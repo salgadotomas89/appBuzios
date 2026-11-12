@@ -12,6 +12,8 @@ import {
   createSharedQuote,
   createSharedReservationHold,
   getSharedRole,
+  listProviderInventory,
+  listProviderOffers,
   listSharedOffers,
   listSharedProviders,
   listSharedReservations,
@@ -25,6 +27,7 @@ import {
   type SharedQuote,
   type SharedReservation,
   type SharedReservationEvent,
+  type SharedInventory,
   type SharedRole,
 } from '../lib/reservationService';
 import { brlFromCents } from '../utils/format';
@@ -35,18 +38,21 @@ type PortalRow = Record<string, unknown>;
 export function ReservationPortal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-    const [name, setName] = useState('');
+  const [name, setName] = useState('');
   const [role, setRole] = useState<SharedRole | null>(null);
   const [offers, setOffers] = useState<PortalRow[]>([]);
   const [providers, setProviders] = useState<PortalRow[]>([]);
   const [reservations, setReservations] = useState<SharedReservation[]>([]);
   const [events, setEvents] = useState<SharedReservationEvent[]>([]);
+  const [providerOffers, setProviderOffers] = useState<PortalRow[]>([]);
+  const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
+  const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<PortalRow | null>(null);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [quantity, setQuantity] = useState('1');
   const [nights, setNights] = useState('1');
   const [quote, setQuote] = useState<SharedQuote | null>(null);
-    const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card');
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card');
   const [offerTitle, setOfferTitle] = useState('Pousada laboratorio');
   const [offerPrice, setOfferPrice] = useState('32000');
   const [stock, setStock] = useState('1');
@@ -58,6 +64,10 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
     const visibleReservations = await listSharedReservations();
     setOffers(visibleOffers);
     setReservations(visibleReservations);
+    if (nextRole === 'provider') {
+      setProviderOffers(await listProviderOffers());
+      setProviderInventory(await listProviderInventory());
+    }
     if (nextRole === 'admin') {
       setProviders(await listSharedProviders());
       setEvents(await listSharedReservationEvents());
@@ -76,11 +86,15 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
         const visibleReservations = await listSharedReservations();
         const visibleProviders = currentRole === 'admin' ? await listSharedProviders() : [];
         const visibleEvents = currentRole === 'admin' ? await listSharedReservationEvents() : [];
+        const ownedOffers = currentRole === 'provider' ? await listProviderOffers() : [];
+        const ownedInventory = currentRole === 'provider' ? await listProviderInventory() : [];
         if (!active) return;
         setOffers(visibleOffers);
         setReservations(visibleReservations);
         setProviders(visibleProviders);
         setEvents(visibleEvents);
+        setProviderOffers(ownedOffers);
+        setProviderInventory(ownedInventory);
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'Error de conexion');
       }
@@ -125,6 +139,9 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
       setReservations([]);
       setProviders([]);
       setOffers([]);
+      setEvents([]);
+      setProviderOffers([]);
+      setProviderInventory([]);
       setMessage('Sesion cerrada.');
     });
   }
@@ -158,6 +175,7 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
   function createOffer() {
     run(async () => {
       const offer = await upsertProviderOffer({
+        offerId: selectedProviderOfferId ?? undefined,
         category: 'pousadas',
         title: offerTitle.trim(),
         basePriceCents: Number(offerPrice),
@@ -170,6 +188,7 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
         totalUnits: Number(stock),
       });
       await refresh();
+      setSelectedProviderOfferId(String(offer.id));
       setMessage('Oferta y disponibilidad guardadas en la base compartida.');
     });
   }
@@ -245,12 +264,49 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
           ) : null}
           {role === 'provider' ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Nueva oferta y disponibilidad</Text>
+              <Text style={styles.sectionTitle}>Mis ofertas</Text>
+              {providerOffers.map(offer => (
+                <Pressable
+                  key={String(offer.id)}
+                  onPress={() => {
+                    setSelectedProviderOfferId(String(offer.id));
+                    setOfferTitle(String(offer.title));
+                    setOfferPrice(String(offer.base_price_cents));
+                  }}
+                  style={[styles.offer, selectedProviderOfferId === offer.id && styles.selected]}
+                >
+                  <Text style={styles.offerName}>{String(offer.title)}</Text>
+                  <Text style={styles.amount}>{brlFromCents(Number(offer.base_price_cents))}</Text>
+                </Pressable>
+              ))}
+              <ActionButton
+                title="Crear otra oferta"
+                secondary
+                onPress={() => {
+                  setSelectedProviderOfferId(null);
+                  setOfferTitle('Pousada laboratorio');
+                  setOfferPrice('32000');
+                }}
+              />
+              <Text style={styles.sectionTitle}>{selectedProviderOfferId ? 'Editar precio y cupo' : 'Nueva oferta y disponibilidad'}</Text>
               <Field label="Nombre de la oferta" value={offerTitle} onChange={setOfferTitle} />
               <Field label="Precio BRL en centavos" value={offerPrice} onChange={setOfferPrice} numeric />
               <Field label="Fecha (AAAA-MM-DD)" value={date} onChange={setDate} />
               <Field label="Habitaciones disponibles" value={stock} onChange={setStock} numeric />
-              <ActionButton title="Publicar oferta y cupo" onPress={createOffer} disabled={busy} />
+              <ActionButton title={selectedProviderOfferId ? 'Guardar cambios y cupo' : 'Publicar oferta y cupo'} onPress={createOffer} disabled={busy} />
+              <Text style={styles.sectionTitle}>Mis cupos compartidos</Text>
+              {providerInventory.length ? providerInventory.map(item => {
+                const offer = providerOffers.find(entry => entry.id === item.offer_id);
+                return (
+                  <View key={`${item.offer_id}:${item.service_date}`} style={styles.row}>
+                    <View style={styles.flex}>
+                      <Text style={styles.offerName}>{String(offer?.title ?? item.offer_id)}</Text>
+                      <Text style={styles.helper}>{item.service_date} · {item.held_units} retenidos · {item.sold_units} vendidos</Text>
+                    </View>
+                    <Text style={styles.amount}>{item.total_units - item.held_units - item.sold_units} libres</Text>
+                  </View>
+                );
+              }) : <Text style={styles.helper}>Todavia no hay cupos publicados.</Text>}
               <Text style={styles.sectionTitle}>Reservas recibidas</Text>
               <ReservationList reservations={reservations} onCancel={id => run(async () => { await cancelSharedReservation(id, 'provider_cancelled'); await refresh(); })} />
             </View>
@@ -353,11 +409,11 @@ const styles = StyleSheet.create({
   offerName: { color: colors.dark, fontSize: 13, fontWeight: '800' },
   amount: { color: colors.sea, fontSize: 14, fontWeight: '800' },
   quote: { gap: 10, padding: 12, backgroundColor: colors.card, borderRadius: radius.card },
-    paymentOptions: { flexDirection: 'row', gap: 8 },
-    paymentOption: { flex: 1, minHeight: 42, justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: colors.track, borderRadius: radius.card },
-    paymentOptionSelected: { borderColor: colors.sea, backgroundColor: '#E8F1EB' },
-    paymentLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', textAlign: 'center' },
-    paymentLabelSelected: { color: colors.dark },
+  paymentOptions: { flexDirection: 'row', gap: 8 },
+  paymentOption: { flex: 1, minHeight: 42, justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: colors.track, borderRadius: radius.card },
+  paymentOptionSelected: { borderColor: colors.sea, backgroundColor: '#E8F1EB' },
+  paymentLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  paymentLabelSelected: { color: colors.dark },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 5 },
   strong: { color: colors.dark, fontSize: 14, fontWeight: '900' },
   reservation: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, borderTopWidth: 1, borderColor: colors.track },

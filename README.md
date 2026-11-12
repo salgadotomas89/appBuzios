@@ -54,7 +54,7 @@ La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationSer
 
 ### Estado de despliegue
 
-- La configuración InsForge de desarrollo responde al endpoint público de autenticación.
+- La configuración local apunta a `8ntv6m27.us-east.insforge.app` y su endpoint público de autenticación responde. `AGENTS.md` identifica el proyecto como OfertasApp; no se pudo verificar desde el cliente si ese tenant corresponde al entorno de ensayo o producción.
 - La consulta de preflight de `connectical_reservations` respondió PostgreSQL `42P01`: estas tablas aún no están desplegadas en el proyecto configurado.
 - No se ejecutó ni se aplicó ningún cambio remoto. El portal muestra error de esquema hasta que un operador aplique la migración en el SQL Editor de InsForge.
 - El registro público crea solo perfiles `traveler`. Una persona operadora debe asignar `provider` o `admin` después de verificar la identidad y debe crear la fila del proveedor desde el SQL Editor confiable. No asignes esos roles desde la app.
@@ -64,8 +64,10 @@ La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationSer
 
 1. Revisa y aplica la migración en el SQL Editor del proyecto InsForge; no ejecutes el seed de laboratorio contra producción.
 2. Registra cuentas mediante Auth. Para usuarios operativos, cambia su perfil solo desde el SQL Editor confiable, después de validar identidad y autorización.
-3. Para un proveedor, crea su fila vinculando `owner_user_id` al UUID Auth verificado y asigna su perfil `provider`. Para administradores, actualiza el perfil validado a `admin`. La tabla `connectical_providers` almacena comisión en puntos base.
+3. Usa el flujo exacto con placeholders y validaciones de [supabase/PROVISIONING.md](supabase/PROVISIONING.md) para asignar el perfil `provider`, crear su fila y asignar `admin` únicamente a una cuenta verificada. La tabla `connectical_providers` almacena comisión en puntos base.
 4. Inicia la app, abre “Reservas compartidas · acceso de operaciones” e inicia sesión. Turistas pueden registrarse; proveedores publican oferta/cupo, turistas cotizan y hacen el hold, y admin ve totales snapshots.
+
+La expiración no tiene cron instalado: los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
 
 No se incluye una clave `service_role` en la app ni en este repositorio. La migración no activa cobros reales; tarjeta y Pix pasan solo por el simulador. La liquidación continúa en conciliación B2B y requiere revisión comercial/legal/bancaria antes de habilitar una pasarela.
 

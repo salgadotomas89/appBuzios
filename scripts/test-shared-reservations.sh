@@ -61,6 +61,14 @@ insert into auth.users (id, raw_user_meta_data) values
   ('10000000-0000-4000-8000-000000000002', '{"name":"Traveler B","country":"BR"}'),
   ('20000000-0000-4000-8000-000000000001', '{"name":"Lab Provider","country":"BR"}'),
   ('30000000-0000-4000-8000-000000000001', '{"name":"Lab Admin","country":"CL"}');
+SQL
+
+traveler_profiles=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "select count(*) from public.connectical_profiles where role='traveler';" | tail -1)
+[ "$traveler_profiles" = '4' ] || { echo "New Auth users were not provisioned as travelers" >&2; exit 1; }
+echo "PASS Auth signup trigger creates traveler-only profiles"
+
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 update public.connectical_profiles set role = 'provider'
   where user_id = '20000000-0000-4000-8000-000000000001';
 update public.connectical_profiles set role = 'admin'
@@ -73,10 +81,44 @@ insert into public.connectical_inventory (offer_id, service_date, total_units)
 values ('50000000-0000-4000-8000-000000000001', current_date + 30, 1);
 SQL
 
+if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',false); update public.connectical_profiles set role='admin' where user_id='10000000-0000-4000-8000-000000000001';" >/dev/null 2>&1; then
+  echo "Traveler self-promotion was not rejected" >&2
+  exit 1
+fi
+echo "PASS authenticated traveler cannot promote their own role"
+
+large_quote=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('51000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'pousadas', 'Large lab price', 4000000, 'night', true);
+set session authorization integration_session;
+set role authenticated;
+set request.jwt.claim.sub = '10000000-0000-4000-8000-000000000001';
+select subtotal_cents||'|'||service_fee_cents||'|'||provider_commission_cents
+from public.connectical_create_quote('51000000-0000-4000-8000-000000000001', current_date + 35, 1, 1, 600);
+SQL
+)
+[ "$large_quote" = '4000000|240000|400000' ] || { echo "Large quote arithmetic mismatch: $large_quote" >&2; exit 1; }
+echo "PASS numeric quote arithmetic avoids intermediate integer overflow"
+
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('51000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000001', 'pousadas', 'Overflow lab price', 2147483647, 'night', true);
+SQL
+if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',false); select public.connectical_create_quote('51000000-0000-4000-8000-000000000002',current_date + 35,2,1,600);" >/dev/null 2>&1; then
+  echo "Out-of-range quote amount was not rejected" >&2
+  exit 1
+fi
+echo "PASS quote amount above integer storage range is rejected"
+
 provider_offer=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select (public.connectical_provider_upsert_offer(null,'pousadas','Provider managed lab offer',12000,'night',true)).id;" | tail -1)
 docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select (public.connectical_provider_publish_inventory('$provider_offer',current_date + 31,1)).offer_id;" >/dev/null
+updated_offer=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select (public.connectical_provider_upsert_offer('$provider_offer','pousadas','Edited provider lab offer',14500,'night',true)).base_price_cents;" | tail -1)
+[ "$updated_offer" = '14500' ] || { echo "Provider could not update owned offer price: $updated_offer" >&2; exit 1; }
 if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',false); select public.connectical_provider_upsert_offer('50000000-0000-4000-8000-000000000001','pousadas','Unauthorized',1,'night',true);" >/dev/null 2>&1; then
   echo "Unauthorized traveler offer mutation was not rejected" >&2
@@ -146,11 +188,14 @@ echo "PASS idempotent retry recovers an existing hold after quote expiry"
 
 provider_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
+provider_inventory=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select held_units||'|'||sold_units from public.connectical_inventory where offer_id='50000000-0000-4000-8000-000000000001' and service_date=current_date + 30;" | tail -1)
 admin_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
 traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$other_traveler',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 [ "$provider_view" = '1' ] || { echo "Provider could not see its reservation from a separate session" >&2; exit 1; }
+[ "$provider_inventory" = '0|1' ] || { echo "Provider could not verify shared inventory counters: $provider_inventory" >&2; exit 1; }
 [ "$traveler_b_view" = '0' ] || { echo "Reservation leaked to another traveler" >&2; exit 1; }
 [ "$admin_view" = '33920|1920|3200' ] || { echo "Admin amount/commission snapshot mismatch: $admin_view" >&2; exit 1; }
 echo "PASS provider visibility, traveler isolation, admin totals and commissions"

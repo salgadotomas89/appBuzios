@@ -44,6 +44,16 @@ export type SharedReservationEvent = {
   created_at: string;
 };
 
+export type SharedInventory = {
+  offer_id: string;
+  service_date: string;
+  total_units: number;
+  held_units: number;
+  sold_units: number;
+  version: number;
+  updated_at: string;
+};
+
 function getClient() {
   if (!insforge) {
     throw new Error('InsForge no está configurado. No se puede acceder a reservas compartidas.');
@@ -182,6 +192,24 @@ export async function listSharedOffers(): Promise<Array<Record<string, unknown>>
     .eq('published', true);
   if (error) throw new Error(`No se pudieron leer ofertas: ${error.message}`);
   return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export async function listProviderOffers(): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await getClient().database
+    .from('connectical_offers')
+    .select('id, provider_id, category, title, base_price_cents, price_mode, currency, published')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`No se pudieron leer ofertas del proveedor: ${error.message}`);
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export async function listProviderInventory(): Promise<SharedInventory[]> {
+  const { data, error } = await getClient().database
+    .from('connectical_inventory')
+    .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
+    .order('service_date', { ascending: true });
+  if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
+  return (data ?? []) as SharedInventory[];
 }
 
 export async function upsertProviderOffer(input: {

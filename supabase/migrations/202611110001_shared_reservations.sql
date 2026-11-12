@@ -106,7 +106,7 @@ create index if not exists connectical_reservations_provider_idx
   on public.connectical_reservations (provider_id, created_at desc);
 create index if not exists connectical_reservations_expiry_idx
   on public.connectical_reservations (offer_id, service_date, hold_expires_at)
-  where status = 'held';
+  where status in ('held', 'pending_payment');
 
 create or replace function public.connectical_is_admin()
 returns boolean
@@ -156,8 +156,9 @@ declare
   v_offer public.connectical_offers;
   v_provider public.connectical_providers;
   v_quote public.connectical_quotes;
-  v_subtotal integer;
-  v_fee integer;
+  v_subtotal numeric;
+  v_fee numeric;
+  v_commission numeric;
 begin
   if auth.uid() is null then raise exception 'authentication_required' using errcode = '28000'; end if;
   if p_quantity <= 0 or p_nights <= 0 or p_service_fee_rate_bps not in (400, 600, 800) then
@@ -170,17 +171,24 @@ begin
     where id = v_offer.provider_id and active = true;
   if not found then raise exception 'provider_inactive' using errcode = 'P0002'; end if;
 
-  v_subtotal := v_offer.base_price_cents * p_quantity * p_nights;
-  v_fee := round(v_subtotal * p_service_fee_rate_bps / 10000.0);
+  v_subtotal := v_offer.base_price_cents::numeric * p_quantity::numeric * p_nights::numeric;
+  v_fee := round(v_subtotal * p_service_fee_rate_bps::numeric / 10000);
+  v_commission := round(v_subtotal * v_provider.commission_rate_bps::numeric / 10000);
+  if v_subtotal > 2147483647
+     or v_fee > 2147483647
+     or v_commission > 2147483647
+     or v_subtotal + v_fee > 2147483647 then
+    raise exception 'quote_amount_out_of_range' using errcode = '22003';
+  end if;
   insert into public.connectical_quotes (
     traveler_user_id, offer_id, service_date, quantity, nights,
     subtotal_cents, service_fee_rate_bps, service_fee_cents, traveler_total_cents,
     provider_commission_rate_bps, provider_commission_cents, quote_version
   ) values (
     auth.uid(), v_offer.id, p_service_date, p_quantity, p_nights,
-    v_subtotal, p_service_fee_rate_bps, v_fee, v_subtotal + v_fee,
+    v_subtotal::integer, p_service_fee_rate_bps, v_fee::integer, (v_subtotal + v_fee)::integer,
     v_provider.commission_rate_bps,
-    round(v_subtotal * v_provider.commission_rate_bps / 10000.0),
+    v_commission::integer,
     'connectical-brl-v1'
   ) returning * into v_quote;
   return v_quote;
@@ -233,8 +241,8 @@ begin
         and status in ('held', 'pending_payment') and hold_expires_at <= now()
       returning id, quantity
   ), logged as (
-    insert into public.connectical_reservation_events (reservation_id, event_type)
-      select id, 'hold_expired' from expired
+    insert into public.connectical_reservation_events (reservation_id, actor_user_id, event_type)
+      select id, auth.uid(), 'hold_expired' from expired
   )
   select coalesce(sum(quantity), 0) into v_expired_quantity from expired;
   if v_expired_quantity > 0 then
@@ -243,6 +251,7 @@ begin
           version = version + 1, updated_at = now()
       where offer_id = v_quote.offer_id and service_date = v_quote.service_date
         and held_units >= v_expired_quantity;
+    if not found then raise exception 'inventory_state_conflict' using errcode = '40001'; end if;
   end if;
 
   select * into v_inventory from public.connectical_inventory
@@ -335,6 +344,7 @@ begin
   for v_slot in
     select distinct offer_id, service_date from public.connectical_reservations
     where status in ('held', 'pending_payment') and hold_expires_at <= now()
+    order by offer_id, service_date
   loop
     perform pg_advisory_xact_lock(hashtextextended(v_slot.offer_id::text || ':' || v_slot.service_date::text, 0));
     for v_expired in
@@ -348,8 +358,8 @@ begin
         where offer_id = v_expired.offer_id and service_date = v_expired.service_date
           and held_units >= v_expired.quantity;
       if not found then raise exception 'inventory_state_conflict' using errcode = '40001'; end if;
-      insert into public.connectical_reservation_events (reservation_id, event_type)
-        values (v_expired.id, 'hold_expired');
+      insert into public.connectical_reservation_events (reservation_id, actor_user_id, event_type)
+        values (v_expired.id, auth.uid(), 'hold_expired');
       v_count := v_count + 1;
     end loop;
   end loop;
@@ -440,6 +450,7 @@ begin
           version = version + 1, updated_at = now()
       where offer_id = v_reservation.offer_id and service_date = v_reservation.service_date
         and held_units >= v_reservation.quantity;
+    if not found then raise exception 'inventory_state_conflict' using errcode = '40001'; end if;
     update public.connectical_reservations set status = 'cancelled', payment_status = p_outcome,
       payment_method = p_method,
       payment_reference = p_reference, hold_expires_at = null, updated_at = now()
@@ -483,11 +494,13 @@ begin
       version = version + 1, updated_at = now()
       where offer_id = v_reservation.offer_id and service_date = v_reservation.service_date
         and held_units >= v_reservation.quantity;
+    if not found then raise exception 'inventory_state_conflict' using errcode = '40001'; end if;
   elsif v_reservation.status = 'confirmed' then
     update public.connectical_inventory set sold_units = sold_units - v_reservation.quantity,
       version = version + 1, updated_at = now()
       where offer_id = v_reservation.offer_id and service_date = v_reservation.service_date
         and sold_units >= v_reservation.quantity;
+    if not found then raise exception 'inventory_state_conflict' using errcode = '40001'; end if;
   else
     return v_reservation;
   end if;
