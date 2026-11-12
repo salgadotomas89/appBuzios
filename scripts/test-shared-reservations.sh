@@ -190,15 +190,21 @@ provider_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgre
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 provider_inventory=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','20000000-0000-4000-8000-000000000001',false); select held_units||'|'||sold_units from public.connectical_inventory where offer_id='50000000-0000-4000-8000-000000000001' and service_date=current_date + 30;" | tail -1)
+traveler_owner_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$winner',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 admin_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
+admin_event_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select count(*) from public.connectical_reservation_events where reservation_id='$reservation_id';" | tail -1)
 traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$other_traveler',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 [ "$provider_view" = '1' ] || { echo "Provider could not see its reservation from a separate session" >&2; exit 1; }
 [ "$provider_inventory" = '0|1' ] || { echo "Provider could not verify shared inventory counters: $provider_inventory" >&2; exit 1; }
+[ "$traveler_owner_view" = '1' ] || { echo "Traveler could not see their own reservation" >&2; exit 1; }
 [ "$traveler_b_view" = '0' ] || { echo "Reservation leaked to another traveler" >&2; exit 1; }
 [ "$admin_view" = '33920|1920|3200' ] || { echo "Admin amount/commission snapshot mismatch: $admin_view" >&2; exit 1; }
-echo "PASS provider visibility, traveler isolation, admin totals and commissions"
+[ "$admin_event_view" -ge 2 ] || { echo "Admin could not read reservation history: $admin_event_view" >&2; exit 1; }
+echo "PASS traveler own-row visibility, provider/inventory visibility, isolation, admin totals, commissions and history"
 
 docker restart "$container" >/dev/null
 attempt=0
