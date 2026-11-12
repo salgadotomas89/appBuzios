@@ -23,7 +23,9 @@ Búzios Flow ayuda a viajeros de Chile, Argentina y Brasil a organizar un viaje 
 - El panel interno usa supuestos no confirmados: pasarela 3,99% + R$0,39 por transacción, conversión 0% al cobrar en BRL y provisión operativa 2% del subtotal. No son tarifas comerciales ni cotización de una pasarela.
 - El paquete de R$2.520 produce totales de R$2.620,80 (4%), R$2.671,20 (6%) y R$2.721,60 (8%). Con pousada al 10% y los costos de ensayo anteriores, el margen de contribución estimado es R$197,44, R$245,83 y R$294,22, respectivamente.
 - Itinerario y reservas se guardan en AsyncStorage local. La confirmación conserva una cotización snapshot (versión, subtotal, cargo, total, comisiones y costos), así que cambiar el escenario solo afecta cotizaciones nuevas.
-- No hay pago, bloqueo de disponibilidad ni reserva real. La atribución de canal está marcada `app-demo`; no contactamos servicios externos.
+- No hay pago, bloqueo de disponibilidad ni reserva real en el flujo local `app-demo`; no contacta servicios externos.
+
+La regla comercial del piloto es: `400`, `600` y `800` puntos base equivalen a 4%, 6% y 8% del subtotal contractual BRL. Los paga el turista como cargo de servicio. No son comisión del proveedor. La comisión del proveedor se calcula aparte sobre el subtotal y no se suma de nuevo al cargo del turista.
 
 ### Web futura
 
@@ -51,6 +53,8 @@ Catálogo y disponibilidad de aliados; administración para proveedores; persist
 El backend local anterior sigue separado: `src/lib/reservationBackend.ts` conserva usuarios, proveedores, ofertas, inventario, cotizaciones y reservas en `Map` de memoria; `src/lib/demoStorage.ts` guarda itinerarios y confirmaciones de demostración en AsyncStorage del dispositivo. Ninguno de esos dos medios comparte reservas entre dispositivos.
 
 La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/202611110001_shared_reservations.sql`; el bloqueo de cupos, la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
+
+En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotización muestra subtotal, porcentaje, cargo y total BRL. La reserva conserva el porcentaje elegido (`service_fee_rate_bps`), los centavos del cargo, el total y la comisión del proveedor como valores separados para que el panel de administración los pueda revisar.
 
 ### Estado de despliegue
 

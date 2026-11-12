@@ -11,6 +11,7 @@ export type SharedReservation = {
   quantity: number;
   status: string;
   amount_cents: number;
+  service_fee_rate_bps: 400 | 600 | 800;
   service_fee_cents: number;
   provider_commission_rate_bps: number;
   provider_commission_cents: number;
@@ -26,6 +27,7 @@ export type SharedQuote = {
   service_date: string;
   quantity: number;
   nights: number;
+  service_fee_rate_bps: 400 | 600 | 800;
   subtotal_cents: number;
   service_fee_cents: number;
   traveler_total_cents: number;

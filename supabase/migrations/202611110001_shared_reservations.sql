@@ -74,6 +74,7 @@ create table if not exists public.connectical_reservations (
   status text not null check (status in ('held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded')),
   hold_expires_at timestamptz,
   amount_cents integer not null check (amount_cents > 0),
+  service_fee_rate_bps integer not null check (service_fee_rate_bps in (400, 600, 800)),
   service_fee_cents integer not null check (service_fee_cents >= 0),
   provider_commission_rate_bps integer not null check (provider_commission_rate_bps between 0 and 10000),
   provider_commission_cents integer not null check (provider_commission_cents >= 0),
@@ -99,6 +100,9 @@ create table if not exists public.connectical_reservation_events (
 
 alter table public.connectical_reservations
   add column if not exists connectical_margin_cents integer not null default 0;
+alter table public.connectical_reservations
+  add column if not exists service_fee_rate_bps integer not null default 600
+  check (service_fee_rate_bps in (400, 600, 800));
 
 create index if not exists connectical_reservations_traveler_idx
   on public.connectical_reservations (traveler_user_id, created_at desc);
@@ -263,13 +267,13 @@ begin
   insert into public.connectical_reservations (
     quote_id, idempotency_key, offer_id, provider_id, traveler_user_id,
     service_date, quantity, status, hold_expires_at, amount_cents,
-    service_fee_cents, provider_commission_rate_bps, provider_commission_cents,
+    service_fee_rate_bps, service_fee_cents, provider_commission_rate_bps, provider_commission_cents,
     connectical_margin_cents, quote_version
   ) values (
     v_quote.id, p_idempotency_key, v_quote.offer_id,
     (select provider_id from public.connectical_offers where id = v_quote.offer_id),
     auth.uid(), v_quote.service_date, v_quote.quantity, 'held', now() + interval '10 minutes',
-    v_quote.traveler_total_cents, v_quote.service_fee_cents,
+    v_quote.traveler_total_cents, v_quote.service_fee_rate_bps, v_quote.service_fee_cents,
     v_quote.provider_commission_rate_bps, v_quote.provider_commission_cents,
     v_quote.service_fee_cents, v_quote.quote_version
   ) returning * into v_reservation;

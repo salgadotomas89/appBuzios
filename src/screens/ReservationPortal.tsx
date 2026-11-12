@@ -31,6 +31,7 @@ import {
   type SharedRole,
 } from '../lib/reservationService';
 import { brlFromCents } from '../utils/format';
+import { DEMO_SERVICE_FEE_RATES, type DemoServiceFeeRate } from '../utils/journey';
 import { colors, radius } from '../theme';
 
 type PortalRow = Record<string, unknown>;
@@ -51,6 +52,7 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [quantity, setQuantity] = useState('1');
   const [nights, setNights] = useState('1');
+  const [serviceFeeRateBps, setServiceFeeRateBps] = useState<DemoServiceFeeRate>(600);
   const [quote, setQuote] = useState<SharedQuote | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card');
   const [offerTitle, setOfferTitle] = useState('Pousada laboratorio');
@@ -154,7 +156,7 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
         serviceDate: date,
         quantity: Number(quantity),
         nights: Number(nights),
-        serviceFeeRateBps: 600,
+        serviceFeeRateBps,
       });
       setQuote(nextQuote);
       setMessage('Cotizacion BRL congelada por 15 minutos.');
@@ -241,12 +243,29 @@ export function ReservationPortal({ onClose }: { onClose: () => void }) {
                   <Field label="Fecha (AAAA-MM-DD)" value={date} onChange={setDate} />
                   <Field label="Habitaciones / unidades" value={quantity} onChange={setQuantity} numeric />
                   <Field label="Noches" value={nights} onChange={setNights} numeric />
+                  <Text style={styles.helper}>Cargo de servicio del turista sobre el subtotal en BRL. La comision del proveedor se calcula aparte.</Text>
+                  <View style={styles.feeRates}>
+                    {DEMO_SERVICE_FEE_RATES.map(rate => (
+                      <Pressable
+                        key={rate}
+                        onPress={() => {
+                          setServiceFeeRateBps(rate);
+                          setQuote(null);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: serviceFeeRateBps === rate }}
+                        style={[styles.feeRateOption, serviceFeeRateBps === rate && styles.feeRateOptionSelected]}
+                      >
+                        <Text style={[styles.feeRateLabel, serviceFeeRateBps === rate && styles.feeRateLabelSelected]}>{rate / 100}%</Text>
+                      </Pressable>
+                    ))}
+                  </View>
                   <ActionButton title="Crear cotizacion" onPress={createQuote} disabled={busy} />
                   {quote ? (
                     <View style={styles.quote}>
                       <Text style={styles.helper}>Cotizacion congelada · {quote.quote_version}</Text>
                       <MoneyRow label="Subtotal" cents={quote.subtotal_cents} />
-                      <MoneyRow label="Cargo servicio" cents={quote.service_fee_cents} />
+                      <MoneyRow label={`Cargo servicio turista · ${quote.service_fee_rate_bps / 100}%`} cents={quote.service_fee_cents} />
                       <MoneyRow label="Total BRL" cents={quote.traveler_total_cents} strong />
                       <View style={styles.paymentOptions}>
                         {(['card', 'pix'] as const).map(method => (
@@ -361,7 +380,7 @@ function ReservationList({ reservations, onCancel }: { reservations: SharedReser
       <View style={styles.flex}>
         <Text style={styles.offerName}>{reservation.status.toUpperCase()} · {brlFromCents(reservation.amount_cents)}</Text>
         <Text style={styles.helper}>{reservation.service_date} · proveedor recibe neto sujeto a conciliacion: {brlFromCents(reservation.amount_cents - reservation.provider_commission_cents)}</Text>
-        <Text style={styles.helper}>Comision proveedor {brlFromCents(reservation.provider_commission_cents)} · fee Connectical {brlFromCents(reservation.connectical_margin_cents)}</Text>
+        <Text style={styles.helper}>Cargo turista {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)} · comision proveedor {brlFromCents(reservation.provider_commission_cents)} · ingreso Connectical {brlFromCents(reservation.connectical_margin_cents)}</Text>
         <Text selectable style={styles.id}>{reservation.id}</Text>
       </View>
       {reservation.status === 'held' || reservation.status === 'confirmed' ? <Pressable onPress={() => onCancel(reservation.id)} accessibilityRole="button"><Text style={styles.link}>Cancelar</Text></Pressable> : null}
@@ -409,6 +428,11 @@ const styles = StyleSheet.create({
   offerName: { color: colors.dark, fontSize: 13, fontWeight: '800' },
   amount: { color: colors.sea, fontSize: 14, fontWeight: '800' },
   quote: { gap: 10, padding: 12, backgroundColor: colors.card, borderRadius: radius.card },
+  feeRates: { flexDirection: 'row', gap: 8 },
+  feeRateOption: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.track, borderRadius: radius.card, backgroundColor: colors.card },
+  feeRateOptionSelected: { borderColor: colors.sea, backgroundColor: '#E8F1EB' },
+  feeRateLabel: { color: colors.muted, fontSize: 13, fontWeight: '800' },
+  feeRateLabelSelected: { color: colors.dark },
   paymentOptions: { flexDirection: 'row', gap: 8 },
   paymentOption: { flex: 1, minHeight: 42, justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: colors.track, borderRadius: radius.card },
   paymentOptionSelected: { borderColor: colors.sea, backgroundColor: '#E8F1EB' },

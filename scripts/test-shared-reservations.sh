@@ -133,6 +133,14 @@ if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres
 fi
 echo "PASS database enforces supported service fee rates"
 
+quote_4pct=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; set request.jwt.claim.sub='10000000-0000-4000-8000-000000000001'; select q.service_fee_rate_bps||'|'||q.service_fee_cents||'|'||q.traveler_total_cents from public.connectical_create_quote('50000000-0000-4000-8000-000000000001',current_date + 30,1,1,400) q;" | tail -1)
+quote_8pct=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; set request.jwt.claim.sub='10000000-0000-4000-8000-000000000001'; select q.service_fee_rate_bps||'|'||q.service_fee_cents||'|'||q.traveler_total_cents from public.connectical_create_quote('50000000-0000-4000-8000-000000000001',current_date + 30,1,1,800) q;" | tail -1)
+[ "$quote_4pct" = '400|1280|33280' ] || { echo "4% BRL quote mismatch: $quote_4pct" >&2; exit 1; }
+[ "$quote_8pct" = '800|2560|34560' ] || { echo "8% BRL quote mismatch: $quote_8pct" >&2; exit 1; }
+echo "PASS 4% and 8% rates produce the expected frozen BRL quote values"
+
 quote_a=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',false); select (public.connectical_create_quote('50000000-0000-4000-8000-000000000001', current_date + 30, 1, 1, 600)).id;" | tail -1)
 quote_b=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000002',false); select (public.connectical_create_quote('50000000-0000-4000-8000-000000000001', current_date + 30, 1, 1, 600)).id;" | tail -1)
 
@@ -193,7 +201,7 @@ provider_inventory=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U po
 traveler_owner_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$winner',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 admin_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
-  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_rate_bps||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
 admin_event_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select count(*) from public.connectical_reservation_events where reservation_id='$reservation_id';" | tail -1)
 traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
@@ -202,7 +210,7 @@ traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postg
 [ "$provider_inventory" = '0|1' ] || { echo "Provider could not verify shared inventory counters: $provider_inventory" >&2; exit 1; }
 [ "$traveler_owner_view" = '1' ] || { echo "Traveler could not see their own reservation" >&2; exit 1; }
 [ "$traveler_b_view" = '0' ] || { echo "Reservation leaked to another traveler" >&2; exit 1; }
-[ "$admin_view" = '33920|1920|3200' ] || { echo "Admin amount/commission snapshot mismatch: $admin_view" >&2; exit 1; }
+[ "$admin_view" = '33920|600|1920|3200' ] || { echo "Admin BRL fee/commission snapshot mismatch: $admin_view" >&2; exit 1; }
 [ "$admin_event_view" -ge 2 ] || { echo "Admin could not read reservation history: $admin_event_view" >&2; exit 1; }
 echo "PASS traveler own-row visibility, provider/inventory visibility, isolation, admin totals, commissions and history"
 
