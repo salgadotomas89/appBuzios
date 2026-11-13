@@ -1,14 +1,17 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { Offer } from '../data/homeMock';
+import type { Language, Offer } from '../data/homeMock';
 import { colors, radius } from '../theme';
 import { brl, discountPercent } from '../utils/format';
 import { Icon } from './Icon';
 
-type Props = { offer: Offer; onPress?: () => void };
+type Props = { offer: Offer; language: Language; onPress?: () => void };
 
-export function OfferRow({ offer, onPress }: Props) {
+export function OfferRow({ offer, language, onPress }: Props) {
   const accent = offer.tone === 'accent';
-  const discount = discountPercent(offer.price, offer.originalPrice);
+  const discount =
+    offer.price === undefined
+      ? 0
+      : discountPercent(offer.price, offer.originalPrice);
 
   return (
     <Pressable
@@ -25,20 +28,27 @@ export function OfferRow({ offer, onPress }: Props) {
       </View>
       <View style={styles.texts}>
         <Text style={styles.title} numberOfLines={1}>
-          {offer.title}
+          {offer.title[language]}
         </Text>
         <Text style={styles.subtitle} numberOfLines={1}>
-          {offer.subtitle}
+          {offer.location[language]}
         </Text>
       </View>
-      <View style={styles.priceCol}>
-        <Text style={styles.price}>{brl(offer.price)}</Text>
-        {discount > 0 ? (
-          <Text style={styles.discount}>-{discount}%</Text>
-        ) : (
-          <Icon name="chevron" size={16} color={colors.muted} />
-        )}
-      </View>
+      {offer.price !== undefined ? (
+        <View style={styles.priceCol}>
+          <Text style={styles.price}>{brl(offer.price)}</Text>
+          {offer.priceUnit ? (
+            <Text style={styles.priceUnit} numberOfLines={1}>
+              {offer.priceUnit[language]}
+            </Text>
+          ) : null}
+          {discount > 0 ? (
+            <Text style={styles.discount}>-{discount}%</Text>
+          ) : null}
+        </View>
+      ) : (
+        <Icon name="chevron" size={16} color={colors.muted} />
+      )}
     </Pressable>
   );
 }
@@ -82,13 +92,18 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   price: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: colors.text,
     fontVariant: ['tabular-nums'],
   },
+  priceUnit: {
+    maxWidth: 88,
+    fontSize: 10,
+    color: colors.muted,
+  },
   discount: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     color: colors.accent,
   },

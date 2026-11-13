@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import type { CategoryStat } from '../data/homeMock';
+import type { CategoryStat, Language } from '../data/homeMock';
 import { colors, radius } from '../theme';
 
 const TRACK_HEIGHT = 150;
 const MAX_FILL = 118;
 
-type Props = { categories: CategoryStat[] };
+type Props = { categories: CategoryStat[]; language: Language };
 
-export function CategoryBars({ categories }: Props) {
+export function CategoryBars({ categories, language }: Props) {
   const [barWidth, setBarWidth] = useState(0);
   const max = Math.max(...categories.map(c => c.count));
 
@@ -18,7 +18,7 @@ export function CategoryBars({ categories }: Props) {
         // El relleno nunca es más bajo que el ancho: así queda como círculo.
         const fill = Math.max((c.count / max) * MAX_FILL, barWidth);
         return (
-          <View key={c.label} style={styles.column}>
+          <View key={c.id} style={styles.column}>
             <View
               style={styles.track}
               onLayout={
@@ -53,7 +53,7 @@ export function CategoryBars({ categories }: Props) {
               </View>
             </View>
             <Text style={styles.caption} numberOfLines={1} adjustsFontSizeToFit>
-              {c.label}
+              {c.label[language]}
             </Text>
           </View>
         );
