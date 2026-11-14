@@ -54,6 +54,8 @@ El backend local anterior sigue separado: `src/lib/reservationBackend.ts` conser
 
 La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/` (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql` y `202611140002_system_hold_sweep.sql`, en ese orden); el bloqueo de cupos por cada noche de la estancia, el rechazo de fechas pasadas (hora de São Paulo), la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
 
+El portal compartido está en español y portugués de Brasil. Valida en el dispositivo fechas (AAAA-MM-DD, desde hoy en Búzios), cantidades, noches (1–30, solo en ofertas por noche) y precios en formato BRL (`1.234,56`) antes de llamar al backend, que repite todas las validaciones. Los códigos de error de PostgreSQL se muestran como mensajes legibles. El turista ve las fechas con cupo publicado y puede elegir el resultado del pago simulado (aprobado, rechazado o pendiente) y reintentar el pago mientras dura la retención. El proveedor publica ofertas de las cuatro categorías y modalidades de precio. El admin filtra reservas por estado. El neto del proveedor es subtotal − comisión: el cargo del turista no forma parte de él.
+
 En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotización muestra subtotal, porcentaje, cargo y total BRL. La reserva conserva el porcentaje elegido (`service_fee_rate_bps`), los centavos del cargo, el total y la comisión del proveedor como valores separados para que el panel de administración los pueda revisar.
 
 ### Estado de despliegue
@@ -74,6 +76,10 @@ En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotizació
 La expiración no tiene cron instalado (la función `connectical_system_expire_holds` queda lista para un scheduler confiable, pero no hay ninguno configurado): los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
 
 No se incluye una clave `service_role` en la app ni en este repositorio. La migración no activa cobros reales; tarjeta y Pix pasan solo por el simulador. La liquidación continúa en conciliación B2B y requiere revisión comercial/legal/bancaria antes de habilitar una pasarela.
+
+### Integración continua
+
+`.github/workflows/ci.yml` ejecuta en cada push y PR: tsc, ESLint y Jest (con `.env.example`, sin claves reales) y la integración con `postgres:17` desechable. No usa secretos ni contacta InsForge.
 
 ### Ensayo local verificable
 
