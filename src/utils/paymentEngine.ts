@@ -236,7 +236,9 @@ export function applyRefund(
   intent: PaymentIntent,
   refund: { refundId: string; amountCents: number; reason: string },
 ): PaymentIntent {
-  if (intent.refundIds.includes(refund.refundId)) {
+  // Pagos guardados antes de existir refundIds no traen el campo.
+  const refundIds = intent.refundIds ?? [];
+  if (refundIds.includes(refund.refundId)) {
     return ignoreRefund(intent, `duplicate refund ignored: ${refund.refundId}`);
   }
   if (!REFUNDABLE_STATES.includes(intent.state)) {
@@ -256,7 +258,7 @@ export function applyRefund(
   return {
     ...intent,
     refundedCents: nextRefundCents,
-    refundIds: [...intent.refundIds, refund.refundId],
+    refundIds: [...refundIds, refund.refundId],
     state: nextState,
     notes: [...intent.notes, note],
     history: [

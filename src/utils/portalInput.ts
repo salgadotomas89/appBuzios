@@ -43,8 +43,8 @@ export function parseBrlToCents(input: string): ParseResult<number> {
 
   const [whole, fraction = ''] = normalized.split('.');
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  if (!Number.isSafeInteger(cents) || cents <= 0) return fail('price_positive');
-  if (cents > MAX_CENTS) return fail('price_max');
+  if (!Number.isSafeInteger(cents) || cents > MAX_CENTS) return fail('price_max');
+  if (cents <= 0) return fail('price_positive');
   return { ok: true, value: cents };
 }
 
@@ -85,6 +85,12 @@ export function parseCount(
 export function addDays(isoDate: string, days: number): string {
   const [year, month, day] = isoDate.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+// Fecha de hoy en Búzios, la misma referencia que usa connectical_today() en PostgreSQL.
+// Brasil no aplica horario de verano desde 2019, así que São Paulo es UTC−3 fijo.
+export function buziosIsoDate(now = new Date()): string {
+  return new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 export function localIsoDate(date = new Date()): string {

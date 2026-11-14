@@ -216,3 +216,23 @@ it('cancels a reservation with the role-specific reason', async () => {
   expect(mocked.cancelSharedReservation).toHaveBeenCalledWith('r1', 'traveler_request');
   expect(hasText(root, 'Reserva cancelada.')).toBe(true);
 });
+
+it('discards a quote that resolves after the traveler changed the inputs', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  let resolveQuote: (quote: service.SharedQuote) => void = () => {};
+  mocked.createSharedQuote.mockReturnValue(new Promise(resolve => { resolveQuote = resolve; }));
+  const root = await render();
+
+  await press(root, 'Pousada Porto');
+  await type(root, 'Entrada (AAAA-MM-DD)', '2099-01-10');
+  await press(root, 'Crear cotización');
+  await type(root, 'Noches', '3');
+  await ReactTestRenderer.act(async () => resolveQuote({
+    id: 'q-old', offer_id: pousada.id, service_date: '2099-01-10', quantity: 1, nights: 1,
+    service_fee_rate_bps: 600, subtotal_cents: 32000, service_fee_cents: 1920, traveler_total_cents: 33920,
+    provider_commission_rate_bps: 1000, provider_commission_cents: 3200,
+    quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z',
+  }));
+  expect(hasText(root, 'R$ 339,20')).toBe(false);
+  expect(hasText(root, 'Reservar y aprobar pago simulado')).toBe(false);
+});

@@ -46,8 +46,8 @@ import { brlFromCents } from '../utils/format';
 import { DEMO_SERVICE_FEE_RATES, type DemoServiceFeeRate } from '../utils/journey';
 import {
   addDays,
+  buziosIsoDate,
   centsToBrlInput,
-  localIsoDate,
   parseBrlToCents,
   parseCount,
   parseIsoDate,
@@ -89,7 +89,7 @@ export function ReservationPortal({
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
   const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<SharedOffer | null>(null);
-  const [date, setDate] = useState(localIsoDate());
+  const [date, setDate] = useState(buziosIsoDate());
   const [quantity, setQuantity] = useState('1');
   const [nights, setNights] = useState('1');
   const [serviceFeeRateBps, setServiceFeeRateBps] = useState<DemoServiceFeeRate>(600);
@@ -104,6 +104,8 @@ export function ReservationPortal({
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  // Se incrementa al cambiar los datos de la cotización; una respuesta tardía con otro valor se descarta.
+  const quoteRequest = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -215,18 +217,24 @@ export function ReservationPortal({
     });
   }
 
+  function invalidateQuote() {
+    quoteRequest.current += 1;
+    setQuote(null);
+  }
+
   function selectOffer(offer: SharedOffer) {
     setSelectedOffer(offer);
-    setQuote(null);
+    invalidateQuote();
     if (offer.price_mode !== 'night') setNights('1');
   }
 
   function createQuote() {
     if (!selectedOffer) return;
     const perNight = selectedOffer.price_mode === 'night';
+    const requestId = ++quoteRequest.current;
     run(async () => {
       const serviceDate = valueOf(
-        parseIsoDate(date, localIsoDate()),
+        parseIsoDate(date, buziosIsoDate()),
         perNight ? words.checkIn : words.date,
       );
       const units = valueOf(parseCount(quantity, { max: MAX_UNITS }), words.quantity[selectedOffer.price_mode]);
@@ -238,6 +246,7 @@ export function ReservationPortal({
         nights: stayNights,
         serviceFeeRateBps,
       });
+      if (requestId !== quoteRequest.current) return;
       setQuote(nextQuote);
       return words.quoteCreated;
     });
@@ -284,7 +293,7 @@ export function ReservationPortal({
       const title = offerTitle.trim();
       if (!title) throw new InputValidationError(words.errors.invalid_offer);
       const basePriceCents = valueOf(parseBrlToCents(offerPrice), words.priceBrl);
-      const serviceDate = valueOf(parseIsoDate(date, localIsoDate()), words.date);
+      const serviceDate = valueOf(parseIsoDate(date, buziosIsoDate()), words.date);
       const totalUnits = valueOf(parseCount(stock, { min: 0, max: MAX_UNITS }), words.units);
       const offer = await upsertProviderOffer({
         offerId: selectedProviderOfferId ?? undefined,
@@ -374,11 +383,11 @@ export function ReservationPortal({
               {selectedOffer ? (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{words.quoteAndBook} · {selectedOffer.title}</Text>
-                  <Field label={perNight ? words.checkIn : words.date} value={date} onChange={value => { setDate(value); setQuote(null); }} />
-                  <Field label={words.quantity[selectedOffer.price_mode]} value={quantity} onChange={value => { setQuantity(value); setQuote(null); }} numeric />
+                  <Field label={perNight ? words.checkIn : words.date} value={date} onChange={value => { setDate(value); invalidateQuote(); }} />
+                  <Field label={words.quantity[selectedOffer.price_mode]} value={quantity} onChange={value => { setQuantity(value); invalidateQuote(); }} numeric />
                   {perNight ? (
                     <>
-                      <Field label={words.nights} value={nights} onChange={value => { setNights(value); setQuote(null); }} numeric />
+                      <Field label={words.nights} value={nights} onChange={value => { setNights(value); invalidateQuote(); }} numeric />
                       {checkOut ? <Text style={styles.helper}>{words.checkOut}: {checkOut}</Text> : null}
                     </>
                   ) : null}
@@ -391,7 +400,7 @@ export function ReservationPortal({
                         selected={serviceFeeRateBps === rate}
                         onPress={() => {
                           setServiceFeeRateBps(rate);
-                          setQuote(null);
+                          invalidateQuote();
                         }}
                       />
                     ))}

@@ -226,6 +226,12 @@ begin
   if exists (select 1 from public.connectical_reservations where quote_id = p_quote_id) then
     raise exception 'quote_already_reserved' using errcode = '23505';
   end if;
+  -- Quotes created by the previous create_quote may still be open while this migration lands.
+  if v_quote.nights > 30 or (v_quote.nights <> 1 and not exists (
+    select 1 from public.connectical_offers where id = v_quote.offer_id and price_mode = 'night'
+  )) then
+    raise exception 'invalid_quote_input' using errcode = '22023';
+  end if;
 
   perform public.connectical_expire_offer_holds(v_quote.offer_id);
 

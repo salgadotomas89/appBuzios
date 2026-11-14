@@ -1,6 +1,7 @@
 import { inputErrorText } from '../src/i18n/portalCopy';
 import {
   addDays,
+  buziosIsoDate,
   centsToBrlInput,
   localIsoDate,
   parseBrlToCents,
@@ -28,6 +29,10 @@ describe('parseBrlToCents', () => {
       expect(parseBrlToCents(input).ok).toBe(false);
     },
   );
+
+  it('reports huge amounts as above the maximum', () => {
+    expect(parseBrlToCents('9999999999999999')).toEqual({ ok: false, error: { code: 'price_max' } });
+  });
 
   it('rejects amounts above the integer column range', () => {
     expect(parseBrlToCents('21.474.836,48').ok).toBe(false);
@@ -91,6 +96,11 @@ describe('parseCount', () => {
 it('adds days across month and leap-year boundaries', () => {
   expect(addDays('2026-11-30', 1)).toBe('2026-12-01');
   expect(addDays('2028-02-28', 2)).toBe('2028-03-01');
+});
+
+it('uses the Búzios calendar date (UTC-3) for today', () => {
+  expect(buziosIsoDate(new Date('2026-11-15T02:30:00Z'))).toBe('2026-11-14');
+  expect(buziosIsoDate(new Date('2026-11-15T03:00:00Z'))).toBe('2026-11-15');
 });
 
 it('formats the local calendar date', () => {
