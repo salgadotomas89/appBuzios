@@ -5,23 +5,43 @@ credenciales: OAuth productivo requiere aprobación humana.
 
 ## Estado actual (verificado en el código de `@insforge/sdk@1.5.2`)
 
-- La app usa correo y contraseña (`signInSharedAccount`, `signUpTravelerAccount` en `src/lib/reservationService.ts`).
-  No se probó contra el tenant: depende de confirmarlo y de aplicar las migraciones.
-- **La sesión vive solo en memoria.** El `TokenManager` del SDK guarda el token en variables; en el navegador lo renueva
-  con cookies, pero en React Native no hay cookies de navegador ni `localStorage`. Consecuencia: **al cerrar y reabrir
-  la app, el usuario debe volver a iniciar sesión.** Aceptable para el ensayo; no para el piloto.
-- Para OAuth el SDK usa PKCE. `signInWithOAuth(provider, { redirectTo, skipBrowserRedirect: true })` devuelve `url` y
+- La app usa correo y contraseña. No se probó contra el tenant: depende de confirmarlo y de aplicar las migraciones.
+- **Persistencia de sesión implementada y probada con dobles, no en dispositivo** (15-11-2026):
+  - `src/lib/insforge.ts` crea el cliente con `isServerMode: true`, que activa el flujo móvil documentado del SDK
+    (`client_type=mobile`): el inicio de sesión devuelve `refreshToken` y `auth.refreshSession({ refreshToken })`
+    lo acepta en el cuerpo. **Riesgo:** el SDK marca `isServerMode` como obsoleto pensando en SSR y no ofrece un
+    modo específico para React Native; revisar antes de actualizar el SDK.
+  - En ese modo el SDK guarda el token solo en el cliente HTTP, **no renueva solo** y `getCurrentUser` devuelve
+    `null`. `src/auth/sessionManager.ts` lo compensa sin tocar el SDK: renueva antes de que caduque el token de
+    acceso (leyendo `exp` del JWT, una sola renovación a la vez) y toma el usuario de la respuesta.
+  - `src/auth/secureSessionStore.ts` guarda **solo** `{ userId, refreshToken }` con `react-native-keychain@10.0.0`
+    (MIT, fijada): Keychain de iOS con `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` y sin iCloud; en Android, AES-GCM con
+    clave del Keystore. El token de acceso vive en memoria. Nada va a AsyncStorage, archivos ni logs.
+  - Al abrir el portal se restaura la sesión. Rechazo del servidor (4xx) = sesión expirada: se borra y se pide
+    iniciar sesión. Sin conexión (sin respuesta, 408, 429 o 5xx) = se conserva y se avisa. Cerrar sesión borra el
+    almacén aunque el servidor no responda. Si el almacén falla, la sesión sigue en memoria y se avisa de que no se
+    guardó.
+  - **Pendiente de verificar:** que el tenant devuelva `refreshToken` en el flujo móvil y si lo rota; la duración
+    real de cada token; y el comportamiento en iPhone y Android reales (Keychain tras reinicio del teléfono,
+    desinstalación, bloqueo). No declarar la persistencia operativa hasta probar en dispositivo.
+- Para OAuth el SDK usa PKCE: `signInWithOAuth(provider, { redirectTo, skipBrowserRedirect: true })` devuelve `url` y
   `codeVerifier`; `exchangeOAuthCode(code, codeVerifier)` completa el inicio de sesión. El SDK guarda el verificador en
-  `sessionStorage`, que **no existe en React Native**: la app debe conservar el `codeVerifier` devuelto y pasarlo
-  explícitamente al intercambio.
+  `sessionStorage`, que no existe en React Native: la app debe conservarlo y pasarlo explícitamente.
 - Existe `signInWithIdToken` para Google con SDK nativo (según los tipos del SDK, solo Google por ahora).
+
+## Prueba en dispositivo (cuando haya simulador o teléfono)
+
+1. Iniciar sesión, cerrar la app por completo y reabrirla: debe entrar sin pedir contraseña.
+2. Reiniciar el teléfono, desbloquearlo y abrir la app: igual.
+3. Cerrar sesión, reabrir: debe pedir inicio de sesión.
+4. Revocar la sesión en el panel de InsForge (o esperar a que caduque el refresh token) y reabrir: debe mostrar
+   "Tu sesión expiró" y el formulario.
+5. Modo avión al reabrir: debe avisar de falta de conexión sin borrar la sesión; al recuperar red, entrar.
 
 ## Decisiones pendientes
 
-1. **Persistencia segura de la sesión.** Guardar el token en Keychain (iOS) / Keystore (Android), por ejemplo con
-   `react-native-keychain`. Implica una dependencia nativa nueva, `pod install` y pruebas en dispositivo. **No usar
-   AsyncStorage para tokens**: no está cifrado. Confirmar también con InsForge si emite un refresh token usable fuera
-   del navegador y su duración.
+1. **Persistencia segura de la sesión:** implementada (ver arriba); falta la prueba en dispositivo y confirmar con el
+   tenant la emisión y rotación del refresh token móvil.
 2. **Proveedores OAuth** a ofrecer (Google, Apple; Apple es obligatorio en iOS si se ofrece otro inicio de sesión de
    terceros, según las normas de la App Store vigentes: verificarlo al decidir).
 3. **URI de retorno.** Propuesta: esquema propio `buziosflow://auth/callback`, que debe registrarse en

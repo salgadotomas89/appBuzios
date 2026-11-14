@@ -27,6 +27,8 @@ import {
   simulateSharedPayment,
   upsertProviderOffer,
   publishProviderInventory,
+  restoreSharedSession,
+  isSharedSessionPersisted,
   publishProviderInventoryRange,
   setProviderOfferDetails,
   setSharedProviderActive,
@@ -205,6 +207,12 @@ export function ReservationPortal({
   useEffect(() => {
     async function restoreSession() {
       try {
+        // Sesión guardada en Keychain/Keystore: se renueva antes de leer el rol.
+        const notice = await restoreSharedSession();
+        if (!mounted.current) return;
+        if (notice === 'expired') setMessage(words.errors.authentication_required);
+        else if (notice === 'unavailable') setMessage(words.errors.session_unavailable);
+        else if (notice === 'not_persisted') setMessage(words.sessionNotPersisted);
         const currentRole = await getSharedRole();
         if (!mounted.current) return;
         setRole(currentRole);
@@ -247,6 +255,7 @@ export function ReservationPortal({
       if (!currentRole) throw new InputValidationError(words.noProfile);
       setPassword('');
       await loadForRole(currentRole);
+      if (!isSharedSessionPersisted()) return words.sessionNotPersisted;
     });
   }
 

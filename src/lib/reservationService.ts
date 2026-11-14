@@ -5,7 +5,8 @@ import {
   type ReservationErrorCode,
   type ReservationStatus,
 } from '../i18n/portalCopy';
-import { insforge } from './insforge';
+import { SessionError } from '../auth/sessionManager';
+import { insforge, sessionManager } from './insforge';
 
 export type SharedRole = 'traveler' | 'provider' | 'admin';
 export type SharedReservation = {
@@ -106,6 +107,27 @@ function getClient() {
   return insforge;
 }
 
+// En el flujo móvil el SDK no renueva el token solo: se renueva antes de cada petición autenticada.
+async function freshClient() {
+  const client = getClient();
+  try {
+    await sessionManager?.ensureFresh();
+  } catch (error) {
+    throw toSessionReservationError(error);
+  }
+  return client;
+}
+
+function toSessionReservationError(error: unknown): Error {
+  if (error instanceof SessionError && error.code === 'session_expired') {
+    return new ReservationError(RESERVATION_ERROR_MESSAGES.authentication_required, 'authentication_required');
+  }
+  if (error instanceof SessionError && error.code === 'session_unavailable') {
+    return new ReservationError(RESERVATION_ERROR_MESSAGES.session_unavailable, 'session_unavailable');
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 // Códigos que las funciones SQL lanzan con `raise exception`; el texto por
 // defecto es español y la pantalla puede traducirlo con `code`.
 const RESERVATION_ERROR_MESSAGES = portalCopy.es.errors;
@@ -126,7 +148,7 @@ export function toReservationError(operation: string, rawMessage: string): Reser
 }
 
 async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
-  const { data, error } = await getClient().database.rpc(name, args);
+  const { data, error } = await (await freshClient()).database.rpc(name, args);
   if (error) throw toReservationError(name, error.message);
   if (data === null) throw new Error(`InsForge ${name}: respuesta vacía`);
   return data as T;
@@ -197,11 +219,29 @@ export async function recordSharedRefund(input: {
   });
 }
 
+export type SessionNotice = 'expired' | 'unavailable' | 'not_persisted' | null;
+
+// Al abrir el portal: restaura la sesión guardada en el dispositivo, si existe.
+export async function restoreSharedSession(): Promise<SessionNotice> {
+  getClient();
+  if (!sessionManager) return null;
+  const result = await sessionManager.restore();
+  if (result === 'expired') return 'expired';
+  if (result === 'unavailable') return 'unavailable';
+  const state = sessionManager.getState();
+  return state.status === 'signed_in' && !state.persisted ? 'not_persisted' : null;
+}
+
+export function isSharedSessionPersisted(): boolean {
+  const state = sessionManager?.getState();
+  return state?.status === 'signed_in' && state.persisted;
+}
+
 export async function getSharedRole(): Promise<SharedRole | null> {
-  const client = getClient();
-  const { data: userData, error: userError } = await client.auth.getCurrentUser();
-  if (userError) throw new Error(`InsForge sesión: ${userError.message}`);
-  const userId = userData?.user?.id;
+  const client = await freshClient();
+  // En el flujo móvil getCurrentUser del SDK no conoce al usuario: lo aporta el gestor de sesión.
+  const state = sessionManager?.getState();
+  const userId = state?.status === 'signed_in' ? state.userId : null;
   if (!userId) return null;
 
   const { data, error } = await client.database
@@ -215,8 +255,13 @@ export async function getSharedRole(): Promise<SharedRole | null> {
 }
 
 export async function signInSharedAccount(email: string, password: string): Promise<void> {
-  const { error } = await getClient().auth.signInWithPassword({ email, password });
-  if (error) throw new Error(`No se pudo iniciar sesión: ${error.message}`);
+  getClient();
+  if (!sessionManager) throw new Error('InsForge no está configurado.');
+  try {
+    await sessionManager.signIn(email, password);
+  } catch (error) {
+    throw new Error(`No se pudo iniciar sesión: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function signUpTravelerAccount(input: {
@@ -231,11 +276,15 @@ export async function signUpTravelerAccount(input: {
   });
   if (error) throw new Error(`No se pudo crear la cuenta: ${error.message}`);
   if (!data) throw new Error('InsForge no devolvio una respuesta de registro.');
+  // Si el registro devolvió una sesión, el SDK la dejó activa sin pasar por el gestor: se descarta
+  // para que la persistencia empiece en un inicio de sesión explícito.
+  if ((data as { accessToken?: string | null }).accessToken) await getClient().auth.signOut();
 }
 
+// Borra la sesión del dispositivo aunque el servidor no responda.
 export async function signOutSharedAccount(): Promise<void> {
-  const { error } = await getClient().auth.signOut();
-  if (error) throw new Error(`No se pudo cerrar sesión: ${error.message}`);
+  getClient();
+  await sessionManager?.signOut();
 }
 
 // Columnas que la migración 202611140005 permite leer al rol authenticated. `select('*')` fallaría:
@@ -246,13 +295,13 @@ export async function listSharedReservations(): Promise<SharedReservation[]> {
   await callRpc<number>('connectical_expire_holds', {});
   // RPC redactado: cada lector recibe solo lo suyo (sin comisión para el turista, sin uuid del turista
   // para el proveedor). La lectura directa de la tabla ya no expone la comisión.
-  const { data, error } = await getClient().database.rpc('connectical_list_reservations', {});
+  const { data, error } = await (await freshClient()).database.rpc('connectical_list_reservations', {});
   if (error) throw new Error(`No se pudieron leer reservas: ${error.message}`);
   return (data ?? []) as SharedReservation[];
 }
 
 export async function listSharedProviders(): Promise<SharedProvider[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_providers')
     .select('id, name, country_code, commission_rate_bps, active');
   if (error) throw new Error(`No se pudieron leer proveedores: ${error.message}`);
@@ -260,7 +309,7 @@ export async function listSharedProviders(): Promise<SharedProvider[]> {
 }
 
 export async function listSharedReservationEvents(): Promise<SharedReservationEvent[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_reservation_events')
     .select(RESERVATION_EVENT_COLUMNS)
     .order('created_at', { ascending: false });
@@ -269,7 +318,7 @@ export async function listSharedReservationEvents(): Promise<SharedReservationEv
 }
 
 export async function listSharedOffers(): Promise<SharedOffer[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_offers')
     .select(OFFER_COLUMNS)
     .eq('published', true);
@@ -278,7 +327,7 @@ export async function listSharedOffers(): Promise<SharedOffer[]> {
 }
 
 export async function listProviderOffers(): Promise<SharedOffer[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_offers')
     .select(OFFER_COLUMNS)
     .order('created_at', { ascending: false });
@@ -287,7 +336,7 @@ export async function listProviderOffers(): Promise<SharedOffer[]> {
 }
 
 export async function listProviderInventory(): Promise<SharedInventory[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_inventory')
     .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
     .order('service_date', { ascending: true });
@@ -387,7 +436,7 @@ export async function listCommissionTerms(): Promise<CommissionTerm[]> {
 
 // rateBps nulo quita la excepción del producto y vuelve a la tasa del proveedor.
 export async function setOfferCommission(offerId: string, rateBps: number | null): Promise<number | null> {
-  const { data, error } = await getClient().database.rpc('connectical_admin_set_offer_commission', {
+  const { data, error } = await (await freshClient()).database.rpc('connectical_admin_set_offer_commission', {
     p_offer_id: offerId,
     p_rate_bps: rateBps,
   });
@@ -437,7 +486,7 @@ export async function getSweepHealth(): Promise<SweepHealth | null> {
 
 // Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.
 export async function listOfferAvailability(offerId: string, fromDate: string): Promise<SharedInventory[]> {
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_inventory')
     .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
     .eq('offer_id', offerId)
@@ -455,7 +504,7 @@ export const PUBLISHED_AVAILABILITY_LIMIT = 1000;
 // retenciones vencidas pueden estar desfasados hasta el siguiente barrido.
 export async function listPublishedAvailability(fromDate: string, offerIds: string[]): Promise<SharedInventory[]> {
   if (!offerIds.length) return [];
-  const { data, error } = await getClient().database
+  const { data, error } = await (await freshClient()).database
     .from('connectical_inventory')
     .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
     .in('offer_id', offerIds)

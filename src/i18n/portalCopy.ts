@@ -123,6 +123,7 @@ const es = {
   resumeProvider: 'Reactivar',
   pauseHint: 'Pausar impide nuevas cotizaciones y publicaciones. Las reservas existentes no cambian.',
   providerUpdated: 'Proveedor actualizado.',
+  sessionNotPersisted: 'Sesión iniciada, pero no se pudo guardar en el dispositivo: al reabrir la app tendrás que iniciar sesión de nuevo.',
   commissionTerms: 'Comisiones por producto',
   commissionTermsHint: 'Referencias por categoría sin aprobar. Una excepción por producto sustituye la tasa del proveedor solo en cotizaciones nuevas.',
   commissionEffective: 'efectiva {rate}',
@@ -263,6 +264,7 @@ const es = {
     invalid_offer_details: 'Revisa el detalle: descripción hasta 2000 caracteres, otros textos hasta 160 y un máximo no menor que el mínimo.',
     quantity_out_of_range: 'La cantidad está fuera de los límites por reserva de esta oferta.',
     simulated_payments_disabled: 'Los pagos simulados están desactivados en este entorno.',
+    session_unavailable: 'No se pudo comprobar tu sesión por falta de conexión. Se conserva en el dispositivo; inténtalo de nuevo.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -354,6 +356,7 @@ const pt: PortalCopy = {
   resumeProvider: 'Reativar',
   pauseHint: 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.',
   providerUpdated: 'Fornecedor atualizado.',
+  sessionNotPersisted: 'Sessão iniciada, mas não foi possível salvá-la no dispositivo: ao reabrir o app será preciso entrar novamente.',
   commissionTerms: 'Comissões por produto',
   commissionTermsHint: 'Referências por categoria não aprovadas. Uma exceção por produto substitui a taxa do fornecedor só em cotações novas.',
   commissionEffective: 'efetiva {rate}',
@@ -494,6 +497,7 @@ const pt: PortalCopy = {
     invalid_offer_details: 'Revise os detalhes: descrição até 2000 caracteres, outros textos até 160 e um máximo não menor que o mínimo.',
     quantity_out_of_range: 'A quantidade está fora dos limites por reserva desta oferta.',
     simulated_payments_disabled: 'Os pagamentos simulados estão desativados neste ambiente.',
+    session_unavailable: 'Não foi possível verificar sua sessão por falta de conexão. Ela continua no dispositivo; tente novamente.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };
