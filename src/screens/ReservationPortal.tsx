@@ -84,6 +84,8 @@ import {
   portalStyles,
 } from '../components/PortalControls';
 import { colors } from '../theme';
+import { AdminConsole } from './AdminConsole';
+import { TravelerServices } from './TravelerServices';
 
 const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
 const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
@@ -858,7 +860,11 @@ export function ReservationPortal({
                 ))}
                 {!events.length ? <Text style={styles.helper}>{words.noEvents}</Text> : null}
               </View>
+              <AdminConsole language={language} busy={busy} run={run} />
             </>
+          ) : null}
+          {role === 'traveler' || role === 'provider' ? (
+            <TravelerServices language={language} role={role} reservations={reservations} busy={busy} run={run} />
           ) : null}
           <ActionButton title={words.refresh} onPress={refresh} disabled={busy} secondary />
         </>

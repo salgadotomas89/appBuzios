@@ -1,3 +1,5 @@
+export {};
+
 // Mitigación de GHSA-mrhx-c7xc-m3w5 (zod < 4.6.6, agotamiento de memoria al validar colecciones
 // enormes). zod@3 llega solo como dependencia de @insforge/shared-schemas, sin versión 3.x corregida.
 // El SDK lo usa para constantes, no para validar datos del usuario; mientras la app tampoco lo

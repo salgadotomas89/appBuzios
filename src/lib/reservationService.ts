@@ -147,7 +147,8 @@ export function toReservationError(operation: string, rawMessage: string): Reser
   return new ReservationError(`InsForge ${operation}: ${rawMessage}`, null);
 }
 
-async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
+// Exportada para los demás servicios del portal: renueva la sesión y traduce los códigos de error SQL.
+export async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await (await freshClient()).database.rpc(name, args);
   if (error) throw toReservationError(name, error.message);
   if (data === null) throw new Error(`InsForge ${name}: respuesta vacía`);
