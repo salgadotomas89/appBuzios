@@ -107,7 +107,7 @@ test('prices lodging by nights and removes it from the trip', async () => {
   pressText(root, 'Pousadas');
   pressText(root, 'Pousada Maravista');
   pressText(root, 'Agregar a Mi viaje');
-  pressAccessible(root, 'Aumentar cantidad', 1);
+  pressAccessible(root, 'Sumar una noche');
 
   expect(hasText(root, 'R$ 640,00')).toBe(true);
   expect(hasText(root, 'R$ 38,40')).toBe(true);
@@ -129,6 +129,23 @@ test('switches language and keeps unavailable listings out of the trip', async (
   expect(hasText(root, 'Sem disponibilidade')).toBe(true);
   expect(hasText(root, 'Faltam informações para reservar')).toBe(true);
   expect(hasText(root, 'Adicionar à Minha viagem')).toBe(false);
+});
+
+test('localizes the operations entry and stepper labels in Portuguese', async () => {
+  const renderer = await renderApp();
+  const root = renderer.root;
+
+  pressText(root, 'PT');
+  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(true);
+  pressText(root, 'Pousadas');
+  pressText(root, 'Pousada Maravista');
+  const labels = root
+    .findAll(node => typeof node.props.onPress === 'function' && typeof node.props.accessibilityLabel === 'string')
+    .map(node => node.props.accessibilityLabel);
+  expect(labels).toEqual(expect.arrayContaining([
+    'Dia anterior', 'Próximo dia', 'Aumentar quantidade', 'Adicionar uma noite',
+  ]));
+  expect(labels).not.toContain('Aumentar cantidad');
 });
 
 test('filters the catalog across all four categories', async () => {
@@ -202,4 +219,29 @@ test('restores an itinerary and a confirmed booking after remounting the app', a
   pressText(reopenedAgain.root, 'Mi viaje');
   expect(hasText(reopenedAgain.root, 'BF-DEMO-001')).toBe(true);
   expect(hasText(reopenedAgain.root, 'R$ 339,20')).toBe(true);
+});
+test('does not let a stored past date be confirmed until it is moved to today or later', async () => {
+  mockStorage.clear();
+  mockStorage.set('@buzios-flow/demo-state-v1', JSON.stringify({
+    schemaVersion: 1,
+    tripItems: [{ id: 'old', offerId: 'pousada-geriba', date: '2020-01-01', quantity: 1, nights: 1 }],
+    bookings: [],
+    serviceFeeRate: 600,
+  }));
+  const renderer = await renderApp(false);
+  const root = renderer.root;
+  pressText(root, 'Mi viaje');
+
+  expect(hasText(root, 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.')).toBe(true);
+  pressText(root, 'Confirmar reserva demo');
+  expect(hasText(root, 'BF-DEMO-001')).toBe(false);
+
+  // Cualquier botón lleva la fecha vencida a hoy; desde hoy no se puede retroceder.
+  pressAccessible(root, 'Día anterior');
+  expect(hasText(root, 'Esta fecha ya pasó en Búzios.')).toBe(false);
+  const previous = root.findAll(node => node.props.accessibilityLabel === 'Día anterior' && typeof node.props.onPress === 'function')[0];
+  expect(previous.props.accessibilityState).toEqual({ disabled: true });
+
+  pressText(root, 'Confirmar reserva demo');
+  expect(hasText(root, 'BF-DEMO-001')).toBe(true);
 });

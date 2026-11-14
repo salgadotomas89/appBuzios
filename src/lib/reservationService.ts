@@ -28,6 +28,7 @@ export type SharedReservation = {
   provider_commission_rate_bps: number;
   provider_commission_cents: number;
   connectical_margin_cents: number;
+  refund_cents: number;
   quote_version: string;
   created_at: string;
   updated_at: string;
@@ -169,6 +170,22 @@ export async function cancelSharedReservation(
   });
 }
 
+// Solo administración. Registra un importe ya decidido; la base de datos no aplica política
+// comercial, solo impide superar lo cobrado y duplicar la misma solicitud.
+export async function recordSharedRefund(input: {
+  reservationId: string;
+  amountCents: number;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<SharedReservation> {
+  return callRpc('connectical_admin_record_refund', {
+    p_reservation_id: input.reservationId,
+    p_amount_cents: input.amountCents,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+}
+
 export async function getSharedRole(): Promise<SharedRole | null> {
   const client = getClient();
   const { data: userData, error: userError } = await client.auth.getCurrentUser();
@@ -303,6 +320,24 @@ export async function listOfferAvailability(offerId: string, fromDate: string): 
     .gte('service_date', fromDate)
     .order('service_date', { ascending: true })
     .limit(60);
+  if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
+  return (data ?? []) as SharedInventory[];
+}
+
+export const PUBLISHED_AVAILABILITY_LIMIT = 1000;
+
+// Inventario de las ofertas indicadas desde una fecha, en una sola consulta para el catálogo.
+// Si devuelve PUBLISHED_AVAILABILITY_LIMIT filas puede estar truncado. Los contadores de
+// retenciones vencidas pueden estar desfasados hasta el siguiente barrido.
+export async function listPublishedAvailability(fromDate: string, offerIds: string[]): Promise<SharedInventory[]> {
+  if (!offerIds.length) return [];
+  const { data, error } = await getClient().database
+    .from('connectical_inventory')
+    .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
+    .in('offer_id', offerIds)
+    .gte('service_date', fromDate)
+    .order('service_date', { ascending: true })
+    .limit(PUBLISHED_AVAILABILITY_LIMIT);
   if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
   return (data ?? []) as SharedInventory[];
 }

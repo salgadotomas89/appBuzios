@@ -106,3 +106,11 @@ it('uses the Búzios calendar date (UTC-3) for today', () => {
 it('formats the local calendar date', () => {
   expect(localIsoDate(new Date(2026, 0, 5, 23, 30))).toBe('2026-01-05');
 });
+
+// scripts/test-shared-reservations.sh comprueba estos mismos instantes con el tzdata de PostgreSQL,
+// la referencia de connectical_today(). Si Brasil volviera al horario de verano, fallaría allí.
+const buziosDates: { instant: string; buziosDate: string }[] = require('./fixtures/buzios-dates.json');
+
+it.each(buziosDates)('uses the Búzios calendar day at $instant', ({ instant, buziosDate }) => {
+  expect(buziosIsoDate(new Date(instant))).toBe(buziosDate);
+});

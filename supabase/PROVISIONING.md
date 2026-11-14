@@ -1,6 +1,6 @@
 # Provisioning for the InsForge trial project
 
-Apply this only in the verified InsForge **trial** project after the shared-reservation migrations (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql`, then `202611140002_system_hold_sweep.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
+Apply this only in the verified InsForge **trial** project after the shared-reservation migrations (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql`, `202611140002_system_hold_sweep.sql`, then `202611140003_refund_ledger.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
 
 ## Preflight (read-only, before applying the migrations)
 
@@ -22,7 +22,7 @@ select exists (select 1 from information_schema.columns where table_schema = 'au
 ```
 
 3. If `connectical_%` tables already exist, do not re-run blindly: compare with the migrations first.
-4. Apply `202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql` and `202611140002_system_hold_sweep.sql` in that order, each in its own run. Then verify:
+4. Apply `202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql`, `202611140002_system_hold_sweep.sql` and `202611140003_refund_ledger.sql` in that order, each in its own run. Then verify:
 
 ```sql
 select column_name from information_schema.columns
@@ -31,8 +31,13 @@ select p.proname, has_function_privilege('authenticated', p.oid, 'execute') as a
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname like 'connectical_%' order by 1;
 -- Expect false for connectical_adjust_stay_inventory, connectical_expire_offer_holds, connectical_lock_offer
--- connectical_create_traveler_profile and connectical_system_expire_holds; true for the RPCs the app calls.
+-- connectical_create_traveler_profile and connectical_system_expire_holds; true for the RPCs the app calls
+-- (connectical_admin_record_refund is true: it checks the admin role itself).
+select has_table_privilege('authenticated', 'public.connectical_refunds', 'insert') as can_insert_refunds; -- expect false
+select relrowsecurity from pg_class where oid = 'public.connectical_refunds'::regclass;                -- expect true
 ```
+
+For a single read-only pass/fail table, paste [`checks/verify_migrations.sql`](checks/verify_migrations.sql) into the SQL Editor after the migrations: every row must show `ok = true`. It only runs `SELECT`, and it accepts either missing write privileges or RLS without write policies, so it does not raise false alarms if the platform grants broad table privileges by default.
 
 The same checks run against a disposable `postgres:17` container with `npm run test:shared-reservations`.
 
@@ -137,3 +142,7 @@ select public.connectical_system_expire_holds();  -- returns the number of holds
 ```
 
 Suggested cadence: every 1–5 minutes (holds last 10 minutes). Until that job exists, expiry stays lazy as described above.
+
+## Refunds (simulated)
+
+Migration `202611140003` adds `public.connectical_refunds` and `public.connectical_admin_record_refund(reservation, amount_cents, reason, idempotency_key)`. Only an administrator session can record a refund, and the function applies no commercial policy: it does not compute deadlines or percentages. It only enforces that the payment was approved, that refunds never exceed `amount_cents`, that a full refund requires the reservation to be cancelled first, and that a retried key with another amount is rejected. No payment gateway is called; every `refund_recorded` event carries `"simulated": true`. Define the cancellation and refund policy before connecting a real gateway.

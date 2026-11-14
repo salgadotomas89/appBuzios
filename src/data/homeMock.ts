@@ -14,6 +14,8 @@ export type Language = 'es' | 'pt';
 
 export type Offer = {
   id: string;
+  // 'shared' marca ofertas reales de InsForge: se reservan en el portal, no en el viaje demo.
+  source?: 'demo' | 'shared';
   category: OfferCategory;
   icon: IconName;
   tone: 'accent' | 'soft';

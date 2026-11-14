@@ -27,6 +27,7 @@ import {
   simulateSharedPayment,
   upsertProviderOffer,
   publishProviderInventory,
+  recordSharedRefund,
   type SharedInventory,
   type SharedOffer,
   type SharedProvider,
@@ -55,6 +56,7 @@ import {
   parseIsoDate,
   type ParseResult,
 } from '../utils/portalInput';
+import { newIdempotencyKey, refundAllowance, summarizeReservations } from '../utils/reservationTotals';
 import { colors, radius } from '../theme';
 
 const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
@@ -65,6 +67,8 @@ const MAX_NIGHTS = 30;
 const MAX_UNITS = 500;
 // Igual que el límite de connectical_provider_upsert_offer.
 const MAX_TITLE_LENGTH = 120;
+// Igual que el límite de connectical_admin_record_refund.
+const MAX_REFUND_REASON_LENGTH = 500;
 const DEFAULT_OFFER = { title: 'Pousada laboratorio', price: '320,00' };
 
 type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
@@ -106,11 +110,17 @@ export function ReservationPortal({
   const [offerPriceMode, setOfferPriceMode] = useState<PortalPriceMode>('night');
   const [stock, setStock] = useState('1');
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
+  const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   // Se incrementa al cambiar los datos de la cotización; una respuesta tardía con otro valor se descarta.
   const quoteRequest = useRef(0);
+  // Una clave por reserva e importe: reintentar, descartar o reabrir el formulario reutiliza la misma,
+  // así una respuesta perdida no duplica el reembolso. Se libera solo tras recargar con éxito.
+  const refundKeys = useRef(new Map<string, string>());
 
   useEffect(() => {
     mounted.current = true;
@@ -290,6 +300,31 @@ export function ReservationPortal({
     });
   }
 
+  function openRefund(reservation: SharedReservation) {
+    const { maxCents } = refundAllowance(reservation);
+    setRefundTarget(reservation);
+    setRefundAmount(centsToBrlInput(maxCents));
+    setRefundReason('');
+  }
+
+  function submitRefund() {
+    if (!refundTarget) return;
+    run(async () => {
+      const amountCents = valueOf(parseBrlToCents(refundAmount), words.refundAmount);
+      const reason = refundReason.trim();
+      if (!reason) throw new InputValidationError(words.refundReasonRequired);
+      const keyId = `${refundTarget.id}:${amountCents}`;
+      const idempotencyKey = refundKeys.current.get(keyId) ?? newIdempotencyKey();
+      refundKeys.current.set(keyId, idempotencyKey);
+      await recordSharedRefund({ reservationId: refundTarget.id, amountCents, reason, idempotencyKey });
+      setRefundTarget(null);
+      if (role) await loadForRole(role);
+      // Con la lista ya actualizada, otro reembolso del mismo importe es una solicitud nueva.
+      refundKeys.current.delete(keyId);
+      return words.refundRecorded;
+    });
+  }
+
   function editProviderOffer(offer: SharedOffer) {
     setSelectedProviderOfferId(offer.id);
     setOfferTitle(offer.title);
@@ -332,6 +367,7 @@ export function ReservationPortal({
   const visibleReservations = statusFilter
     ? reservations.filter(reservation => reservation.status === statusFilter)
     : reservations;
+  const totals = summarizeReservations(visibleReservations);
   const perNight = selectedOffer?.price_mode === 'night';
   const parsedNights = Number(nights);
   const checkOut =
@@ -347,6 +383,7 @@ export function ReservationPortal({
       onCancel={id => cancel(id, reason)}
       // Solo el turista paga; el backend rechaza pagos de reservas ajenas.
       onPay={role === 'traveler' ? pay : undefined}
+      onRefund={role === 'admin' ? openRefund : undefined}
       disabled={busy}
     />
   );
@@ -546,14 +583,34 @@ export function ReservationPortal({
               </View>
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>
-                <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(visibleReservations.reduce((sum, item) => sum + item.provider_commission_cents, 0))}</Text>
-                <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(visibleReservations.reduce((sum, item) => sum + item.connectical_margin_cents, 0))}</Text>
+                <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
+                <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(totals.connecticalFeeCents)}</Text>
+                <Text style={styles.helper}>{words.collectedTotal}: {brlFromCents(totals.collectedCents)} · {words.refundedTotal}: {brlFromCents(totals.refundedCents)}</Text>
+                <Text style={styles.helper}>{words.netCollected}: {brlFromCents(totals.netCollectedCents)}</Text>
+                {totals.pendingRefundReviewCount ? (
+                  <Text style={styles.warning}>{words.pendingRefundReview.replace('{count}', String(totals.pendingRefundReviewCount))}</Text>
+                ) : null}
                 <View style={styles.chips}>
                   <Chip label={words.allStatuses} selected={statusFilter === null} onPress={() => setStatusFilter(null)} />
                   {STATUSES.map(status => (
                     <Chip key={status} label={words.status[status]} selected={statusFilter === status} onPress={() => setStatusFilter(status)} />
                   ))}
                 </View>
+                {refundTarget ? (
+                  <View style={styles.quote}>
+                    <Text style={styles.sectionTitle}>{words.refundTitle}</Text>
+                    <Text style={styles.helper}>{brlFromCents(refundTarget.amount_cents)} · {refundTarget.id}</Text>
+                    <Text style={styles.helper}>{words.refundMax}: {brlFromCents(refundAllowance(refundTarget).maxCents)}</Text>
+                    {refundAllowance(refundTarget).fullRequiresCancellation ? (
+                      <Text style={styles.helper}>{words.refundFullNeedsCancel}</Text>
+                    ) : null}
+                    <Field label={words.refundAmount} value={refundAmount} onChange={setRefundAmount} decimal />
+                    <Field label={words.refundReason} value={refundReason} onChange={setRefundReason} maxLength={MAX_REFUND_REASON_LENGTH} />
+                    <Text style={styles.helper}>{words.refundReasonVisible}</Text>
+                    <ActionButton title={words.refundSubmit} onPress={submitRefund} disabled={busy} />
+                    <ActionButton title={words.refundDiscard} onPress={() => setRefundTarget(null)} disabled={busy} secondary />
+                  </View>
+                ) : null}
                 {reservationList('admin_review', visibleReservations)}
               </View>
               <View style={styles.section}>
@@ -590,6 +647,7 @@ function ReservationList({
   words,
   onCancel,
   onPay,
+  onRefund,
   disabled,
 }: {
   reservations: SharedReservation[];
@@ -597,6 +655,7 @@ function ReservationList({
   words: PortalWords;
   onCancel: (id: string) => void;
   onPay?: (id: string) => void;
+  onRefund?: (reservation: SharedReservation) => void;
   disabled: boolean;
 }) {
   if (!reservations.length) return <Text style={styles.helper}>{words.noReservations}</Text>;
@@ -613,6 +672,9 @@ function ReservationList({
           <Text style={styles.helper}>{offerTitles.get(reservation.offer_id) ?? reservation.offer_id} · {dates} · ×{reservation.quantity}</Text>
           <Text style={styles.helper}>{words.providerNet}: {brlFromCents(reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents)}</Text>
           <Text style={styles.helper}>{words.travelerFee} {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)} · {words.providerCommission} {brlFromCents(reservation.provider_commission_cents)} · {words.connecticalIncome} {brlFromCents(reservation.connectical_margin_cents)}</Text>
+          {reservation.refund_cents > 0 ? (
+            <Text style={styles.helper}>{brlFromCents(reservation.refund_cents)} {words.refundedSoFar}</Text>
+          ) : null}
           {awaitingPayment && reservation.hold_expires_at ? (
             <Text style={styles.helper}>{words.holdExpires}: {formatTime(reservation.hold_expires_at)}</Text>
           ) : null}
@@ -622,6 +684,11 @@ function ReservationList({
           {awaitingPayment && onPay ? (
             <Pressable onPress={() => onPay(reservation.id)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.payNow} ${reservation.id}`}>
               <Text style={styles.link}>{words.payNow}</Text>
+            </Pressable>
+          ) : null}
+          {onRefund && refundAllowance(reservation).maxCents > 0 ? (
+            <Pressable onPress={() => onRefund(reservation)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.refund} ${reservation.id}`}>
+              <Text style={styles.link}>{words.refund}</Text>
             </Pressable>
           ) : null}
           {awaitingPayment || reservation.status === 'confirmed' ? (
@@ -728,5 +795,6 @@ const styles = StyleSheet.create({
   eventRow: { paddingVertical: 9, borderTopWidth: 1, borderColor: colors.track, gap: 3 },
   id: { color: colors.muted, fontSize: 10, marginTop: 3 },
   busy: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  warning: { color: colors.dark, backgroundColor: '#FFF3D7', padding: 9, borderRadius: radius.card, fontSize: 12, lineHeight: 18 },
   message: { color: colors.dark, backgroundColor: '#FFF3D7', padding: 11, borderRadius: radius.card, fontSize: 12, lineHeight: 18 },
 });
