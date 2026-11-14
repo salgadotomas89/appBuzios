@@ -32,7 +32,8 @@ const boat: SharedOffer = {
 function reservation(overrides: Partial<SharedReservation>): SharedReservation {
   return {
     id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1', traveler_user_id: 'u1',
-    service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', amount_cents: 67840,
+    service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', hold_expires_at: null,
+    payment_status: null, payment_method: null, amount_cents: 67840,
     service_fee_rate_bps: 600, service_fee_cents: 3840, provider_commission_rate_bps: 1000,
     provider_commission_cents: 6400, connectical_margin_cents: 3840, quote_version: 'connectical-brl-v1',
     created_at: '2099-01-01T00:00:00Z', updated_at: '2099-01-01T00:00:00Z',
@@ -132,10 +133,10 @@ it('quotes a multi-night stay and books it with the quote id as idempotency key'
   expect(hasText(root, 'R$ 691,20')).toBe(true);
 
   await press(root, 'Pix · simulado');
-  await press(root, 'Reservar y aprobar pago simulado');
+  await press(root, 'Reservar con pago simulado');
   expect(mocked.createSharedReservationHold).toHaveBeenCalledWith('q1', 'q1');
   expect(mocked.simulateSharedPayment).toHaveBeenCalledWith('r1', 'approved', 'pix');
-  expect(hasText(root, 'Reserva confirmada: Confirmada · r1')).toBe(true);
+  expect(hasText(root, 'Reserva: Confirmada · r1')).toBe(true);
 });
 
 it('hides nights for per-person offers and always sends one night', async () => {
@@ -234,5 +235,31 @@ it('discards a quote that resolves after the traveler changed the inputs', async
     quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z',
   }));
   expect(hasText(root, 'R$ 339,20')).toBe(false);
-  expect(hasText(root, 'Reservar y aprobar pago simulado')).toBe(false);
+  expect(hasText(root, 'Reservar con pago simulado')).toBe(false);
+});
+
+it('lets a traveler retry a pending simulated payment and labels admin events', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ status: 'pending_payment', hold_expires_at: '2099-01-01T12:05:00Z' }),
+  ]);
+  mocked.simulateSharedPayment.mockResolvedValue(reservation({ status: 'confirmed' }));
+  const root = await render();
+  expect(hasText(root, 'retención vence')).toBe(true);
+  await press(root, 'Pagar (simulado)');
+  expect(mocked.simulateSharedPayment).toHaveBeenCalledWith('r1', 'approved', 'card');
+  expect(hasText(root, 'Reserva: Confirmada · r1')).toBe(true);
+});
+
+it('sends the chosen simulated outcome and hides payment actions from admins', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', hold_expires_at: '2099-01-01T12:05:00Z' })]);
+  mocked.listSharedReservationEvents.mockResolvedValue([
+    { id: 1, reservation_id: 'r1', actor_user_id: null, event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
+    { id: 2, reservation_id: 'r1', actor_user_id: null, event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
+  ]);
+  const root = await render('pt');
+  expect(hasText(root, 'Pagamento recusado (simulado)')).toBe(true);
+  expect(hasText(root, 'custom_event')).toBe(true);
+  expect(hasText(root, 'Pagar (simulado)')).toBe(false);
 });

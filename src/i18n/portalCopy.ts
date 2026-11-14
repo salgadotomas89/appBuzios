@@ -13,6 +13,7 @@ export type ReservationStatus =
   | 'refunded';
 export type PortalCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy';
 export type PortalPriceMode = 'night' | 'person' | 'ticket' | 'group';
+export type SimulatedOutcome = 'approved' | 'rejected' | 'pending';
 export type ReservationErrorCode = keyof (typeof portalCopy)['es']['errors'];
 
 const es = {
@@ -69,8 +70,26 @@ const es = {
   card: 'Tarjeta internacional',
   pix: 'Pix',
   simulated: 'simulado',
-  reserve: 'Reservar y aprobar pago simulado',
-  reserved: 'Reserva confirmada',
+  reserve: 'Reservar con pago simulado',
+  outcome: 'Resultado del pago simulado',
+  outcomes: {
+    approved: 'Aprobado',
+    rejected: 'Rechazado',
+    pending: 'Pendiente',
+  } satisfies Record<SimulatedOutcome, string>,
+  payNow: 'Pagar (simulado)',
+  holdExpires: 'retención vence',
+  paymentResult: 'Resultado',
+  eventTypes: {
+    reservation_held: 'Cupo retenido',
+    hold_expired: 'Retención vencida',
+    payment_approved: 'Pago aprobado (simulado)',
+    payment_rejected: 'Pago rechazado (simulado)',
+    payment_pending: 'Pago pendiente (simulado)',
+    payment_requires_action: 'Pago requiere acción (simulado)',
+    reservation_cancelled: 'Reserva cancelada',
+  } as Record<string, string>,
+  reserved: 'Reserva',
   myReservations: 'Mis reservas',
   myOffers: 'Mis ofertas',
   newOffer: 'Crear otra oferta',
@@ -196,8 +215,22 @@ const pt: PortalCopy = {
   card: 'Cartão internacional',
   pix: 'Pix',
   simulated: 'simulado',
-  reserve: 'Reservar e aprovar pagamento simulado',
-  reserved: 'Reserva confirmada',
+  reserve: 'Reservar com pagamento simulado',
+  outcome: 'Resultado do pagamento simulado',
+  outcomes: { approved: 'Aprovado', rejected: 'Recusado', pending: 'Pendente' },
+  payNow: 'Pagar (simulado)',
+  holdExpires: 'retenção expira',
+  paymentResult: 'Resultado',
+  eventTypes: {
+    reservation_held: 'Vaga retida',
+    hold_expired: 'Retenção expirada',
+    payment_approved: 'Pagamento aprovado (simulado)',
+    payment_rejected: 'Pagamento recusado (simulado)',
+    payment_pending: 'Pagamento pendente (simulado)',
+    payment_requires_action: 'Pagamento requer ação (simulado)',
+    reservation_cancelled: 'Reserva cancelada',
+  },
+  reserved: 'Reserva',
   myReservations: 'Minhas reservas',
   myOffers: 'Minhas ofertas',
   newOffer: 'Criar outra oferta',

@@ -19,6 +19,9 @@ export type SharedReservation = {
   nights?: number;
   quantity: number;
   status: ReservationStatus;
+  hold_expires_at: string | null;
+  payment_status: 'approved' | 'rejected' | 'pending' | 'requires_action' | null;
+  payment_method: 'card' | 'pix' | null;
   amount_cents: number;
   service_fee_rate_bps: 400 | 600 | 800;
   service_fee_cents: number;

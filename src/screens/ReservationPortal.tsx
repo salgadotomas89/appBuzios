@@ -41,6 +41,7 @@ import {
   type PortalCategory,
   type PortalPriceMode,
   type ReservationStatus,
+  type SimulatedOutcome,
 } from '../i18n/portalCopy';
 import { brlFromCents } from '../utils/format';
 import { DEMO_SERVICE_FEE_RATES, type DemoServiceFeeRate } from '../utils/journey';
@@ -57,6 +58,7 @@ import { colors, radius } from '../theme';
 
 const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
 const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
+const OUTCOMES: SimulatedOutcome[] = ['approved', 'rejected', 'pending'];
 const STATUSES: ReservationStatus[] = ['held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'];
 const MAX_NIGHTS = 30;
 const MAX_UNITS = 500;
@@ -95,6 +97,7 @@ export function ReservationPortal({
   const [serviceFeeRateBps, setServiceFeeRateBps] = useState<DemoServiceFeeRate>(600);
   const [quote, setQuote] = useState<SharedQuote | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card');
+  const [paymentOutcome, setPaymentOutcome] = useState<SimulatedOutcome>('approved');
   const [offerTitle, setOfferTitle] = useState(DEFAULT_OFFER.title);
   const [offerPrice, setOfferPrice] = useState(DEFAULT_OFFER.price);
   const [offerCategory, setOfferCategory] = useState<PortalCategory>('pousadas');
@@ -257,10 +260,18 @@ export function ReservationPortal({
     run(async () => {
       // La cotización solo admite una reserva, así que su id sirve como clave de idempotencia.
       const held = await createSharedReservationHold(quote.id, quote.id);
-      const confirmed = await simulateSharedPayment(held.id, 'approved', paymentMethod);
+      const result = await simulateSharedPayment(held.id, paymentOutcome, paymentMethod);
       setQuote(null);
       if (role) await loadForRole(role);
-      return `${words.reserved}: ${words.status[confirmed.status]} · ${confirmed.id}`;
+      return `${words.reserved}: ${words.status[result.status]} · ${result.id}`;
+    });
+  }
+
+  function pay(reservationId: string) {
+    run(async () => {
+      const result = await simulateSharedPayment(reservationId, paymentOutcome, paymentMethod);
+      if (role) await loadForRole(role);
+      return `${words.reserved}: ${words.status[result.status]} · ${result.id}`;
     });
   }
 
@@ -327,6 +338,8 @@ export function ReservationPortal({
       offerTitles={offerTitles}
       words={words}
       onCancel={id => cancel(id, reason)}
+      // Solo el turista paga; el backend rechaza pagos de reservas ajenas.
+      onPay={role === 'traveler' ? pay : undefined}
       disabled={busy}
     />
   );
@@ -422,6 +435,12 @@ export function ReservationPortal({
                           />
                         ))}
                       </View>
+                      <Text style={styles.fieldLabel}>{words.outcome}</Text>
+                      <View style={styles.chips}>
+                        {OUTCOMES.map(outcome => (
+                          <Chip key={outcome} label={words.outcomes[outcome]} selected={paymentOutcome === outcome} onPress={() => setPaymentOutcome(outcome)} />
+                        ))}
+                      </View>
                       <ActionButton title={words.reserve} onPress={reserve} disabled={busy} />
                     </View>
                   ) : null}
@@ -511,7 +530,7 @@ export function ReservationPortal({
                 <Text style={styles.sectionTitle}>{words.history} · {events.length}</Text>
                 {events.map(event => (
                   <View key={event.id} style={styles.eventRow}>
-                    <Text style={styles.offerName}>{event.event_type}</Text>
+                    <Text style={styles.offerName}>{words.eventTypes[event.event_type] ?? event.event_type}</Text>
                     <Text style={styles.helper}>{event.created_at} · {event.reservation_id}</Text>
                   </View>
                 ))}
@@ -540,17 +559,20 @@ function ReservationList({
   offerTitles,
   words,
   onCancel,
+  onPay,
   disabled,
 }: {
   reservations: SharedReservation[];
   offerTitles: Map<string, string>;
   words: PortalWords;
   onCancel: (id: string) => void;
+  onPay?: (id: string) => void;
   disabled: boolean;
 }) {
   if (!reservations.length) return <Text style={styles.helper}>{words.noReservations}</Text>;
   return <>{reservations.map(reservation => {
     const nights = reservation.nights ?? 1;
+    const awaitingPayment = reservation.status === 'held' || reservation.status === 'pending_payment';
     const dates = nights > 1
       ? `${reservation.service_date} → ${addDays(reservation.service_date, nights)}`
       : reservation.service_date;
@@ -561,16 +583,33 @@ function ReservationList({
           <Text style={styles.helper}>{offerTitles.get(reservation.offer_id) ?? reservation.offer_id} · {dates} · ×{reservation.quantity}</Text>
           <Text style={styles.helper}>{words.providerNet}: {brlFromCents(reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents)}</Text>
           <Text style={styles.helper}>{words.travelerFee} {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)} · {words.providerCommission} {brlFromCents(reservation.provider_commission_cents)} · {words.connecticalIncome} {brlFromCents(reservation.connectical_margin_cents)}</Text>
+          {awaitingPayment && reservation.hold_expires_at ? (
+            <Text style={styles.helper}>{words.holdExpires}: {formatTime(reservation.hold_expires_at)}</Text>
+          ) : null}
           <Text selectable style={styles.id}>{reservation.id}</Text>
         </View>
-        {reservation.status === 'held' || reservation.status === 'pending_payment' || reservation.status === 'confirmed' ? (
-          <Pressable onPress={() => onCancel(reservation.id)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.cancel} ${reservation.id}`}>
-            <Text style={styles.link}>{words.cancel}</Text>
-          </Pressable>
-        ) : null}
+        <View>
+          {awaitingPayment && onPay ? (
+            <Pressable onPress={() => onPay(reservation.id)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.payNow} ${reservation.id}`}>
+              <Text style={styles.link}>{words.payNow}</Text>
+            </Pressable>
+          ) : null}
+          {awaitingPayment || reservation.status === 'confirmed' ? (
+            <Pressable onPress={() => onCancel(reservation.id)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.cancel} ${reservation.id}`}>
+              <Text style={styles.link}>{words.cancel}</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     );
   })}</>;
+}
+
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 function Field({
