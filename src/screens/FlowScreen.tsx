@@ -20,6 +20,7 @@ import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
 import { buziosIsoDate } from '../utils/portalInput';
+import { selectGateway } from '../payments/gateways';
 import {
   DEFAULT_DEMO_SERVICE_FEE_RATE,
   DEMO_SERVICE_FEE_RATES,
@@ -400,7 +401,7 @@ export function FlowScreen() {
       amountCents: quote.travelerTotalCents,
       travelerCountry: 'BR',
       travelerHasCpf: true,
-      selectedProvider: 'mercado_pago',
+      selectedProvider: selectGateway('simulated_gateway', 'simulated').gateway.id,
       method: 'visa',
       providerCommissionCents: quote.providerCommissionCents,
       travelerFeeCents: quote.serviceFeeCents,

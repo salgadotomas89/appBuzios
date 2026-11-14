@@ -116,7 +116,8 @@ export function createPaymentIntent(args: {
     id: `pay-${Math.random().toString(36).slice(2, 10)}`,
     bookingId: args.bookingId,
     paymentMethod: args.method ?? 'visa',
-    provider: args.selectedProvider ?? 'mercado_pago',
+    // Sin contrato con ninguna pasarela, el valor por defecto es el simulador.
+    provider: args.selectedProvider ?? 'simulated_gateway',
     currency: 'BRL',
     amountCents: args.amountCents,
     travelerCountry: args.travelerCountry,
