@@ -104,7 +104,8 @@ insert into public.connectical_offers (id, provider_id, category, title, base_pr
 values ('51000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'pousadas', 'Large lab price', 4000000, 'night', true);
 set session authorization integration_session;
 set role authenticated;
-set request.jwt.claim.sub = '10000000-0000-4000-8000-000000000001';
+-- The admin sees the commission; travelers get it redacted (checked further down).
+set request.jwt.claim.sub = '30000000-0000-4000-8000-000000000001';
 select subtotal_cents||'|'||service_fee_cents||'|'||provider_commission_cents
 from public.connectical_create_quote('51000000-0000-4000-8000-000000000001', current_date + 35, 1, 1, 600);
 SQL
@@ -212,7 +213,7 @@ provider_inventory=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U po
 traveler_owner_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$winner',false); select count(*) from public.connectical_reservations where id='$reservation_id';" | tail -1)
 admin_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
-  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_rate_bps||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select amount_cents||'|'||service_fee_rate_bps||'|'||service_fee_cents||'|'||provider_commission_cents from public.connectical_list_reservations() where id='$reservation_id';" | tail -1)
 admin_event_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','30000000-0000-4000-8000-000000000001',false); select count(*) from public.connectical_reservation_events where reservation_id='$reservation_id';" | tail -1)
 traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
@@ -532,7 +533,8 @@ insert into public.connectical_offers (id, provider_id, category, title, base_pr
   from public.lab_quote_parity;
 grant select on public.lab_quote_parity to authenticated;
 SQL
-parity=$(as_user "$traveler_a" "
+# Run as the admin, who receives the commission that travelers do not.
+parity=$(as_user "$admin_user" "
   select count(*) || '|' || coalesce(string_agg(c.n::text, ',') filter (where
     (q.subtotal_cents, q.service_fee_cents, q.traveler_total_cents, q.provider_commission_cents)
     is distinct from (c.\"subtotalCents\", c.\"serviceFeeCents\", c.\"travelerTotalCents\", c.\"providerCommissionCents\")), '')
@@ -837,8 +839,10 @@ echo "PASS scheduled sweep skips overlaps, isolates failing offers, recovers and
 # Commercial terms: experiences category, admin-only product commission, frozen quotes, B2B privacy.
 vip_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'experiencias', 'Private lab tour', 50000, 'group', true)).id;")
 as_user "$provider_user" "select public.connectical_provider_publish_inventory('$vip_offer', current_date + 150, 2);" >/dev/null
-base_quote=$(as_user "$traveler_a" "select q.id || '|' || q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
-[ "${base_quote#*|}" = '1000|5000' ] || { echo "Experience quote did not use the provider rate: $base_quote" >&2; exit 1; }
+base_quote=$(as_user "$traveler_a" "select q.id || '|' || coalesce(q.provider_commission_rate_bps::text, 'hidden') || '|' || coalesce(q.provider_commission_cents::text, 'hidden') from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
+[ "${base_quote#*|}" = 'hidden|hidden' ] || { echo "Traveler received the commission in a quote: $base_quote" >&2; exit 1; }
+stored_quote() { docker exec "$container" psql -qAt -U postgres -d postgres -c "select provider_commission_rate_bps || '|' || provider_commission_cents from public.connectical_quotes where id = '$1';" | tail -1; }
+[ "$(stored_quote "${base_quote%%|*}")" = '1000|5000' ] || { echo "Experience quote did not use the provider rate: $(stored_quote "${base_quote%%|*}")" >&2; exit 1; }
 for actor in "$traveler_a" "$provider_user"; do
   if as_user "$actor" "select public.connectical_admin_set_offer_commission('$vip_offer', 0);" >/dev/null 2>&1; then
     echo "Non-admin could set a product commission" >&2; exit 1
@@ -856,9 +860,10 @@ for bad in 10001 -1; do
   fi
 done
 as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', 2000);" >/dev/null
-vip_quote=$(as_user "$traveler_a" "select q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
-frozen=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select provider_commission_rate_bps from public.connectical_quotes where id = '${base_quote%%|*}';" | tail -1)
-[ "$vip_quote" = '2000|10000' ] && [ "$frozen" = '1000' ] || { echo "Product commission not applied or earlier quote changed: $vip_quote $frozen" >&2; exit 1; }
+vip_quote_id=$(as_user "$traveler_a" "select (public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600)).id;")
+vip_quote=$(stored_quote "$vip_quote_id")
+frozen=$(stored_quote "${base_quote%%|*}")
+[ "$vip_quote" = '2000|10000' ] && [ "$frozen" = '1000|5000' ] || { echo "Product commission not applied or earlier quote changed: $vip_quote $frozen" >&2; exit 1; }
 provider_view_rate=$(as_user "$provider_user" "select coalesce((public.connectical_provider_upsert_offer('$vip_offer', 'experiencias', 'Private lab tour', 50000, 'group', true)).commission_rate_bps::text, 'hidden');")
 [ "$provider_view_rate" = 'hidden' ] || { echo "Provider received the product commission: $provider_view_rate" >&2; exit 1; }
 terms=$(as_user "$admin_user" "select t.effective_rate_bps || '|' || t.reference_status || '|' || t.outside_reference from public.connectical_admin_list_commission_terms() t where t.offer_id = '$vip_offer';")
@@ -872,7 +877,7 @@ as_user "$admin_user" "select public.connectical_admin_set_provider_commission('
 if as_user "$admin_user" "select count(*) from public.connectical_commission_references;" >/dev/null 2>&1; then
   echo "Commission references readable through the API" >&2; exit 1
 fi
-echo "PASS experiences category, admin-only product commissions frozen per quote and hidden from providers"
+echo "PASS experiences category, admin-only product commissions frozen per quote and never returned to travelers"
 
 # Gateway webhooks: idempotent ingestion, exact BRL amount, no double confirmation, late payments.
 pg_offer='5b000000-0000-4000-8000-000000000001'
@@ -954,6 +959,57 @@ done
 in_range=$(as_user "$traveler_a" "select (public.connectical_create_quote('$boat_offer', current_date + 170, 12, 1, 600)).subtotal_cents;")
 [ "$in_range" = '108000' ] || { echo "Quantity at the limit mismatch: $in_range" >&2; exit 1; }
 echo "PASS providers describe their offers and quotes respect per-booking quantity limits"
+
+# Traveler privacy and server-side payment switch (migration 202611140010).
+priv_offer='5c000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$priv_offer', '$lab_provider', 'barcos', 'Privacy lab boat', 10000, 'person', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$priv_offer', current_date + 180, 9);"
+priv_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$priv_offer', current_date + 180, 1, 1, 600)).id;")
+priv_hold=$(as_user "$traveler_a" "select r.id || '|' || coalesce(r.provider_commission_cents::text, 'hidden') from public.connectical_create_reservation_hold('$priv_quote', gen_random_uuid()) r;")
+priv_id=${priv_hold%%|*}
+[ "${priv_hold#*|}" = 'hidden' ] || { echo "Hold returned the commission to the traveler: $priv_hold" >&2; exit 1; }
+for probe in \
+  "$provider_user|select traveler_user_id from public.connectical_quotes limit 1" \
+  "$provider_user|select provider_commission_cents from public.connectical_quotes limit 1" \
+  "$traveler_a|select provider_commission_cents from public.connectical_reservations limit 1" \
+  "$traveler_a|select * from public.connectical_quotes limit 1" \
+  "$admin_user|select value from public.connectical_settings limit 1"; do
+  probe_user=${probe%%|*}; probe_sql=${probe#*|}
+  if as_user "$probe_user" "$probe_sql" >/dev/null 2>&1; then
+    echo "Readable but should not be, as $probe_user: $probe_sql" >&2; exit 1
+  fi
+done
+seen_by() { as_user "$1" "select coalesce(provider_commission_cents::text, 'hidden') || '|' || coalesce(traveler_user_id::text, 'hidden') from public.connectical_list_reservations() where id = '$priv_id';"; }
+[ "$(seen_by "$traveler_a")" = "hidden|$traveler_a" ] || { echo "Traveler view of own reservation: $(seen_by "$traveler_a")" >&2; exit 1; }
+[ "$(seen_by "$provider_user")" = '1000|hidden' ] || { echo "Provider view of reservation: $(seen_by "$provider_user")" >&2; exit 1; }
+[ "$(seen_by "$admin_user")" = "1000|$traveler_a" ] || { echo "Admin view of reservation: $(seen_by "$admin_user")" >&2; exit 1; }
+other_count=$(as_user "$traveler_b" "select count(*) from public.connectical_list_reservations() where id = '$priv_id';")
+[ "$other_count" = '0' ] || { echo "Other traveler sees the reservation: $other_count" >&2; exit 1; }
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_settings set value = 'false' where key = 'simulated_payments_enabled';"
+if as_user "$traveler_a" "select public.connectical_simulate_payment('$priv_id','approved','card','LAB-OFF');" >/dev/null 2>&1; then
+  echo "Simulated payment ran with the switch off" >&2; exit 1
+fi
+docker exec "$container" psql -q -U postgres -d postgres -c "delete from public.connectical_settings where key = 'simulated_payments_enabled';"
+if as_user "$traveler_a" "select public.connectical_simulate_payment('$priv_id','approved','card','LAB-OFF');" >/dev/null 2>&1; then
+  echo "Simulated payment ran with the switch missing" >&2; exit 1
+fi
+docker exec "$container" psql -q -U postgres -d postgres -c "insert into public.connectical_settings (key, value) values ('simulated_payments_enabled', 'true');"
+paid=$(as_user "$traveler_a" "select r.status || '|' || coalesce(r.provider_commission_cents::text, 'hidden') from public.connectical_simulate_payment('$priv_id','approved','card','LAB-ON') r;")
+[ "$paid" = 'confirmed|hidden' ] || { echo "Simulated payment with the switch on: $paid" >&2; exit 1; }
+# A late rejection of an earlier attempt must not cancel a newer attempt.
+stale_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$priv_offer', current_date + 180, 1, 1, 600)).id;")
+stale_id=$(as_user "$traveler_a" "select (public.connectical_create_reservation_hold('$stale_quote', gen_random_uuid())).id;")
+ingest_priv() { docker exec "$container" psql -qAt -U postgres -d postgres -c "select (public.connectical_system_ingest_payment_event($1)).outcome;" | tail -1; }
+[ "$(ingest_priv "'lab', 'st-1', '$stale_id', 'payment_pending', 0, 'BRL', 'card', 'ATTEMPT-1'")" = 'applied_pending' ] || { echo "First attempt not pending" >&2; exit 1; }
+[ "$(ingest_priv "'lab', 'st-2', '$stale_id', 'payment_pending', 0, 'BRL', 'pix', 'ATTEMPT-2'")" = 'applied_pending' ] || { echo "Second attempt not pending" >&2; exit 1; }
+[ "$(ingest_priv "'lab', 'st-3', '$stale_id', 'payment_rejected', 0, 'BRL', 'card', 'ATTEMPT-1'")" = 'ignored_stale_attempt' ] || { echo "Stale rejection was applied" >&2; exit 1; }
+[ "$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select status from public.connectical_reservations where id = '$stale_id';" | tail -1)" = 'pending_payment' ] || { echo "Stale rejection cancelled the hold" >&2; exit 1; }
+[ "$(ingest_priv "'lab', 'st-4', '$stale_id', 'payment_rejected', 0, 'BRL', 'pix', 'ATTEMPT-2'")" = 'applied_rejected' ] || { echo "Current rejection not applied" >&2; exit 1; }
+priv_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$priv_reconcile" ] || { echo "Inventory does not reconcile after privacy checks: $priv_reconcile" >&2; exit 1; }
+echo "PASS travelers never receive commissions, providers never traveler ids, and simulated payments obey a server switch"
 
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \

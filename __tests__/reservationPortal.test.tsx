@@ -176,10 +176,11 @@ it('lets providers publish offers in any category with a BRL price', async () =>
   await type(root, 'Cupo disponible para esa fecha', '12');
   await press(root, 'Publicar oferta y cupo');
 
-  expect(mocked.upsertProviderOffer).toHaveBeenCalledWith({
-    offerId: undefined, category: 'barcos', title: 'Fiesta en barco',
-    basePriceCents: 123456, priceMode: 'person', published: true,
-  });
+  // Se crea sin publicar y se publica al final, con el mismo contenido.
+  expect(mocked.upsertProviderOffer.mock.calls.map(call => call[0])).toEqual([
+    { offerId: undefined, category: 'barcos', title: 'Fiesta en barco', basePriceCents: 123456, priceMode: 'person', published: false },
+    { offerId: 'new-offer', category: 'barcos', title: 'Fiesta en barco', basePriceCents: 123456, priceMode: 'person', published: true },
+  ]);
   expect(mocked.publishProviderInventory).toHaveBeenCalledWith({
     offerId: 'new-offer', serviceDate: '2099-03-01', totalUnits: 12,
   });
@@ -456,7 +457,7 @@ it('separates holds, confirmed gross and provider net and flags inconsistent sta
   expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
   expect(hasText(root, 'Bruto de reservas confirmadas: R$ 1.356,80')).toBe(true);
   // 2 × (678,40 − 38,40 − 64,00)
-  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 1.152,00')).toBe(true);
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 1.152,00')).toBe(true);
   expect(hasText(root, 'Estados inconsistentes para revisar: 1')).toBe(true);
   expect(hasText(root, 'confirmada sin pago aprobado · r-odd')).toBe(true);
 });
@@ -579,7 +580,38 @@ it('shows providers their net income and the platform commission, without counti
   ]);
   const root = await render();
   expect(hasText(root, 'Tus ingresos')).toBe(true);
-  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 576,00')).toBe(true);
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 576,00')).toBe(true);
   expect(hasText(root, 'Comisión de la plataforma en reservas confirmadas: R$ 64,00')).toBe(true);
   expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
+});
+
+it('shows travelers what they paid but not the commission between provider and platform', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-mine', provider_commission_rate_bps: null, provider_commission_cents: null }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Cargo servicio turista 6% · R$ 38,40')).toBe(true);
+  expect(hasText(root, 'comisión proveedor')).toBe(false);
+  expect(hasText(root, 'proveedor recibe neto')).toBe(false);
+});
+
+it('publishes a new offer only after its details and inventory are saved, and retries on the same offer', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockImplementation(async input => ({ ...boat, id: 'offer-new', published: input.published }));
+  mocked.setProviderOfferDetails.mockResolvedValue('offer-new');
+  mocked.publishProviderInventory
+    .mockRejectedValueOnce(new Error('network down'))
+    .mockResolvedValue({} as never);
+  const root = await render();
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await press(root, 'Publicar oferta y cupo');
+  expect(hasText(root, 'network down')).toBe(true);
+  // Creada sin publicar y nunca publicada porque el cupo falló.
+  expect(mocked.upsertProviderOffer.mock.calls.map(call => [call[0].offerId, call[0].published])).toEqual([[undefined, false]]);
+
+  await press(root, 'Guardar cambios y cupo');
+  expect(mocked.upsertProviderOffer.mock.calls.slice(1).map(call => [call[0].offerId, call[0].published]))
+    .toEqual([['offer-new', true]]);
+  expect(mocked.publishProviderInventory).toHaveBeenCalledTimes(2);
 });

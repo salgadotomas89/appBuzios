@@ -13,7 +13,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Retenciones de 10 min y expiración diferida | COMPLETO | Se liberan al listar o reservar; pruebas de retención vencida | P0 hecho |
 | Barrido programado de retenciones | PARCIAL | Función con registro, sin solapes y aislamiento por oferta (0006), probada; **scheduler no instalado** (bloqueado por tenant) | P0 |
 | Idempotencia de reservas | COMPLETO | Doble envío simultáneo, reintento tras vencer la cotización | P0 hecho |
-| Pagos simulados (tarjeta, Pix) | SIMULADO | `simulate_payment`: aprobado, rechazado, pendiente, reintentos | — |
+| Pagos simulados (tarjeta, Pix) | SIMULADO | `simulate_payment`: aprobado, rechazado, pendiente, reintentos; interruptor en la base de datos (0010), que hay que apagar antes de una pasarela real | — |
 | Webhooks de pasarela | PARCIAL | Ingesta idempotente con revisión de doble cobro (0008), probada; **falta el manejador firmado** y una pasarela contratada | P1 |
 | Pagos reales | BLOQUEADO | Sin pasarela contratada; tres controles independientes apagados y ningún adaptador en vivo ([arquitectura-pagos.md](arquitectura-pagos.md)) | Decisión comercial |
 | Reembolsos | SIMULADO | Registro de admin idempotente con topes (0003); sin devolución bancaria | — |
@@ -37,7 +37,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Notificaciones y comprobantes | NO IMPLEMENTADO | Requiere proveedor de correo/push | P2 |
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
 | Inglés | NO IMPLEMENTADO | Arquitectura preparada (`Record<Language, …>`); traducción pendiente de revisión humana | P2 |
-| Privacidad de identificadores | COMPLETO | Privilegios por columna (0005), sondas de fuga y verificación automática | P0 hecho |
+| Privacidad de identificadores y comisiones | COMPLETO | 0005 y 0010: el proveedor no lee uuid de turistas (tampoco en cotizaciones) y el turista no recibe la comisión B2B en ninguna lectura ni respuesta; sondas de fuga y verificación automática | P0 hecho |
 | iOS | PARCIAL | Build Debug para simulador compila; **no ejecutado**: CoreSimulator desactualizado | Bloqueado (equipo) |
 | Android | BLOQUEADO | Sin JDK 17 ni Android SDK en el equipo; pasos en [entorno-movil.md](entorno-movil.md). El build release firma con la clave debug de la plantilla | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |

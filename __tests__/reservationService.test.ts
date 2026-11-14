@@ -8,8 +8,8 @@ import { portalCopy } from '../src/i18n/portalCopy';
 import {
   createSharedQuote,
   createSharedReservationHold,
+  listSharedReservations,
   recordSharedRefund,
-  RESERVATION_COLUMNS,
   RESERVATION_EVENT_COLUMNS,
   ReservationError,
   toReservationError,
@@ -104,14 +104,21 @@ function columns(list: string): string[] {
   return list.split(',').map(column => column.trim());
 }
 
-it('reads only the reservation and event columns the database grants, never Auth ids', () => {
-  const reservationGrant = grantedColumns('connectical_reservations');
+it('reads only granted event columns and reservations through the redacted RPC', () => {
   const eventGrant = grantedColumns('connectical_reservation_events');
-  expect(columns(RESERVATION_COLUMNS).filter(column => !reservationGrant.includes(column))).toEqual([]);
   expect(columns(RESERVATION_EVENT_COLUMNS).filter(column => !eventGrant.includes(column))).toEqual([]);
-  for (const list of [RESERVATION_COLUMNS, RESERVATION_EVENT_COLUMNS, reservationGrant.join(','), eventGrant.join(',')]) {
+  for (const list of [RESERVATION_EVENT_COLUMNS, eventGrant.join(',')]) {
     expect(list).not.toMatch(/user_id|idempotency_key|\*/);
   }
   const service = fs.readFileSync(`${__dirname}/../src/lib/reservationService.ts`, 'utf8');
   expect(service).not.toMatch(/\.select\(\s*['"`]\*['"`]\s*\)/);
+  // La tabla de reservas ya no expone la comisión; el RPC la entrega solo a quien corresponde.
+  expect(service).not.toMatch(/from\(\s*['"]connectical_reservations['"]\s*\)/);
+  expect(service).toContain("rpc('connectical_list_reservations'");
+});
+
+it('lists reservations through the redacted RPC after sweeping elapsed holds', async () => {
+  mockRpc.mockResolvedValueOnce({ data: 0, error: null }).mockResolvedValueOnce({ data: [{ id: 'r1' }], error: null });
+  await expect(listSharedReservations()).resolves.toEqual([{ id: 'r1' }]);
+  expect(mockRpc.mock.calls.map(call => call[0])).toEqual(['connectical_expire_holds', 'connectical_list_reservations']);
 });

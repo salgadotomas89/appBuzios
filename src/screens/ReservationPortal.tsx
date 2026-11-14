@@ -427,19 +427,16 @@ export function ReservationPortal({
         ? valueOf(parseCount(offerDetails.maxQuantity, { min: minQuantity, max: MAX_UNITS }), words.maxQuantity)
         : null;
       const nightsToPublish = valueOf(parseCount(publishNights, { max: MAX_PUBLISH_NIGHTS }), words.publishNights);
+      const offerFields = { category: offerCategory, title, basePriceCents, priceMode: offerPriceMode };
+      // Una oferta nueva se crea sin publicar y solo se publica cuando ya tiene detalle y cupo: si algo
+      // falla a mitad, no queda a la venta incompleta y el reintento actualiza esa misma oferta.
+      const isNew = !selectedProviderOfferId;
       const offer = await upsertProviderOffer({
+        ...offerFields,
         offerId: selectedProviderOfferId ?? undefined,
-        category: offerCategory,
-        title,
-        basePriceCents,
-        priceMode: offerPriceMode,
-        published: true,
+        published: !isNew,
       });
-      if (nightsToPublish === 1) {
-        await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
-      } else {
-        await publishProviderInventoryRange({ offerId: offer.id, fromDate: serviceDate, nights: nightsToPublish, totalUnits });
-      }
+      setSelectedProviderOfferId(offer.id);
       await setProviderOfferDetails({
         offerId: offer.id,
         description: offerDetails.description.trim(),
@@ -449,7 +446,12 @@ export function ReservationPortal({
         minQuantity,
         maxQuantity,
       });
-      setSelectedProviderOfferId(offer.id);
+      if (nightsToPublish === 1) {
+        await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
+      } else {
+        await publishProviderInventoryRange({ offerId: offer.id, fromDate: serviceDate, nights: nightsToPublish, totalUnits });
+      }
+      if (isNew) await upsertProviderOffer({ ...offerFields, offerId: offer.id, published: true });
       if (role) await loadForRole(role);
       return words.offerSaved;
     });
@@ -886,8 +888,15 @@ function ReservationList({
         <View style={styles.flex}>
           <Text style={styles.offerName}>{words.status[reservation.status] ?? reservation.status} · {brlFromCents(reservation.amount_cents)}</Text>
           <Text style={styles.helper}>{offerTitles.get(reservation.offer_id) ?? reservation.offer_id} · {dates} · ×{reservation.quantity}</Text>
-          <Text style={styles.helper}>{words.providerNet}: {brlFromCents(reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents)}</Text>
-          <Text style={styles.helper}>{words.travelerFee} {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)} · {words.providerCommission} {brlFromCents(reservation.provider_commission_cents)} · {words.connecticalIncome} {brlFromCents(reservation.connectical_margin_cents)}</Text>
+          {reservation.provider_commission_cents !== null ? (
+            <>
+              <Text style={styles.helper}>{words.providerNet}: {brlFromCents(reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents)}</Text>
+              <Text style={styles.helper}>{words.travelerFee} {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)} · {words.providerCommission} {brlFromCents(reservation.provider_commission_cents)} · {words.connecticalIncome} {brlFromCents(reservation.connectical_margin_cents)}</Text>
+            </>
+          ) : (
+            // El turista ve lo que pagó; la comisión entre proveedor y plataforma no le corresponde.
+            <Text style={styles.helper}>{words.travelerFee} {reservation.service_fee_rate_bps / 100}% · {brlFromCents(reservation.service_fee_cents)}</Text>
+          )}
           {reservation.refund_cents > 0 ? (
             <Text style={styles.helper}>{brlFromCents(reservation.refund_cents)} {words.refundedSoFar}</Text>
           ) : null}

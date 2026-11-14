@@ -24,8 +24,9 @@ export type SharedReservation = {
   amount_cents: number;
   service_fee_rate_bps: 400 | 600 | 800;
   service_fee_cents: number;
-  provider_commission_rate_bps: number;
-  provider_commission_cents: number;
+  // Nulos para el turista: la comisión solo la ven el proveedor dueño y la administración.
+  provider_commission_rate_bps: number | null;
+  provider_commission_cents: number | null;
   connectical_margin_cents: number;
   refund_cents: number;
   quote_version: string;
@@ -43,8 +44,9 @@ export type SharedQuote = {
   subtotal_cents: number;
   service_fee_cents: number;
   traveler_total_cents: number;
-  provider_commission_rate_bps: number;
-  provider_commission_cents: number;
+  // Nulos en la respuesta al turista (migración 202611140010).
+  provider_commission_rate_bps: number | null;
+  provider_commission_cents: number | null;
   quote_version: string;
   expires_at: string;
 };
@@ -237,22 +239,16 @@ export async function signOutSharedAccount(): Promise<void> {
 }
 
 // Columnas que la migración 202611140005 permite leer al rol authenticated. `select('*')` fallaría:
-// los identificadores de Auth (turista, autor de cada evento) no salen de la base de datos.
-export const RESERVATION_COLUMNS =
-  'id, quote_id, offer_id, provider_id, service_date, nights, quantity, status, hold_expires_at, ' +
-  'amount_cents, service_fee_rate_bps, service_fee_cents, provider_commission_rate_bps, ' +
-  'provider_commission_cents, connectical_margin_cents, quote_version, payment_status, payment_method, ' +
-  'payment_reference, refund_cents, created_at, updated_at';
+// los identificadores de Auth (autor de cada evento) no salen de la base de datos.
 export const RESERVATION_EVENT_COLUMNS = 'id, reservation_id, event_type, details, created_at';
 
 export async function listSharedReservations(): Promise<SharedReservation[]> {
   await callRpc<number>('connectical_expire_holds', {});
-  const { data, error } = await getClient().database
-    .from('connectical_reservations')
-    .select(RESERVATION_COLUMNS)
-    .order('created_at', { ascending: false });
+  // RPC redactado: cada lector recibe solo lo suyo (sin comisión para el turista, sin uuid del turista
+  // para el proveedor). La lectura directa de la tabla ya no expone la comisión.
+  const { data, error } = await getClient().database.rpc('connectical_list_reservations', {});
   if (error) throw new Error(`No se pudieron leer reservas: ${error.message}`);
-  return (data ?? []) as unknown as SharedReservation[];
+  return (data ?? []) as SharedReservation[];
 }
 
 export async function listSharedProviders(): Promise<SharedProvider[]> {

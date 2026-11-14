@@ -170,7 +170,7 @@ const es = {
   netCollected: 'Cobrado neto de reembolsos',
   heldTotal: 'Retenido o pago pendiente (no es ingreso)',
   confirmedGross: 'Bruto de reservas confirmadas',
-  providerNetTotal: 'Neto proveedor de reservas confirmadas',
+  providerNetTotal: 'Neto proveedor de reservas confirmadas, antes de reembolsos',
   statusCounts: 'Retenidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
   inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
   inconsistencies: {
@@ -262,6 +262,7 @@ const es = {
     invalid_commission_rate: 'La comisión debe estar entre 0 % y 100 %.',
     invalid_offer_details: 'Revisa el detalle: descripción hasta 2000 caracteres, otros textos hasta 160 y un máximo no menor que el mínimo.',
     quantity_out_of_range: 'La cantidad está fuera de los límites por reserva de esta oferta.',
+    simulated_payments_disabled: 'Los pagos simulados están desactivados en este entorno.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -400,7 +401,7 @@ const pt: PortalCopy = {
   netCollected: 'Cobrado líquido de reembolsos',
   heldTotal: 'Retido ou pagamento pendente (não é receita)',
   confirmedGross: 'Bruto de reservas confirmadas',
-  providerNetTotal: 'Líquido do fornecedor de reservas confirmadas',
+  providerNetTotal: 'Líquido do fornecedor de reservas confirmadas, antes de reembolsos',
   statusCounts: 'Retidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
   inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
   inconsistencies: {
@@ -492,6 +493,7 @@ const pt: PortalCopy = {
     invalid_commission_rate: 'A comissão deve estar entre 0 % e 100 %.',
     invalid_offer_details: 'Revise os detalhes: descrição até 2000 caracteres, outros textos até 160 e um máximo não menor que o mínimo.',
     quantity_out_of_range: 'A quantidade está fora dos limites por reserva desta oferta.',
+    simulated_payments_disabled: 'Os pagamentos simulados estão desativados neste ambiente.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };
