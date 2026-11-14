@@ -15,6 +15,7 @@ jest.mock('../src/lib/reservationService', () => {
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
+    'listCommissionTerms', 'setOfferCommission',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -88,6 +89,7 @@ beforeEach(() => {
   mocked.listProviderInventory.mockResolvedValue([]);
   mocked.listOfferAvailability.mockResolvedValue([]);
   mocked.getSweepHealth.mockResolvedValue(null);
+  mocked.listCommissionTerms.mockResolvedValue([]);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -484,4 +486,38 @@ it('keeps the admin panel working when sweep health is unavailable', async () =>
   expect(hasText(root, 'Barrido de retenciones vencidas')).toBe(false);
   expect(hasText(root, 'function does not exist')).toBe(false);
   expect(hasText(root, 'Reservas · 0')).toBe(true);
+});
+
+it('shows effective commissions against unapproved references and sets a product exception', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listCommissionTerms.mockResolvedValue([
+    {
+      offer_id: 'o-vip', offer_title: 'Tour privado', category: 'experiencias', provider_name: 'Lab',
+      provider_rate_bps: 1000, offer_rate_bps: null, effective_rate_bps: 1000,
+      reference_min_bps: 1800, reference_max_bps: 2000, reference_status: 'reference', outside_reference: true,
+    },
+    {
+      offer_id: 'o-buggy', offer_title: 'Buggy', category: 'buggy', provider_name: 'Lab',
+      provider_rate_bps: 1000, offer_rate_bps: 1250, effective_rate_bps: 1250,
+      reference_min_bps: null, reference_max_bps: null, reference_status: 'reference', outside_reference: false,
+    },
+  ]);
+  mocked.setOfferCommission.mockResolvedValue(1850);
+  const root = await render();
+
+  expect(hasText(root, 'Experiencias privadas y VIP · efectiva 10 %')).toBe(true);
+  expect(hasText(root, 'referencia 18 %–20 % (propuesta) · fuera de la referencia')).toBe(true);
+  expect(hasText(root, 'Buggy · efectiva 12,5 % · excepción del producto')).toBe(true);
+  expect(hasText(root, 'sin referencia definida')).toBe(true);
+
+  await press(root, 'Cambiar');
+  await type(root, 'Comisión del producto (%), vacío para usar la del proveedor', '18,555');
+  await press(root, 'Guardar comisión');
+  expect(hasText(root, 'Porcentaje inválido. Usa por ejemplo 18 o 18,5.')).toBe(true);
+  expect(mocked.setOfferCommission).not.toHaveBeenCalled();
+
+  await type(root, 'Comisión del producto (%), vacío para usar la del proveedor', '18,5');
+  await press(root, 'Guardar comisión');
+  expect(mocked.setOfferCommission).toHaveBeenCalledWith('o-vip', 1850);
+  expect(hasText(root, 'Comisión actualizada.')).toBe(true);
 });

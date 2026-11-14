@@ -30,6 +30,9 @@ import {
   publishProviderInventoryRange,
   setSharedProviderActive,
   getSweepHealth,
+  listCommissionTerms,
+  setOfferCommission,
+  type CommissionTerm,
   type SweepHealth,
   recordSharedRefund,
   type SharedInventory,
@@ -58,6 +61,7 @@ import {
   parseBrlToCents,
   parseCount,
   parseIsoDate,
+  parsePercentToBps,
   type ParseResult,
 } from '../utils/portalInput';
 import {
@@ -68,7 +72,7 @@ import {
 } from '../utils/reservationTotals';
 import { colors, radius } from '../theme';
 
-const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
+const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
 const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
 const OUTCOMES: SimulatedOutcome[] = ['approved', 'rejected', 'pending'];
 const STATUSES: ReservationStatus[] = ['held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'];
@@ -104,6 +108,8 @@ export function ReservationPortal({
   const [reservations, setReservations] = useState<SharedReservation[]>([]);
   const [events, setEvents] = useState<SharedReservationEvent[]>([]);
   const [sweepHealth, setSweepHealth] = useState<SweepHealth | null>(null);
+  const [commissionTerms, setCommissionTerms] = useState<CommissionTerm[]>([]);
+  const [commissionEdit, setCommissionEdit] = useState<{ offerId: string; value: string } | null>(null);
   const [providerOffers, setProviderOffers] = useState<SharedOffer[]>([]);
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
   const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
@@ -173,8 +179,14 @@ export function ReservationPortal({
     setProviderInventory(ownedInventory);
     if (nextRole === 'admin') {
       // La salud del barrido es informativa: si la migración 202611140006 falta, no bloquea el panel.
-      const health = await getSweepHealth().catch(() => null);
-      if (mounted.current) setSweepHealth(health);
+      const [health, terms] = await Promise.all([
+        getSweepHealth().catch(() => null),
+        listCommissionTerms().catch(() => []),
+      ]);
+      if (mounted.current) {
+        setSweepHealth(health);
+        setCommissionTerms(terms);
+      }
     }
   }
 
@@ -340,6 +352,17 @@ export function ReservationPortal({
       // Con la lista ya actualizada, otro reembolso del mismo importe es una solicitud nueva.
       refundKeys.current.delete(keyId);
       return words.refundRecorded;
+    });
+  }
+
+  function saveOfferCommission() {
+    if (!commissionEdit) return;
+    run(async () => {
+      const rateBps = valueOf(parsePercentToBps(commissionEdit.value), words.commissionRateLabel);
+      await setOfferCommission(commissionEdit.offerId, rateBps);
+      setCommissionEdit(null);
+      if (role) await loadForRole(role);
+      return words.commissionSaved;
     });
   }
 
@@ -676,6 +699,48 @@ export function ReservationPortal({
                 ) : null}
                 {reservationList('admin_review', visibleReservations)}
               </View>
+              {commissionTerms.length ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{words.commissionTerms}</Text>
+                  <Text style={styles.helper}>{words.commissionTermsHint}</Text>
+                  {commissionTerms.map(term => (
+                    <View key={term.offer_id} style={styles.row}>
+                      <View style={styles.flex}>
+                        <Text style={styles.offerName}>{term.offer_title} · {term.provider_name}</Text>
+                        <Text style={styles.helper}>
+                          {words.categories[term.category]} · {words.commissionEffective.replace('{rate}', formatBps(term.effective_rate_bps))}
+                          {term.offer_rate_bps !== null ? ` · ${words.commissionOverride}` : ''}
+                        </Text>
+                        <Text style={term.outside_reference ? styles.warning : styles.helper}>
+                          {term.reference_min_bps === null
+                            ? words.commissionNoReference
+                            : words.commissionReference
+                                .replace('{range}', term.reference_max_bps !== null && term.reference_max_bps !== term.reference_min_bps
+                                  ? `${formatBps(term.reference_min_bps)}–${formatBps(term.reference_max_bps)}`
+                                  : formatBps(term.reference_min_bps))
+                                .replace('{status}', words.commissionStatus[term.reference_status])}
+                          {term.outside_reference ? ` · ${words.commissionOutside}` : ''}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => setCommissionEdit({ offerId: term.offer_id, value: term.offer_rate_bps === null ? '' : formatBps(term.offer_rate_bps).replace(' %', '') })}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${words.commissionEdit} ${term.offer_title}`}
+                      >
+                        <Text style={styles.link}>{words.commissionEdit}</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                  {commissionEdit ? (
+                    <View style={styles.quote}>
+                      <Field label={words.commissionRateLabel} value={commissionEdit.value} onChange={value => setCommissionEdit({ ...commissionEdit, value })} decimal />
+                      <ActionButton title={words.commissionSave} onPress={saveOfferCommission} disabled={busy} />
+                      <ActionButton title={words.refundDiscard} onPress={() => setCommissionEdit(null)} disabled={busy} secondary />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               {sweepHealth ? (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{words.sweepTitle}</Text>
@@ -778,6 +843,12 @@ function ReservationList({
       </View>
     );
   })}</>;
+}
+
+function formatBps(bps: number): string {
+  const whole = Math.floor(bps / 100);
+  const fraction = bps % 100;
+  return `${whole}${fraction ? `,${String(fraction).padStart(2, '0').replace(/0$/, '')}` : ''} %`;
 }
 
 function formatTime(iso: string): string {

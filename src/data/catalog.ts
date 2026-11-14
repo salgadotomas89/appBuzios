@@ -9,11 +9,12 @@ import type { CategoryStat, Offer, OfferCategory } from './homeMock';
 
 export const SHARED_OFFER_PREFIX = 'shared:';
 
-const CATEGORY_ICONS: Record<OfferCategory, IconName> = {
+export const CATEGORY_ICONS: Record<OfferCategory, IconName> = {
   pousadas: 'bed',
   barcos: 'boat',
   noche: 'music',
   buggy: 'buggy',
+  experiencias: 'star',
 };
 
 const PRICE_UNITS: Record<Offer['priceMode'], { es: string; pt: string }> = {
@@ -23,7 +24,7 @@ const PRICE_UNITS: Record<Offer['priceMode'], { es: string; pt: string }> = {
   group: { es: 'por grupo', pt: 'por grupo' },
 };
 
-const CATEGORY_ORDER: OfferCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
+const CATEGORY_ORDER: OfferCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
 
 export function sharedOfferToOffer(shared: SharedOffer, inventory: SharedInventory[] | null): Offer {
   const ownInventory = inventory?.filter(item => item.offer_id === shared.id) ?? null;

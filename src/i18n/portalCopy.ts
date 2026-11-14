@@ -12,7 +12,7 @@ export type ReservationStatus =
   | 'expired'
   | 'cancelled'
   | 'refunded';
-export type PortalCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy';
+export type PortalCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
 export type PortalPriceMode = 'night' | 'person' | 'ticket' | 'group';
 export type SimulatedOutcome = 'approved' | 'rejected' | 'pending';
 export type ReservationErrorCode = keyof (typeof portalCopy)['es']['errors'];
@@ -60,6 +60,7 @@ const es = {
     barcos: 'Barcos',
     noche: 'Noche',
     buggy: 'Buggy',
+    experiencias: 'Experiencias privadas y VIP',
   } satisfies Record<PortalCategory, string>,
   availability: 'Fechas con cupo publicado',
   noAvailability: 'El proveedor todavía no publicó cupo para esta oferta.',
@@ -110,6 +111,18 @@ const es = {
   resumeProvider: 'Reactivar',
   pauseHint: 'Pausar impide nuevas cotizaciones y publicaciones. Las reservas existentes no cambian.',
   providerUpdated: 'Proveedor actualizado.',
+  commissionTerms: 'Comisiones por producto',
+  commissionTermsHint: 'Referencias por categoría sin aprobar. Una excepción por producto sustituye la tasa del proveedor solo en cotizaciones nuevas.',
+  commissionEffective: 'efectiva {rate}',
+  commissionOverride: 'excepción del producto',
+  commissionReference: 'referencia {range} ({status})',
+  commissionNoReference: 'sin referencia definida',
+  commissionOutside: 'fuera de la referencia',
+  commissionStatus: { reference: 'propuesta', approved: 'aprobada' },
+  commissionEdit: 'Cambiar',
+  commissionRateLabel: 'Comisión del producto (%), vacío para usar la del proveedor',
+  commissionSave: 'Guardar comisión',
+  commissionSaved: 'Comisión actualizada.',
   sweepTitle: 'Barrido de retenciones vencidas',
   sweepNever: 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona. Las retenciones vencidas se liberan al listar o reservar.',
   sweepLast: 'Última ejecución correcta: {time}',
@@ -190,6 +203,8 @@ const es = {
     date_past: 'La fecha no puede ser anterior a hoy.',
     count_integer: 'indica un número entero.',
     count_range: 'debe estar entre {min} y {max}.',
+    percent_format: 'Porcentaje inválido. Usa por ejemplo 18 o 18,5.',
+    percent_range: 'El porcentaje no puede superar 100.',
   } satisfies Record<InputError['code'], string>,
   errors: {
     authentication_required: 'Tu sesión expiró. Inicia sesión de nuevo.',
@@ -223,6 +238,7 @@ const es = {
     invalid_inventory_range: 'El rango debe tener entre 1 y 90 noches.',
     invalid_provider_state: 'Estado de proveedor no válido.',
     provider_not_found: 'No encontramos el proveedor.',
+    invalid_commission_rate: 'La comisión debe estar entre 0 % y 100 %.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -257,7 +273,7 @@ const pt: PortalCopy = {
   checkOut: 'Check-out',
   quantity: { night: 'Quartos', person: 'Pessoas', ticket: 'Ingressos', group: 'Grupos' },
   priceUnit: { night: 'por noite', person: 'por pessoa', ticket: 'por ingresso', group: 'por grupo' },
-  categories: { pousadas: 'Pousadas', barcos: 'Barcos', noche: 'Noite', buggy: 'Buggy' },
+  categories: { pousadas: 'Pousadas', barcos: 'Barcos', noche: 'Noite', buggy: 'Buggy', experiencias: 'Experiências privadas e VIP' },
   availability: 'Datas com vagas publicadas',
   noAvailability: 'O fornecedor ainda não publicou vagas para esta oferta.',
   feeHint: 'Taxa de serviço do turista sobre o subtotal em BRL. A comissão do fornecedor é calculada à parte.',
@@ -303,6 +319,18 @@ const pt: PortalCopy = {
   resumeProvider: 'Reativar',
   pauseHint: 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.',
   providerUpdated: 'Fornecedor atualizado.',
+  commissionTerms: 'Comissões por produto',
+  commissionTermsHint: 'Referências por categoria não aprovadas. Uma exceção por produto substitui a taxa do fornecedor só em cotações novas.',
+  commissionEffective: 'efetiva {rate}',
+  commissionOverride: 'exceção do produto',
+  commissionReference: 'referência {range} ({status})',
+  commissionNoReference: 'sem referência definida',
+  commissionOutside: 'fora da referência',
+  commissionStatus: { reference: 'proposta', approved: 'aprovada' },
+  commissionEdit: 'Alterar',
+  commissionRateLabel: 'Comissão do produto (%), vazio para usar a do fornecedor',
+  commissionSave: 'Salvar comissão',
+  commissionSaved: 'Comissão atualizada.',
   sweepTitle: 'Varredura de retenções vencidas',
   sweepNever: 'Nenhuma execução correta registrada: o agendador não está instalado ou não funciona. As retenções vencidas são liberadas ao listar ou reservar.',
   sweepLast: 'Última execução correta: {time}',
@@ -383,6 +411,8 @@ const pt: PortalCopy = {
     date_past: 'A data não pode ser anterior a hoje.',
     count_integer: 'informe um número inteiro.',
     count_range: 'deve estar entre {min} e {max}.',
+    percent_format: 'Porcentagem inválida. Use por exemplo 18 ou 18,5.',
+    percent_range: 'A porcentagem não pode passar de 100.',
   },
   errors: {
     authentication_required: 'Sua sessão expirou. Entre novamente.',
@@ -416,6 +446,7 @@ const pt: PortalCopy = {
     invalid_inventory_range: 'O intervalo deve ter entre 1 e 90 noites.',
     invalid_provider_state: 'Estado de fornecedor inválido.',
     provider_not_found: 'Não encontramos o fornecedor.',
+    invalid_commission_rate: 'A comissão deve estar entre 0 % e 100 %.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };

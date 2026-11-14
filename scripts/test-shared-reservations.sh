@@ -834,6 +834,46 @@ sweep_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U po
 [ -z "$sweep_reconcile" ] || { echo "Inventory does not reconcile after sweeps: $sweep_reconcile" >&2; exit 1; }
 echo "PASS scheduled sweep skips overlaps, isolates failing offers, recovers and reports health to admins only"
 
+# Commercial terms: experiences category, admin-only product commission, frozen quotes, B2B privacy.
+vip_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'experiencias', 'Private lab tour', 50000, 'group', true)).id;")
+as_user "$provider_user" "select public.connectical_provider_publish_inventory('$vip_offer', current_date + 150, 2);" >/dev/null
+base_quote=$(as_user "$traveler_a" "select q.id || '|' || q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
+[ "${base_quote#*|}" = '1000|5000' ] || { echo "Experience quote did not use the provider rate: $base_quote" >&2; exit 1; }
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_set_offer_commission('$vip_offer', 0);" >/dev/null 2>&1; then
+    echo "Non-admin could set a product commission" >&2; exit 1
+  fi
+  if as_user "$actor" "select public.connectical_admin_set_provider_commission('$lab_provider', 0);" >/dev/null 2>&1; then
+    echo "Non-admin could set a provider commission" >&2; exit 1
+  fi
+  if as_user "$actor" "select commission_rate_bps from public.connectical_offers limit 1;" >/dev/null 2>&1; then
+    echo "Product commission readable by $actor" >&2; exit 1
+  fi
+done
+for bad in 10001 -1; do
+  if as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', $bad);" >/dev/null 2>&1; then
+    echo "Invalid commission rate accepted: $bad" >&2; exit 1
+  fi
+done
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', 2000);" >/dev/null
+vip_quote=$(as_user "$traveler_a" "select q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
+frozen=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select provider_commission_rate_bps from public.connectical_quotes where id = '${base_quote%%|*}';" | tail -1)
+[ "$vip_quote" = '2000|10000' ] && [ "$frozen" = '1000' ] || { echo "Product commission not applied or earlier quote changed: $vip_quote $frozen" >&2; exit 1; }
+provider_view_rate=$(as_user "$provider_user" "select coalesce((public.connectical_provider_upsert_offer('$vip_offer', 'experiencias', 'Private lab tour', 50000, 'group', true)).commission_rate_bps::text, 'hidden');")
+[ "$provider_view_rate" = 'hidden' ] || { echo "Provider received the product commission: $provider_view_rate" >&2; exit 1; }
+terms=$(as_user "$admin_user" "select t.effective_rate_bps || '|' || t.reference_status || '|' || t.outside_reference from public.connectical_admin_list_commission_terms() t where t.offer_id = '$vip_offer';")
+[ "$terms" = '2000|reference|false' ] || { echo "Commission terms mismatch: $terms" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', null);" >/dev/null
+outside=$(as_user "$admin_user" "select t.effective_rate_bps || '|' || t.outside_reference from public.connectical_admin_list_commission_terms() t where t.offer_id = '$vip_offer';")
+[ "$outside" = '1000|true' ] || { echo "Out-of-reference rate not flagged: $outside" >&2; exit 1; }
+provider_rate=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_commission('$lab_provider', 1200)).commission_rate_bps;")
+as_user "$admin_user" "select public.connectical_admin_set_provider_commission('$lab_provider', 1000);" >/dev/null
+[ "$provider_rate" = '1200' ] || { echo "Admin could not set the provider rate: $provider_rate" >&2; exit 1; }
+if as_user "$admin_user" "select count(*) from public.connectical_commission_references;" >/dev/null 2>&1; then
+  echo "Commission references readable through the API" >&2; exit 1
+fi
+echo "PASS experiences category, admin-only product commissions frozen per quote and hidden from providers"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

@@ -4,7 +4,7 @@ import { addDays } from '../utils/portalInput';
 // La app usa reservationService (PostgreSQL); si cambian las reglas SQL, este modelo debe seguirlas.
 
 export type UserRole = 'traveler' | 'provider' | 'admin';
-export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy';
+export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
 export type PriceMode = 'night' | 'person' | 'ticket' | 'group';
 export type ReservationStatus =
   | 'draft'

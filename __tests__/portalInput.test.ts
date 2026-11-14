@@ -7,6 +7,7 @@ import {
   parseBrlToCents,
   parseCount,
   parseIsoDate,
+  parsePercentToBps,
 } from '../src/utils/portalInput';
 
 describe('parseBrlToCents', () => {
@@ -113,4 +114,17 @@ const buziosDates: { instant: string; buziosDate: string }[] = require('./fixtur
 
 it.each(buziosDates)('uses the Búzios calendar day at $instant', ({ instant, buziosDate }) => {
   expect(buziosIsoDate(new Date(instant))).toBe(buziosDate);
+});
+
+it('converts commission percentages to integer basis points without floating point', () => {
+  expect(parsePercentToBps('18')).toEqual({ ok: true, value: 1800 });
+  expect(parsePercentToBps('18,5')).toEqual({ ok: true, value: 1850 });
+  expect(parsePercentToBps('18.25 %')).toEqual({ ok: true, value: 1825 });
+  expect(parsePercentToBps('0,07')).toEqual({ ok: true, value: 7 });
+  expect(parsePercentToBps('100')).toEqual({ ok: true, value: 10000 });
+  expect(parsePercentToBps('  ')).toEqual({ ok: true, value: null });
+  expect(parsePercentToBps('100,01')).toEqual({ ok: false, error: { code: 'percent_range' } });
+  for (const bad of ['18,555', '-1', 'abc', '1.000', '18,']) {
+    expect(parsePercentToBps(bad)).toEqual({ ok: false, error: { code: 'percent_format' } });
+  }
 });

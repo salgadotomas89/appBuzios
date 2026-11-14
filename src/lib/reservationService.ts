@@ -338,6 +338,35 @@ export async function setSharedProviderActive(providerId: string, active: boolea
   return callRpc('connectical_admin_set_provider_active', { p_provider_id: providerId, p_active: active });
 }
 
+export type CommissionTerm = {
+  offer_id: string;
+  offer_title: string;
+  category: PortalCategory;
+  provider_name: string;
+  provider_rate_bps: number;
+  offer_rate_bps: number | null;
+  effective_rate_bps: number;
+  reference_min_bps: number | null;
+  reference_max_bps: number | null;
+  reference_status: 'reference' | 'approved';
+  outside_reference: boolean;
+};
+
+// Solo administración (migración 202611140007). Las referencias por categoría no están aprobadas.
+export async function listCommissionTerms(): Promise<CommissionTerm[]> {
+  return callRpc('connectical_admin_list_commission_terms', {});
+}
+
+// rateBps nulo quita la excepción del producto y vuelve a la tasa del proveedor.
+export async function setOfferCommission(offerId: string, rateBps: number | null): Promise<number | null> {
+  const { data, error } = await getClient().database.rpc('connectical_admin_set_offer_commission', {
+    p_offer_id: offerId,
+    p_rate_bps: rateBps,
+  });
+  if (error) throw toReservationError('connectical_admin_set_offer_commission', error.message);
+  return data as number | null;
+}
+
 export type SweepHealth = {
   last_success_at: string | null;
   last_run_at: string | null;
