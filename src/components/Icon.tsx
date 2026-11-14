@@ -7,7 +7,8 @@ export type IconName =
   | 'music'
   | 'buggy'
   | 'bed'
-  | 'food';
+  | 'food'
+  | 'star';
 
 type Props = {
   name: IconName;
@@ -59,6 +60,9 @@ export function Icon({ name, size = 24, color = '#1E1E1E' }: Props) {
           <Path d="M3 7v12M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6" {...stroke} />
           <Circle cx="7" cy="11.5" r="1.8" {...stroke} />
         </>
+      )}
+      {name === 'star' && (
+        <Path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" {...stroke} />
       )}
       {name === 'food' && (
         <>

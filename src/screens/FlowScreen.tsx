@@ -15,7 +15,7 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
-import type { Catalog } from '../data/catalog';
+import { CATEGORY_ICONS, type Catalog } from '../data/catalog';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
@@ -644,7 +644,7 @@ function HomeView({
         </View>
       </View>
       <CatalogNotice source={catalog.source} words={words} />
-      <SectionHeading title={words.categories} trailing="04" />
+      <SectionHeading title={words.categories} trailing={String(catalog.categories.length).padStart(2, '0')} />
       <View style={styles.categoryGrid}>
         {catalog.categories.map(category => (
           <Pressable
@@ -653,7 +653,7 @@ function HomeView({
             onPress={() => onCategory(category.id)}
             style={styles.homeCategory}
           >
-            <Icon name={category.id === 'pousadas' ? 'bed' : category.id === 'barcos' ? 'boat' : category.id === 'noche' ? 'music' : 'buggy'} size={21} color={colors.sea} />
+            <Icon name={CATEGORY_ICONS[category.id]} size={21} color={colors.sea} />
             <Text style={styles.homeCategoryName}>{category.label[language]}</Text>
             <Text style={styles.categoryCount}>{category.count}{catalog.source === 'shared' ? '' : ' · demo'}</Text>
           </Pressable>

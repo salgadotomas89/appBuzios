@@ -9,6 +9,8 @@ import {
   createSharedQuote,
   createSharedReservationHold,
   recordSharedRefund,
+  RESERVATION_COLUMNS,
+  RESERVATION_EVENT_COLUMNS,
   ReservationError,
   toReservationError,
 } from '../src/lib/reservationService';
@@ -87,4 +89,29 @@ it('has Spanish and Portuguese text for every error code raised by the migration
   expect(raised.size).toBeGreaterThan(20);
   const missing = [...raised].filter(code => !(code in portalCopy.es.errors) || !(code in portalCopy.pt.errors));
   expect(missing).toEqual([]);
+});
+
+// Contrato con 202611140005_hide_internal_ids.sql: la app solo pide columnas concedidas al rol
+// authenticated y nunca `*`, que fallaría y además reintroduciría identificadores internos.
+function grantedColumns(table: string): string[] {
+  const sql = fs.readFileSync(`${__dirname}/../supabase/migrations/202611140005_hide_internal_ids.sql`, 'utf8');
+  const match = new RegExp(`grant select \\(([^)]*)\\)\\s+on public\\.${table} to authenticated`).exec(sql);
+  if (!match) throw new Error(`No column grant for ${table}`);
+  return match[1].split(',').map(column => column.trim());
+}
+
+function columns(list: string): string[] {
+  return list.split(',').map(column => column.trim());
+}
+
+it('reads only the reservation and event columns the database grants, never Auth ids', () => {
+  const reservationGrant = grantedColumns('connectical_reservations');
+  const eventGrant = grantedColumns('connectical_reservation_events');
+  expect(columns(RESERVATION_COLUMNS).filter(column => !reservationGrant.includes(column))).toEqual([]);
+  expect(columns(RESERVATION_EVENT_COLUMNS).filter(column => !eventGrant.includes(column))).toEqual([]);
+  for (const list of [RESERVATION_COLUMNS, RESERVATION_EVENT_COLUMNS, reservationGrant.join(','), eventGrant.join(',')]) {
+    expect(list).not.toMatch(/user_id|idempotency_key|\*/);
+  }
+  const service = fs.readFileSync(`${__dirname}/../src/lib/reservationService.ts`, 'utf8');
+  expect(service).not.toMatch(/\.select\(\s*['"`]\*['"`]\s*\)/);
 });

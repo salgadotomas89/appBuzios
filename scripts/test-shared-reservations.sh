@@ -594,6 +594,286 @@ if as_user "$traveler_a" "select public.connectical_simulate_payment('$late_id',
 fi
 echo "PASS simulated payment outcomes: pending, approve or reject after pending, ownership and expiry"
 
+# Operations tools: atomic range publishing and admin pause/resume of a provider.
+provider_user='20000000-0000-4000-8000-000000000001'
+lab_provider='40000000-0000-4000-8000-000000000001'
+range_offer='56000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$range_offer', '$lab_provider', 'pousadas', 'Range lab room', 25000, 'night', true);"
+range_count=$(as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 90, 5, 2);")
+range_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) || '|' || min(total_units) || '|' || max(total_units) from public.connectical_inventory where offer_id = '$range_offer';" | tail -1)
+[ "$range_count" = '5' ] && [ "$range_rows" = '5|2|2' ] || { echo "Range publish mismatch: $range_count $range_rows" >&2; exit 1; }
+# The payment-lab boat has one unit sold at current_date + 80: a range lowering it to 0 must fail whole.
+if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$pay_offer', current_date + 78, 5, 0);" >/dev/null 2>&1; then
+  echo "Range publish below committed units was not rejected" >&2; exit 1
+fi
+partial_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_inventory where offer_id = '$pay_offer' and service_date in (current_date + 78, current_date + 79);" | tail -1)
+[ "$partial_rows" = '0' ] || { echo "Failed range publish left $partial_rows partial rows" >&2; exit 1; }
+for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', current_date - 1, 3, 1"; do
+  if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range($bad);" >/dev/null 2>&1; then
+    echo "Invalid range publish was accepted: $bad" >&2; exit 1
+  fi
+done
+if as_user "$traveler_a" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 90, 2, 9);" >/dev/null 2>&1; then
+  echo "Traveler could publish a range" >&2; exit 1
+fi
+echo "PASS providers publish a date range atomically with the single-date rules"
+
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_set_provider_active('$lab_provider', false);" >/dev/null 2>&1; then
+    echo "Non-admin could pause a provider" >&2; exit 1
+  fi
+done
+paused=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_active('$lab_provider', false)).active;")
+[ "$paused" = 'f' ] || { echo "Admin pause failed: $paused" >&2; exit 1; }
+if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 100, 2, 1);" >/dev/null 2>&1; then
+  echo "Paused provider could publish a range" >&2; exit 1
+fi
+if as_user "$traveler_a" "select public.connectical_create_quote('$range_offer', current_date + 90, 1, 2, 600);" >/dev/null 2>&1; then
+  echo "Traveler could quote a paused provider" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_set_provider_active(gen_random_uuid(), true);" >/dev/null 2>&1; then
+  echo "Unknown provider was not rejected" >&2; exit 1
+fi
+resumed=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_active('$lab_provider', true)).active;")
+quote_ok=$(as_user "$traveler_a" "select (public.connectical_create_quote('$range_offer', current_date + 90, 1, 2, 600)).subtotal_cents;")
+[ "$resumed" = 't' ] && [ "$quote_ok" = '50000' ] || { echo "Admin resume mismatch: $resumed $quote_ok" >&2; exit 1; }
+echo "PASS only admins pause or resume providers, and pausing blocks quotes and publishing"
+
+# Internal Auth ids: travelers and providers never read who acted, nor the provider the traveler's id.
+leak_reservation=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select id from public.connectical_reservations where provider_id = '$lab_provider' and status = 'confirmed' order by created_at limit 1;" | tail -1)
+leak_traveler=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select traveler_user_id from public.connectical_reservations where id = '$leak_reservation';" | tail -1)
+for probe in \
+  "$leak_traveler|select actor_user_id from public.connectical_reservation_events limit 1" \
+  "$provider_user|select actor_user_id from public.connectical_reservation_events limit 1" \
+  "$provider_user|select traveler_user_id from public.connectical_reservations limit 1" \
+  "$provider_user|select * from public.connectical_reservations limit 1" \
+  "$leak_traveler|select actor_user_id from public.connectical_refunds limit 1" \
+  "$leak_traveler|select idempotency_key from public.connectical_refunds limit 1" \
+  "$admin_user|select actor_user_id from public.connectical_reservation_events limit 1"; do
+  probe_user=${probe%%|*}; probe_sql=${probe#*|}
+  if as_user "$probe_user" "$probe_sql" >/dev/null 2>&1; then
+    echo "Internal id readable by $probe_user: $probe_sql" >&2; exit 1
+  fi
+done
+owner_events=$(as_user "$leak_traveler" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+provider_events=$(as_user "$provider_user" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+stranger_events=$(as_user "$traveler_b" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+[ "$owner_events" -ge 2 ] && [ "$provider_events" = "$owner_events" ] && [ "$stranger_events" = '0' ] || {
+  echo "Event visibility changed: owner=$owner_events provider=$provider_events stranger=$stranger_events" >&2; exit 1; }
+audit_actors=$(as_user "$admin_user" "select count(*) filter (where actor_user_id is not null) from public.connectical_admin_list_reservation_events('$leak_reservation');")
+[ "$audit_actors" -ge 1 ] || { echo "Admin audit lost the actor ids: $audit_actors" >&2; exit 1; }
+for actor in "$leak_traveler" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_list_reservation_events(null, 10);" >/dev/null 2>&1; then
+    echo "Non-admin could read the audit with actor ids" >&2; exit 1
+  fi
+done
+cancel_as_provider=$(as_user "$provider_user" "select coalesce(r.traveler_user_id::text, 'hidden') || '|' || coalesce(r.idempotency_key::text, 'hidden') || '|' || r.status from public.connectical_cancel_reservation('$leak_reservation', 'provider_cancelled') r;")
+[ "$cancel_as_provider" = 'hidden|hidden|cancelled' ] || { echo "Provider cancel returned traveler ids: $cancel_as_provider" >&2; exit 1; }
+echo "PASS internal Auth ids stay out of traveler and provider reads; admins audit them through an RPC"
+
+# Edge cases: several rooms, cancel racing a new hold, rolled-back transactions, expiry mid-flow,
+# and a stay across New Year.
+racer() { printf '11000000-0000-4000-8000-00000000000%s' "$1"; }
+sync_hold() {
+  # $1 user, $2 quote, $3 start epoch, $4 output file
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$1',false);" \
+    -c "select pg_sleep(greatest(0, $3 - extract(epoch from clock_timestamp())));" \
+    -c "select (public.connectical_create_reservation_hold('$2', gen_random_uuid())).id;" >"$4" 2>&1 && echo ok >>"$4" || echo fail >>"$4"
+}
+multi_offer='57000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$multi_offer', '$lab_provider', 'pousadas', 'Three rooms lab', 18000, 'night', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$multi_offer', current_date + 120, 3);"
+multi_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '4 seconds');" | tail -1)
+multi_pids=''
+for g in 1 2 3 4; do
+  multi_quote=$(as_user "$(racer $g)" "select (public.connectical_create_quote('$multi_offer', current_date + 120, 2, 1, 600)).id;")
+  sync_hold "$(racer $g)" "$multi_quote" "$multi_start" "$workdir/multi.$g" &
+  multi_pids="$multi_pids $!"
+done
+for pid in $multi_pids; do wait "$pid"; done
+multi_wins=$(tail -qn1 "$workdir"/multi.* | grep -c '^ok$' || true)
+[ "$multi_wins" = '1' ] || { echo "Two-room requests on three rooms: expected 1 winner, got $multi_wins" >&2; exit 1; }
+single_quote=$(as_user "$(racer 5)" "select (public.connectical_create_quote('$multi_offer', current_date + 120, 1, 1, 600)).id;")
+as_user "$(racer 5)" "select (public.connectical_create_reservation_hold('$single_quote', gen_random_uuid())).id;" >/dev/null
+multi_counters=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || total_units from public.connectical_inventory where offer_id = '$multi_offer';" | tail -1)
+[ "$multi_counters" = '3/3' ] || { echo "Multi-room counters mismatch: $multi_counters" >&2; exit 1; }
+echo "PASS concurrent multi-room requests never exceed capacity and the remaining room is still bookable"
+
+edge_offer='58000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$edge_offer', '$lab_provider', 'pousadas', 'Edge lab room', 21000, 'night', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$edge_offer', current_date + 130, 1);"
+first_quote=$(as_user "$(racer 1)" "select (public.connectical_create_quote('$edge_offer', current_date + 130, 1, 1, 600)).id;")
+first_id=$(as_user "$(racer 1)" "select (public.connectical_create_reservation_hold('$first_quote', gen_random_uuid())).id;")
+as_user "$(racer 1)" "select public.connectical_simulate_payment('$first_id','approved','card','LAB-EDGE');" >/dev/null
+second_quote=$(as_user "$(racer 2)" "select (public.connectical_create_quote('$edge_offer', current_date + 130, 1, 1, 600)).id;")
+edge_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '3 seconds');" | tail -1)
+(
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$(racer 1)',false);" \
+    -c "select pg_sleep(greatest(0, $edge_start - extract(epoch from clock_timestamp())));" \
+    -c "select (public.connectical_cancel_reservation('$first_id', 'traveler_request')).status;" >"$workdir/edge.cancel" 2>&1
+) &
+cancel_pid=$!
+sync_hold "$(racer 2)" "$second_quote" "$edge_start" "$workdir/edge.hold" &
+hold_pid=$!
+wait "$cancel_pid"; wait "$hold_pid"
+grep -q '^cancelled$' "$workdir/edge.cancel" || { echo "Cancel racing a hold did not cancel" >&2; cat "$workdir/edge.cancel" >&2; exit 1; }
+edge_counters=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || sold_units from public.connectical_inventory where offer_id = '$edge_offer';" | tail -1)
+case "$(tail -n1 "$workdir/edge.hold")|$edge_counters" in
+  'ok|1/0'|'fail|0/0') ;;
+  *) echo "Cancel racing a hold left inconsistent state: $(tail -n1 "$workdir/edge.hold") $edge_counters" >&2; exit 1 ;;
+esac
+echo "PASS a cancellation racing a new hold leaves the room either freed or re-held, never both"
+
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$edge_offer', current_date + 131, 1);"
+rollback_quote=$(as_user "$(racer 3)" "select (public.connectical_create_quote('$edge_offer', current_date + 131, 1, 1, 600)).id;")
+docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$(racer 3)',false);" \
+  -c "begin; select (public.connectical_create_reservation_hold('$rollback_quote', gen_random_uuid())).id; rollback;" >/dev/null
+rollback_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select (select count(*) from public.connectical_reservations where quote_id = '$rollback_quote') || '|' ||
+         (select held_units from public.connectical_inventory where offer_id = '$edge_offer' and service_date = current_date + 131);" | tail -1)
+[ "$rollback_state" = '0|0' ] || { echo "Rolled-back hold left residue: $rollback_state" >&2; exit 1; }
+retry_after_rollback=$(as_user "$(racer 3)" "select (public.connectical_create_reservation_hold('$rollback_quote', gen_random_uuid())).status;")
+[ "$retry_after_rollback" = 'held' ] || { echo "Quote unusable after a rolled-back hold: $retry_after_rollback" >&2; exit 1; }
+echo "PASS an interrupted transaction leaves no reservation or held unit and the quote stays usable"
+
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_reservations set hold_expires_at = now() - interval '1 second' where quote_id = '$rollback_quote';"
+late_quote=$(as_user "$(racer 4)" "select (public.connectical_create_quote('$edge_offer', current_date + 131, 1, 1, 600)).id;")
+late_hold=$(as_user "$(racer 4)" "select (public.connectical_create_reservation_hold('$late_quote', gen_random_uuid())).status;")
+expired_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select status from public.connectical_reservations where quote_id = '$rollback_quote';" | tail -1)
+[ "$late_hold" = 'held' ] && [ "$expired_state" = 'expired' ] || { echo "Elapsed hold blocked the last room: $late_hold $expired_state" >&2; exit 1; }
+echo "PASS a hold that elapses mid-flow releases the last room to the next traveler"
+
+ny_offer='59000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$ny_offer', '$lab_provider', 'pousadas', 'New Year lab room', 50000, 'night', true);"
+ny_from="make_date(extract(year from current_date)::int + 1, 12, 30)"
+as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$ny_offer', $ny_from, 4, 1);" >/dev/null
+ny_quote=$(as_user "$(racer 5)" "select (public.connectical_create_quote('$ny_offer', $ny_from, 1, 4, 600)).id;")
+ny_hold=$(as_user "$(racer 5)" "select r.status || '|' || r.nights || '|' || r.amount_cents from public.connectical_create_reservation_hold('$ny_quote', gen_random_uuid()) r;")
+ny_dates=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select string_agg(to_char(service_date, 'MM-DD') || ':' || held_units, ',' order by service_date) from public.connectical_inventory where offer_id = '$ny_offer';" | tail -1)
+[ "$ny_hold" = 'held|4|212000' ] && [ "$ny_dates" = '12-30:1,12-31:1,01-01:1,01-02:1' ] || { echo "New Year stay mismatch: $ny_hold $ny_dates" >&2; exit 1; }
+ny_overlap=$(as_user "$(racer 6)" "select (public.connectical_create_quote('$ny_offer', $ny_from + 2, 1, 1, 600)).id;")
+if as_user "$(racer 6)" "select public.connectical_create_reservation_hold('$ny_overlap', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "New Year's Day was double booked" >&2; exit 1
+fi
+echo "PASS a four-night stay across New Year holds each night and blocks overlaps"
+
+reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$reconcile" ] || { echo "Inventory does not reconcile with reservations:" >&2; echo "$reconcile" >&2; exit 1; }
+echo "PASS every inventory counter reconciles with the reservations covering that night"
+
+# Scheduled sweep: overlap guard, per-offer failure isolation, recovery, health and privileges.
+sweep_offer_ok='5a000000-0000-4000-8000-000000000001'
+sweep_offer_bad='5a000000-0000-4000-8000-000000000002'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published) values
+  ('$sweep_offer_ok', '$lab_provider', 'barcos', 'Sweep ok boat', 9000, 'person', true),
+  ('$sweep_offer_bad', '$lab_provider', 'barcos', 'Sweep drift boat', 9000, 'person', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values
+  ('$sweep_offer_ok', current_date + 140, 2), ('$sweep_offer_bad', current_date + 140, 2);"
+for sweep_offer in "$sweep_offer_ok" "$sweep_offer_bad"; do
+  sweep_quote=$(as_user "$(racer 7)" "select (public.connectical_create_quote('$sweep_offer', current_date + 140, 1, 1, 600)).id;")
+  as_user "$(racer 7)" "select public.connectical_create_reservation_hold('$sweep_quote', gen_random_uuid());" >/dev/null
+done
+docker exec "$container" psql -q -U postgres -d postgres -c "
+update public.connectical_reservations set hold_expires_at = now() - interval '1 second'
+  where offer_id in ('$sweep_offer_ok', '$sweep_offer_bad');
+update public.connectical_inventory set held_units = 0 where offer_id = '$sweep_offer_bad';"
+for actor in "$traveler_a" "$admin_user"; do
+  if as_user "$actor" "select public.connectical_system_run_hold_sweep();" >/dev/null 2>&1; then
+    echo "App role could run the scheduled sweep" >&2; exit 1
+  fi
+done
+# Hold the sweep lock in one session while a second run starts: the second must skip.
+(
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "begin; select pg_advisory_xact_lock(hashtextextended('connectical-hold-sweep', 0)); select pg_sleep(3); commit;" >/dev/null
+) &
+lock_pid=$!
+sleep 1
+skipped=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select (public.connectical_system_run_hold_sweep()).status;" | tail -1)
+wait "$lock_pid"
+[ "$skipped" = 'skipped' ] || { echo "Overlapping sweep did not skip: $skipped" >&2; exit 1; }
+partial=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select r.status || '|' || (r.expired_count >= 1) || '|' || jsonb_array_length(r.failed_offers) || '|' || (r.failed_offers->0->>'offer_id')
+  from public.connectical_system_run_hold_sweep() r;" | tail -1)
+# Earlier checks left other elapsed holds behind, so only "at least one expired" is asserted here.
+[ "$partial" = "partial|true|1|$sweep_offer_bad" ] || { echo "Sweep did not isolate the failing offer: $partial" >&2; exit 1; }
+ok_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select (select status from public.connectical_reservations where offer_id = '$sweep_offer_ok') || '|' ||
+         (select held_units from public.connectical_inventory where offer_id = '$sweep_offer_ok');" | tail -1)
+[ "$ok_state" = 'expired|0' ] || { echo "Healthy offer was not swept: $ok_state" >&2; exit 1; }
+stale_health=$(as_user "$admin_user" "select h.last_status || '|' || h.overdue_holds || '|' || h.partial_runs_last_hour from public.connectical_admin_sweep_health() h;")
+[ "$stale_health" = 'partial|1|1' ] || { echo "Sweep health did not report the partial run: $stale_health" >&2; exit 1; }
+# Recovery: fix the drift and the next run succeeds and releases the remaining hold.
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_inventory set held_units = 1 where offer_id = '$sweep_offer_bad';"
+recovered=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select r.status || '|' || r.expired_count from public.connectical_system_run_hold_sweep() r;" | tail -1)
+healthy=$(as_user "$admin_user" "select h.last_status || '|' || h.overdue_holds || '|' || h.stale from public.connectical_admin_sweep_health() h;")
+[ "$recovered" = 'succeeded|1' ] && [ "$healthy" = 'succeeded|0|false' ] || { echo "Sweep recovery mismatch: $recovered $healthy" >&2; exit 1; }
+idle=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select r.status || '|' || r.expired_count from public.connectical_system_run_hold_sweep() r;" | tail -1)
+[ "$idle" = 'succeeded|0' ] || { echo "Idle sweep mismatch: $idle" >&2; exit 1; }
+if as_user "$traveler_a" "select public.connectical_admin_sweep_health();" >/dev/null 2>&1; then
+  echo "Traveler could read sweep health" >&2; exit 1
+fi
+if as_user "$admin_user" "select count(*) from public.connectical_sweep_runs;" >/dev/null 2>&1; then
+  echo "Sweep run log is readable through the API" >&2; exit 1
+fi
+sweep_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$sweep_reconcile" ] || { echo "Inventory does not reconcile after sweeps: $sweep_reconcile" >&2; exit 1; }
+echo "PASS scheduled sweep skips overlaps, isolates failing offers, recovers and reports health to admins only"
+
+# Commercial terms: experiences category, admin-only product commission, frozen quotes, B2B privacy.
+vip_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'experiencias', 'Private lab tour', 50000, 'group', true)).id;")
+as_user "$provider_user" "select public.connectical_provider_publish_inventory('$vip_offer', current_date + 150, 2);" >/dev/null
+base_quote=$(as_user "$traveler_a" "select q.id || '|' || q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
+[ "${base_quote#*|}" = '1000|5000' ] || { echo "Experience quote did not use the provider rate: $base_quote" >&2; exit 1; }
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_set_offer_commission('$vip_offer', 0);" >/dev/null 2>&1; then
+    echo "Non-admin could set a product commission" >&2; exit 1
+  fi
+  if as_user "$actor" "select public.connectical_admin_set_provider_commission('$lab_provider', 0);" >/dev/null 2>&1; then
+    echo "Non-admin could set a provider commission" >&2; exit 1
+  fi
+  if as_user "$actor" "select commission_rate_bps from public.connectical_offers limit 1;" >/dev/null 2>&1; then
+    echo "Product commission readable by $actor" >&2; exit 1
+  fi
+done
+for bad in 10001 -1; do
+  if as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', $bad);" >/dev/null 2>&1; then
+    echo "Invalid commission rate accepted: $bad" >&2; exit 1
+  fi
+done
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', 2000);" >/dev/null
+vip_quote=$(as_user "$traveler_a" "select q.provider_commission_rate_bps || '|' || q.provider_commission_cents from public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600) q;")
+frozen=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select provider_commission_rate_bps from public.connectical_quotes where id = '${base_quote%%|*}';" | tail -1)
+[ "$vip_quote" = '2000|10000' ] && [ "$frozen" = '1000' ] || { echo "Product commission not applied or earlier quote changed: $vip_quote $frozen" >&2; exit 1; }
+provider_view_rate=$(as_user "$provider_user" "select coalesce((public.connectical_provider_upsert_offer('$vip_offer', 'experiencias', 'Private lab tour', 50000, 'group', true)).commission_rate_bps::text, 'hidden');")
+[ "$provider_view_rate" = 'hidden' ] || { echo "Provider received the product commission: $provider_view_rate" >&2; exit 1; }
+terms=$(as_user "$admin_user" "select t.effective_rate_bps || '|' || t.reference_status || '|' || t.outside_reference from public.connectical_admin_list_commission_terms() t where t.offer_id = '$vip_offer';")
+[ "$terms" = '2000|reference|false' ] || { echo "Commission terms mismatch: $terms" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$vip_offer', null);" >/dev/null
+outside=$(as_user "$admin_user" "select t.effective_rate_bps || '|' || t.outside_reference from public.connectical_admin_list_commission_terms() t where t.offer_id = '$vip_offer';")
+[ "$outside" = '1000|true' ] || { echo "Out-of-reference rate not flagged: $outside" >&2; exit 1; }
+provider_rate=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_commission('$lab_provider', 1200)).commission_rate_bps;")
+as_user "$admin_user" "select public.connectical_admin_set_provider_commission('$lab_provider', 1000);" >/dev/null
+[ "$provider_rate" = '1200' ] || { echo "Admin could not set the provider rate: $provider_rate" >&2; exit 1; }
+if as_user "$admin_user" "select count(*) from public.connectical_commission_references;" >/dev/null 2>&1; then
+  echo "Commission references readable through the API" >&2; exit 1
+fi
+echo "PASS experiences category, admin-only product commissions frozen per quote and hidden from providers"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

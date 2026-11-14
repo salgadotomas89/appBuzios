@@ -14,6 +14,8 @@ jest.mock('../src/lib/reservationService', () => {
     'listSharedReservations', 'listSharedReservationEvents', 'signInSharedAccount',
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
+    'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
+    'listCommissionTerms', 'setOfferCommission',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -31,9 +33,9 @@ const boat: SharedOffer = {
 
 function reservation(overrides: Partial<SharedReservation>): SharedReservation {
   return {
-    id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1', traveler_user_id: 'u1',
+    id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1',
     service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', hold_expires_at: null,
-    payment_status: null, payment_method: null, amount_cents: 67840,
+    payment_status: 'approved', payment_method: 'card', amount_cents: 67840,
     service_fee_rate_bps: 600, service_fee_cents: 3840, provider_commission_rate_bps: 1000,
     provider_commission_cents: 6400, connectical_margin_cents: 3840, refund_cents: 0, quote_version: 'connectical-brl-v1',
     created_at: '2099-01-01T00:00:00Z', updated_at: '2099-01-01T00:00:00Z',
@@ -86,6 +88,8 @@ beforeEach(() => {
   mocked.listProviderOffers.mockResolvedValue([]);
   mocked.listProviderInventory.mockResolvedValue([]);
   mocked.listOfferAvailability.mockResolvedValue([]);
+  mocked.getSweepHealth.mockResolvedValue(null);
+  mocked.listCommissionTerms.mockResolvedValue([]);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -118,7 +122,7 @@ it('quotes a multi-night stay and books it with the quote id as idempotency key'
     provider_commission_rate_bps: 1000, provider_commission_cents: 6400,
     quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z',
   });
-  mocked.createSharedReservationHold.mockResolvedValue(reservation({ status: 'held' }));
+  mocked.createSharedReservationHold.mockResolvedValue(reservation({ status: 'held', payment_status: null }));
   mocked.simulateSharedPayment.mockResolvedValue(reservation({ status: 'confirmed' }));
   const root = await render();
 
@@ -218,7 +222,7 @@ it('shows collected, refunded and pending-review totals to admins', async () => 
     reservation({ id: 'r-paid', payment_status: 'approved' }),
     reservation({ id: 'r-partial', status: 'cancelled', payment_status: 'approved', refund_cents: 10000 }),
     reservation({ id: 'r-refunded', status: 'refunded', payment_status: 'approved', refund_cents: 67840 }),
-    reservation({ id: 'r-expired', status: 'expired' }),
+    reservation({ id: 'r-expired', status: 'expired', payment_status: null }),
   ]);
   const root = await render();
   expect(hasText(root, 'Cobrado (simulado): R$ 2.035,20 · Reembolsado (simulado): R$ 778,40')).toBe(true);
@@ -231,7 +235,7 @@ it('records an admin refund with a stable idempotency key across retries', async
   mocked.getSharedRole.mockResolvedValue('admin');
   mocked.listSharedReservations.mockResolvedValue([
     reservation({ id: 'r-paid', payment_status: 'approved' }),
-    reservation({ id: 'r-unpaid', status: 'held' }),
+    reservation({ id: 'r-unpaid', status: 'held', payment_status: null }),
   ]);
   mocked.recordSharedRefund
     .mockRejectedValueOnce(new Error('Network request failed'))
@@ -323,7 +327,7 @@ it('discards a quote that resolves after the traveler changed the inputs', async
 it('lets a traveler retry a pending simulated payment and labels admin events', async () => {
   mocked.getSharedRole.mockResolvedValue('traveler');
   mocked.listSharedReservations.mockResolvedValue([
-    reservation({ status: 'pending_payment', hold_expires_at: '2099-01-01T12:05:00Z' }),
+    reservation({ status: 'pending_payment', payment_status: 'pending', hold_expires_at: '2099-01-01T12:05:00Z' }),
   ]);
   mocked.simulateSharedPayment.mockResolvedValue(reservation({ status: 'confirmed' }));
   const root = await render();
@@ -335,10 +339,10 @@ it('lets a traveler retry a pending simulated payment and labels admin events', 
 
 it('sends the chosen simulated outcome and hides payment actions from admins', async () => {
   mocked.getSharedRole.mockResolvedValue('admin');
-  mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', hold_expires_at: '2099-01-01T12:05:00Z' })]);
+  mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', payment_status: null, hold_expires_at: '2099-01-01T12:05:00Z' })]);
   mocked.listSharedReservationEvents.mockResolvedValue([
-    { id: 1, reservation_id: 'r1', actor_user_id: null, event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
-    { id: 2, reservation_id: 'r1', actor_user_id: null, event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
+    { id: 1, reservation_id: 'r1', event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
+    { id: 2, reservation_id: 'r1', event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
   ]);
   const root = await render('pt');
   expect(hasText(root, 'Pagamento recusado (simulado)')).toBe(true);
@@ -395,4 +399,125 @@ it('reuses the refund key after a failed reload even if the form is reopened or 
   const [first, second] = mocked.recordSharedRefund.mock.calls.map(call => call[0]);
   expect(second.idempotencyKey).toBe(first.idempotencyKey);
   expect(hasText(root, 'Reembolso registrado.')).toBe(true);
+});
+
+it('publishes a range of nights in one call and keeps single dates on the single-date RPC', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockResolvedValue({ ...pousada, id: 'offer-new' });
+  mocked.publishProviderInventory.mockResolvedValue({} as never);
+  mocked.publishProviderInventoryRange.mockResolvedValue(7);
+  const root = await render();
+
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await type(root, 'Cupo disponible para esa fecha', '3');
+  await type(root, 'Noches a publicar desde esa fecha', '7');
+  await press(root, 'Publicar oferta y cupo');
+  expect(mocked.publishProviderInventoryRange).toHaveBeenCalledWith({
+    offerId: 'offer-new', fromDate: '2099-03-01', nights: 7, totalUnits: 3,
+  });
+  expect(mocked.publishProviderInventory).not.toHaveBeenCalled();
+
+  await type(root, 'Noches a publicar desde esa fecha', '91');
+  await press(root, 'Guardar cambios y cupo');
+  expect(hasText(root, 'Noches a publicar desde esa fecha: debe estar entre 1 y 90.')).toBe(true);
+  expect(mocked.publishProviderInventoryRange).toHaveBeenCalledTimes(1);
+
+  await type(root, 'Noches a publicar desde esa fecha', '1');
+  await press(root, 'Guardar cambios y cupo');
+  expect(mocked.publishProviderInventory).toHaveBeenCalledWith({ offerId: 'offer-new', serviceDate: '2099-03-01', totalUnits: 3 });
+});
+
+it('lets admins pause and resume providers', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedProviders
+    .mockResolvedValueOnce([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: true }])
+    .mockResolvedValue([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false }]);
+  mocked.setSharedProviderActive.mockResolvedValue({ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false });
+  const root = await render('pt');
+
+  expect(hasText(root, 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.')).toBe(true);
+  await press(root, 'Pausar');
+  expect(mocked.setSharedProviderActive).toHaveBeenCalledWith('p1', false);
+  expect(hasText(root, 'Fornecedor atualizado.')).toBe(true);
+  expect(hasText(root, '10% · pausado')).toBe(true);
+  expect(root.findAll(node => node.props.accessibilityLabel === 'Reativar Pousada Sol').length).toBeGreaterThan(0);
+});
+
+it('separates holds, confirmed gross and provider net and flags inconsistent states for admins', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid', payment_status: 'approved' }),
+    reservation({ id: 'r-held', status: 'held', payment_status: null, hold_expires_at: '2099-01-01T00:10:00Z' }),
+    reservation({ id: 'r-odd', status: 'confirmed', payment_status: 'pending' }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Retenidas 1 · confirmadas 2 · canceladas 0 · reembolsadas 0')).toBe(true);
+  expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
+  expect(hasText(root, 'Bruto de reservas confirmadas: R$ 1.356,80')).toBe(true);
+  // 2 × (678,40 − 38,40 − 64,00)
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 1.152,00')).toBe(true);
+  expect(hasText(root, 'Estados inconsistentes para revisar: 1')).toBe(true);
+  expect(hasText(root, 'confirmada sin pago aprobado · r-odd')).toBe(true);
+});
+
+it('tells admins when no scheduled sweep has run and when runs were partial', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.getSweepHealth.mockResolvedValueOnce({
+    last_success_at: null, last_run_at: null, last_status: null, runs_last_hour: 0,
+    partial_runs_last_hour: 0, overdue_holds: 3, stale: true,
+  });
+  let root = await render();
+  expect(hasText(root, 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona.')).toBe(true);
+  expect(hasText(root, 'Retenciones vencidas esperando barrido: 3')).toBe(true);
+
+  mocked.getSweepHealth.mockResolvedValueOnce({
+    last_success_at: '2099-01-01T12:00:00Z', last_run_at: '2099-01-01T12:20:00Z', last_status: 'partial',
+    runs_last_hour: 4, partial_runs_last_hour: 2, overdue_holds: 0, stale: true,
+  });
+  root = await render('pt');
+  expect(hasText(root, 'Atenção: mais de 15 minutos sem uma execução correta.')).toBe(true);
+  expect(hasText(root, 'Execuções parciais na última hora: 2')).toBe(true);
+});
+
+it('keeps the admin panel working when sweep health is unavailable', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.getSweepHealth.mockRejectedValue(new Error('function does not exist'));
+  const root = await render();
+  expect(hasText(root, 'Barrido de retenciones vencidas')).toBe(false);
+  expect(hasText(root, 'function does not exist')).toBe(false);
+  expect(hasText(root, 'Reservas · 0')).toBe(true);
+});
+
+it('shows effective commissions against unapproved references and sets a product exception', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listCommissionTerms.mockResolvedValue([
+    {
+      offer_id: 'o-vip', offer_title: 'Tour privado', category: 'experiencias', provider_name: 'Lab',
+      provider_rate_bps: 1000, offer_rate_bps: null, effective_rate_bps: 1000,
+      reference_min_bps: 1800, reference_max_bps: 2000, reference_status: 'reference', outside_reference: true,
+    },
+    {
+      offer_id: 'o-buggy', offer_title: 'Buggy', category: 'buggy', provider_name: 'Lab',
+      provider_rate_bps: 1000, offer_rate_bps: 1250, effective_rate_bps: 1250,
+      reference_min_bps: null, reference_max_bps: null, reference_status: 'reference', outside_reference: false,
+    },
+  ]);
+  mocked.setOfferCommission.mockResolvedValue(1850);
+  const root = await render();
+
+  expect(hasText(root, 'Experiencias privadas y VIP · efectiva 10 %')).toBe(true);
+  expect(hasText(root, 'referencia 18 %–20 % (propuesta) · fuera de la referencia')).toBe(true);
+  expect(hasText(root, 'Buggy · efectiva 12,5 % · excepción del producto')).toBe(true);
+  expect(hasText(root, 'sin referencia definida')).toBe(true);
+
+  await press(root, 'Cambiar');
+  await type(root, 'Comisión del producto (%), vacío para usar la del proveedor', '18,555');
+  await press(root, 'Guardar comisión');
+  expect(hasText(root, 'Porcentaje inválido. Usa por ejemplo 18 o 18,5.')).toBe(true);
+  expect(mocked.setOfferCommission).not.toHaveBeenCalled();
+
+  await type(root, 'Comisión del producto (%), vacío para usar la del proveedor', '18,5');
+  await press(root, 'Guardar comisión');
+  expect(mocked.setOfferCommission).toHaveBeenCalledWith('o-vip', 1850);
+  expect(hasText(root, 'Comisión actualizada.')).toBe(true);
 });

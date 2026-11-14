@@ -27,6 +27,13 @@ import {
   simulateSharedPayment,
   upsertProviderOffer,
   publishProviderInventory,
+  publishProviderInventoryRange,
+  setSharedProviderActive,
+  getSweepHealth,
+  listCommissionTerms,
+  setOfferCommission,
+  type CommissionTerm,
+  type SweepHealth,
   recordSharedRefund,
   type SharedInventory,
   type SharedOffer,
@@ -54,12 +61,18 @@ import {
   parseBrlToCents,
   parseCount,
   parseIsoDate,
+  parsePercentToBps,
   type ParseResult,
 } from '../utils/portalInput';
-import { newIdempotencyKey, refundAllowance, summarizeReservations } from '../utils/reservationTotals';
+import {
+  findInconsistencies,
+  newIdempotencyKey,
+  refundAllowance,
+  summarizeReservations,
+} from '../utils/reservationTotals';
 import { colors, radius } from '../theme';
 
-const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
+const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
 const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
 const OUTCOMES: SimulatedOutcome[] = ['approved', 'rejected', 'pending'];
 const STATUSES: ReservationStatus[] = ['held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'];
@@ -69,6 +82,8 @@ const MAX_UNITS = 500;
 const MAX_TITLE_LENGTH = 120;
 // Igual que el límite de connectical_admin_record_refund.
 const MAX_REFUND_REASON_LENGTH = 500;
+// Igual que el límite de connectical_provider_publish_inventory_range.
+const MAX_PUBLISH_NIGHTS = 90;
 const DEFAULT_OFFER = { title: 'Pousada laboratorio', price: '320,00' };
 
 type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
@@ -92,6 +107,9 @@ export function ReservationPortal({
   const [providers, setProviders] = useState<SharedProvider[]>([]);
   const [reservations, setReservations] = useState<SharedReservation[]>([]);
   const [events, setEvents] = useState<SharedReservationEvent[]>([]);
+  const [sweepHealth, setSweepHealth] = useState<SweepHealth | null>(null);
+  const [commissionTerms, setCommissionTerms] = useState<CommissionTerm[]>([]);
+  const [commissionEdit, setCommissionEdit] = useState<{ offerId: string; value: string } | null>(null);
   const [providerOffers, setProviderOffers] = useState<SharedOffer[]>([]);
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
   const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
@@ -109,6 +127,7 @@ export function ReservationPortal({
   const [offerCategory, setOfferCategory] = useState<PortalCategory>('pousadas');
   const [offerPriceMode, setOfferPriceMode] = useState<PortalPriceMode>('night');
   const [stock, setStock] = useState('1');
+  const [publishNights, setPublishNights] = useState('1');
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
   const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
@@ -158,6 +177,17 @@ export function ReservationPortal({
     setEvents(visibleEvents);
     setProviderOffers(ownedOffers);
     setProviderInventory(ownedInventory);
+    if (nextRole === 'admin') {
+      // La salud del barrido es informativa: si la migración 202611140006 falta, no bloquea el panel.
+      const [health, terms] = await Promise.all([
+        getSweepHealth().catch(() => null),
+        listCommissionTerms().catch(() => []),
+      ]);
+      if (mounted.current) {
+        setSweepHealth(health);
+        setCommissionTerms(terms);
+      }
+    }
   }
 
   useEffect(() => {
@@ -325,6 +355,25 @@ export function ReservationPortal({
     });
   }
 
+  function saveOfferCommission() {
+    if (!commissionEdit) return;
+    run(async () => {
+      const rateBps = valueOf(parsePercentToBps(commissionEdit.value), words.commissionRateLabel);
+      await setOfferCommission(commissionEdit.offerId, rateBps);
+      setCommissionEdit(null);
+      if (role) await loadForRole(role);
+      return words.commissionSaved;
+    });
+  }
+
+  function toggleProvider(provider: SharedProvider) {
+    run(async () => {
+      await setSharedProviderActive(provider.id, !provider.active);
+      if (role) await loadForRole(role);
+      return words.providerUpdated;
+    });
+  }
+
   function editProviderOffer(offer: SharedOffer) {
     setSelectedProviderOfferId(offer.id);
     setOfferTitle(offer.title);
@@ -356,7 +405,12 @@ export function ReservationPortal({
         priceMode: offerPriceMode,
         published: true,
       });
-      await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
+      const nightsToPublish = valueOf(parseCount(publishNights, { max: MAX_PUBLISH_NIGHTS }), words.publishNights);
+      if (nightsToPublish === 1) {
+        await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
+      } else {
+        await publishProviderInventoryRange({ offerId: offer.id, fromDate: serviceDate, nights: nightsToPublish, totalUnits });
+      }
       setSelectedProviderOfferId(offer.id);
       if (role) await loadForRole(role);
       return words.offerSaved;
@@ -368,6 +422,7 @@ export function ReservationPortal({
     ? reservations.filter(reservation => reservation.status === statusFilter)
     : reservations;
   const totals = summarizeReservations(visibleReservations);
+  const inconsistencies = role === 'admin' ? findInconsistencies(reservations) : [];
   const perNight = selectedOffer?.price_mode === 'night';
   const parsedNights = Number(nights);
   const checkOut =
@@ -555,6 +610,8 @@ export function ReservationPortal({
               <Field label={words.priceBrl} value={offerPrice} onChange={setOfferPrice} decimal />
               <Field label={words.date} value={date} onChange={setDate} />
               <Field label={words.units} value={stock} onChange={setStock} numeric />
+              <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
+              <Text style={styles.helper}>{words.publishNightsHint}</Text>
               <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
               <Text style={styles.sectionTitle}>{words.myInventory}</Text>
               {providerInventory.length ? providerInventory.map(item => (
@@ -576,17 +633,46 @@ export function ReservationPortal({
                 <Text style={styles.sectionTitle}>{words.providers} · {providers.length}</Text>
                 {providers.map(provider => (
                   <View key={provider.id} style={styles.row}>
-                    <Text style={styles.offerName}>{provider.name}</Text>
-                    <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
+                    <View style={styles.flex}>
+                      <Text style={styles.offerName}>{provider.name}</Text>
+                      <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => toggleProvider(provider)}
+                      disabled={busy}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${provider.active ? words.pauseProvider : words.resumeProvider} ${provider.name}`}
+                    >
+                      <Text style={styles.link}>{provider.active ? words.pauseProvider : words.resumeProvider}</Text>
+                    </Pressable>
                   </View>
                 ))}
+                {providers.length ? <Text style={styles.helper}>{words.pauseHint}</Text> : null}
               </View>
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>
+                <Text style={styles.helper}>
+                  {words.statusCounts
+                    .replace('{held}', String(totals.heldCount))
+                    .replace('{confirmed}', String(totals.confirmedCount))
+                    .replace('{cancelled}', String(totals.cancelledCount))
+                    .replace('{refunded}', String(totals.refundedCount))}
+                </Text>
+                <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
+                <Text style={styles.helper}>{words.confirmedGross}: {brlFromCents(totals.confirmedGrossCents)}</Text>
+                <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
                 <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
                 <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(totals.connecticalFeeCents)}</Text>
                 <Text style={styles.helper}>{words.collectedTotal}: {brlFromCents(totals.collectedCents)} · {words.refundedTotal}: {brlFromCents(totals.refundedCents)}</Text>
                 <Text style={styles.helper}>{words.netCollected}: {brlFromCents(totals.netCollectedCents)}</Text>
+                {inconsistencies.length ? (
+                  <View style={styles.warning}>
+                    <Text style={styles.offerName}>{words.inconsistencyTitle.replace('{count}', String(inconsistencies.length))}</Text>
+                    {inconsistencies.map(item => (
+                      <Text key={`${item.id}:${item.code}`} selectable style={styles.helper}>{words.inconsistencies[item.code]} · {item.id}</Text>
+                    ))}
+                  </View>
+                ) : null}
                 {totals.pendingRefundReviewCount ? (
                   <Text style={styles.warning}>{words.pendingRefundReview.replace('{count}', String(totals.pendingRefundReviewCount))}</Text>
                 ) : null}
@@ -613,6 +699,63 @@ export function ReservationPortal({
                 ) : null}
                 {reservationList('admin_review', visibleReservations)}
               </View>
+              {commissionTerms.length ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{words.commissionTerms}</Text>
+                  <Text style={styles.helper}>{words.commissionTermsHint}</Text>
+                  {commissionTerms.map(term => (
+                    <View key={term.offer_id} style={styles.row}>
+                      <View style={styles.flex}>
+                        <Text style={styles.offerName}>{term.offer_title} · {term.provider_name}</Text>
+                        <Text style={styles.helper}>
+                          {words.categories[term.category]} · {words.commissionEffective.replace('{rate}', formatBps(term.effective_rate_bps))}
+                          {term.offer_rate_bps !== null ? ` · ${words.commissionOverride}` : ''}
+                        </Text>
+                        <Text style={term.outside_reference ? styles.warning : styles.helper}>
+                          {term.reference_min_bps === null
+                            ? words.commissionNoReference
+                            : words.commissionReference
+                                .replace('{range}', term.reference_max_bps !== null && term.reference_max_bps !== term.reference_min_bps
+                                  ? `${formatBps(term.reference_min_bps)}–${formatBps(term.reference_max_bps)}`
+                                  : formatBps(term.reference_min_bps))
+                                .replace('{status}', words.commissionStatus[term.reference_status])}
+                          {term.outside_reference ? ` · ${words.commissionOutside}` : ''}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => setCommissionEdit({ offerId: term.offer_id, value: term.offer_rate_bps === null ? '' : formatBps(term.offer_rate_bps).replace(' %', '') })}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${words.commissionEdit} ${term.offer_title}`}
+                      >
+                        <Text style={styles.link}>{words.commissionEdit}</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                  {commissionEdit ? (
+                    <View style={styles.quote}>
+                      <Field label={words.commissionRateLabel} value={commissionEdit.value} onChange={value => setCommissionEdit({ ...commissionEdit, value })} decimal />
+                      <ActionButton title={words.commissionSave} onPress={saveOfferCommission} disabled={busy} />
+                      <ActionButton title={words.refundDiscard} onPress={() => setCommissionEdit(null)} disabled={busy} secondary />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+              {sweepHealth ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{words.sweepTitle}</Text>
+                  <Text style={sweepHealth.last_success_at ? styles.helper : styles.warning}>
+                    {sweepHealth.last_success_at
+                      ? words.sweepLast.replace('{time}', formatTime(sweepHealth.last_success_at))
+                      : words.sweepNever}
+                  </Text>
+                  {sweepHealth.stale && sweepHealth.last_success_at ? <Text style={styles.warning}>{words.sweepStale}</Text> : null}
+                  {sweepHealth.partial_runs_last_hour ? (
+                    <Text style={styles.warning}>{words.sweepPartial.replace('{count}', String(sweepHealth.partial_runs_last_hour))}</Text>
+                  ) : null}
+                  <Text style={styles.helper}>{words.sweepOverdue.replace('{count}', String(sweepHealth.overdue_holds))}</Text>
+                </View>
+              ) : null}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.history} · {events.length}</Text>
                 {events.map(event => (
@@ -700,6 +843,12 @@ function ReservationList({
       </View>
     );
   })}</>;
+}
+
+function formatBps(bps: number): string {
+  const whole = Math.floor(bps / 100);
+  const fraction = bps % 100;
+  return `${whole}${fraction ? `,${String(fraction).padStart(2, '0').replace(/0$/, '')}` : ''} %`;
 }
 
 function formatTime(iso: string): string {

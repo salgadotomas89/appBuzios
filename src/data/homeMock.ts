@@ -9,7 +9,7 @@ export type CategoryStat = {
   highlight?: boolean;
 };
 
-export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy';
+export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
 export type Language = 'es' | 'pt';
 
 export type Offer = {
@@ -48,6 +48,8 @@ export const homeMock = {
     { id: 'barcos', label: { es: 'Barcos', pt: 'Barcos' }, count: 1 },
     { id: 'noche', label: { es: 'Noche', pt: 'Noite' }, count: 1 },
     { id: 'buggy', label: { es: 'Buggy', pt: 'Buggy' }, count: 2 },
+    // Sin ofertas de ejemplo: no se inventan experiencias VIP para la demo.
+    { id: 'experiencias', label: { es: 'Experiencias VIP', pt: 'Experiências VIP' }, count: 0 },
   ] as CategoryStat[],
   offers: [
     {

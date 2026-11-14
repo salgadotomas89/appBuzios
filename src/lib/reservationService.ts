@@ -13,9 +13,8 @@ export type SharedReservation = {
   quote_id: string;
   offer_id: string;
   provider_id: string;
-  traveler_user_id: string;
   service_date: string;
-  // Ausente hasta aplicar la migración 202611140001; equivale a 1.
+  // Columna de la migración 202611140001; la app requiere todas las migraciones aplicadas.
   nights?: number;
   quantity: number;
   status: ReservationStatus;
@@ -53,7 +52,6 @@ export type SharedQuote = {
 export type SharedReservationEvent = {
   id: number;
   reservation_id: string;
-  actor_user_id: string | null;
   event_type: string;
   details: Record<string, unknown>;
   created_at: string;
@@ -227,14 +225,23 @@ export async function signOutSharedAccount(): Promise<void> {
   if (error) throw new Error(`No se pudo cerrar sesión: ${error.message}`);
 }
 
+// Columnas que la migración 202611140005 permite leer al rol authenticated. `select('*')` fallaría:
+// los identificadores de Auth (turista, autor de cada evento) no salen de la base de datos.
+export const RESERVATION_COLUMNS =
+  'id, quote_id, offer_id, provider_id, service_date, nights, quantity, status, hold_expires_at, ' +
+  'amount_cents, service_fee_rate_bps, service_fee_cents, provider_commission_rate_bps, ' +
+  'provider_commission_cents, connectical_margin_cents, quote_version, payment_status, payment_method, ' +
+  'payment_reference, refund_cents, created_at, updated_at';
+export const RESERVATION_EVENT_COLUMNS = 'id, reservation_id, event_type, details, created_at';
+
 export async function listSharedReservations(): Promise<SharedReservation[]> {
   await callRpc<number>('connectical_expire_holds', {});
   const { data, error } = await getClient().database
     .from('connectical_reservations')
-    .select('*')
+    .select(RESERVATION_COLUMNS)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudieron leer reservas: ${error.message}`);
-  return (data ?? []) as SharedReservation[];
+  return (data ?? []) as unknown as SharedReservation[];
 }
 
 export async function listSharedProviders(): Promise<SharedProvider[]> {
@@ -248,10 +255,10 @@ export async function listSharedProviders(): Promise<SharedProvider[]> {
 export async function listSharedReservationEvents(): Promise<SharedReservationEvent[]> {
   const { data, error } = await getClient().database
     .from('connectical_reservation_events')
-    .select('*')
+    .select(RESERVATION_EVENT_COLUMNS)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudo leer el historial: ${error.message}`);
-  return (data ?? []) as SharedReservationEvent[];
+  return (data ?? []) as unknown as SharedReservationEvent[];
 }
 
 export async function listSharedOffers(): Promise<SharedOffer[]> {
@@ -309,6 +316,71 @@ export async function publishProviderInventory(input: {
     p_service_date: input.serviceDate,
     p_total_units: input.totalUnits,
   });
+}
+
+// Mismo cupo para `nights` noches desde `fromDate`, en una sola transacción (máximo 90).
+export async function publishProviderInventoryRange(input: {
+  offerId: string;
+  fromDate: string;
+  nights: number;
+  totalUnits: number;
+}): Promise<number> {
+  return callRpc('connectical_provider_publish_inventory_range', {
+    p_offer_id: input.offerId,
+    p_from_date: input.fromDate,
+    p_nights: input.nights,
+    p_total_units: input.totalUnits,
+  });
+}
+
+// Solo administración. Pausar bloquea cotizaciones y publicaciones nuevas; no toca reservas existentes.
+export async function setSharedProviderActive(providerId: string, active: boolean): Promise<SharedProvider> {
+  return callRpc('connectical_admin_set_provider_active', { p_provider_id: providerId, p_active: active });
+}
+
+export type CommissionTerm = {
+  offer_id: string;
+  offer_title: string;
+  category: PortalCategory;
+  provider_name: string;
+  provider_rate_bps: number;
+  offer_rate_bps: number | null;
+  effective_rate_bps: number;
+  reference_min_bps: number | null;
+  reference_max_bps: number | null;
+  reference_status: 'reference' | 'approved';
+  outside_reference: boolean;
+};
+
+// Solo administración (migración 202611140007). Las referencias por categoría no están aprobadas.
+export async function listCommissionTerms(): Promise<CommissionTerm[]> {
+  return callRpc('connectical_admin_list_commission_terms', {});
+}
+
+// rateBps nulo quita la excepción del producto y vuelve a la tasa del proveedor.
+export async function setOfferCommission(offerId: string, rateBps: number | null): Promise<number | null> {
+  const { data, error } = await getClient().database.rpc('connectical_admin_set_offer_commission', {
+    p_offer_id: offerId,
+    p_rate_bps: rateBps,
+  });
+  if (error) throw toReservationError('connectical_admin_set_offer_commission', error.message);
+  return data as number | null;
+}
+
+export type SweepHealth = {
+  last_success_at: string | null;
+  last_run_at: string | null;
+  last_status: 'running' | 'succeeded' | 'partial' | 'skipped' | null;
+  runs_last_hour: number;
+  partial_runs_last_hour: number;
+  overdue_holds: number;
+  stale: boolean;
+};
+
+// Solo administración: estado del barrido programado de retenciones (migración 202611140006).
+export async function getSweepHealth(): Promise<SweepHealth | null> {
+  const rows = await callRpc<SweepHealth[]>('connectical_admin_sweep_health', {});
+  return rows[0] ?? null;
 }
 
 // Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.

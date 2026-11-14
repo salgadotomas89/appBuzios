@@ -11,7 +11,9 @@ export type InputErrorCode =
   | 'date_invalid'
   | 'date_past'
   | 'count_integer'
-  | 'count_range';
+  | 'count_range'
+  | 'percent_format'
+  | 'percent_range';
 
 export type InputError = { code: InputErrorCode; min?: number; max?: number };
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: InputError };
@@ -80,6 +82,18 @@ export function parseCount(
   const count = Number(value);
   if (count < min || count > max) return fail('count_range', { min, max });
   return { ok: true, value: count };
+}
+
+// "18", "18,5" o "18.25" → puntos básicos enteros (1800, 1850, 1825), sin pasar por coma flotante.
+// Vacío devuelve null: la pantalla lo usa para "sin excepción".
+export function parsePercentToBps(input: string): ParseResult<number | null> {
+  const value = input.trim().replace('%', '').trim();
+  if (!value) return { ok: true, value: null };
+  const match = /^(\d{1,3})(?:[.,](\d{1,2}))?$/.exec(value);
+  if (!match) return fail('percent_format');
+  const bps = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
+  if (bps > 10_000) return fail('percent_range');
+  return { ok: true, value: bps };
 }
 
 export function addDays(isoDate: string, days: number): string {

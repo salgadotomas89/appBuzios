@@ -22,20 +22,25 @@ with checks(name, ok) as (
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_adjust_stay_inventory', 'connectical_expire_offer_holds', 'connectical_lock_offer',
-          'connectical_create_traveler_profile', 'connectical_system_expire_holds'))),
+          'connectical_create_traveler_profile', 'connectical_system_expire_holds',
+          'connectical_system_run_hold_sweep'))),
     ('app RPCs executable by authenticated',
-      (select count(*) = 9 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
+      (select count(*) = 15 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_quote', 'connectical_create_reservation_hold', 'connectical_simulate_payment',
           'connectical_cancel_reservation', 'connectical_expire_holds', 'connectical_provider_upsert_offer',
-          'connectical_provider_publish_inventory', 'connectical_admin_record_refund', 'connectical_today'))),
-    ('anon cannot run reservation or refund RPCs',
+          'connectical_provider_publish_inventory', 'connectical_admin_record_refund', 'connectical_today',
+          'connectical_provider_publish_inventory_range', 'connectical_admin_set_provider_active',
+          'connectical_admin_sweep_health', 'connectical_admin_set_provider_commission',
+          'connectical_admin_set_offer_commission', 'connectical_admin_list_commission_terms'))),
+    ('anon cannot run reservation, refund or operations RPCs',
       (select bool_and(not has_function_privilege('anon', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_reservation_hold', 'connectical_simulate_payment', 'connectical_cancel_reservation',
-          'connectical_admin_record_refund'))),
+          'connectical_admin_record_refund', 'connectical_provider_publish_inventory_range',
+          'connectical_admin_set_provider_active'))),
     ('SECURITY DEFINER functions pin search_path',
       (select bool_and(p.proconfig is not null and exists (
           select 1 from unnest(p.proconfig) cfg where cfg like 'search_path=%'))
@@ -55,8 +60,27 @@ with checks(name, ok) as (
         where n.nspname = 'public' and c.relkind = 'r'
           and c.relname in ('connectical_reservations', 'connectical_inventory', 'connectical_quotes',
                             'connectical_reservation_events', 'connectical_refunds'))),
-    ('no scheduler assumed: system sweep exists but is private',
-      (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'public' and p.proname = 'connectical_system_expire_holds'))
+    -- Identificadores de Auth: solo se pueden leer los que RLS limita a su dueño (perfil propio,
+    -- proveedor propio, cotización propia). Una columna *_user_id nueva falla aquí hasta revisarla.
+    ('app roles cannot read internal Auth ids of other people',
+      (select coalesce(bool_and(not has_column_privilege(r.role, format('public.%I', c.table_name)::regclass,
+                                                         c.column_name, 'SELECT')), true)
+        from information_schema.columns c
+        cross join (values ('anon'), ('authenticated')) as r(role)
+        where c.table_schema = 'public' and c.table_name like 'connectical\_%'
+          and (c.column_name like '%user_id' or c.column_name = 'idempotency_key')
+          and (c.table_name, c.column_name) not in (
+            ('connectical_profiles', 'user_id'),
+            ('connectical_providers', 'owner_user_id'),
+            ('connectical_quotes', 'traveler_user_id')))),
+    ('product commission and references are not readable by app roles',
+      (select not has_column_privilege('anon', 'public.connectical_offers', 'commission_rate_bps', 'SELECT')
+          and not has_column_privilege('authenticated', 'public.connectical_offers', 'commission_rate_bps', 'SELECT')
+          and not has_table_privilege('authenticated', 'public.connectical_commission_references', 'SELECT'))),
+    ('commission references seeded as proposals, none approved',
+      (select count(*) = 5 and bool_and(status = 'reference') from public.connectical_commission_references)),
+    ('no scheduler assumed: system sweeps exist but are private',
+      (select count(*) = 2 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname in ('connectical_system_expire_holds', 'connectical_system_run_hold_sweep')))
 )
 select name, coalesce(ok, false) as ok from checks order by name;

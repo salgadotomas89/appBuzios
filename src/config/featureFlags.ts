@@ -6,3 +6,8 @@
 // Es una constante y no una variable de .env porque react-native-dotenv está configurado con
 // allowUndefined: false y una variable nueva rompería cualquier .env local existente.
 export const SHARED_CATALOG_ENABLED = false;
+
+// CANCELLATION_POLICY_ENABLED permitiría mostrar la propuesta de src/utils/cancellationPolicy.ts.
+// No existe una política comercial aprobada, así que no hay ninguna política cargada y ningún flujo
+// lo consulta todavía. No cambiarlo sin una política aprobada por escrito.
+export const CANCELLATION_POLICY_ENABLED = false;

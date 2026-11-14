@@ -34,3 +34,5 @@ jobs:
       - uses: actions/checkout@v4
       # Contenedor postgres:17 desechable; no se conecta a ningún tenant remoto.
       - run: npm run test:shared-reservations
+      # Actualización desde etapas intermedias con datos creados por los RPC de cada etapa.
+      - run: npm run test:migration-upgrade
