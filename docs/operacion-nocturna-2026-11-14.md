@@ -3,7 +3,7 @@
 Rama de trabajo: `work/night-2026-11-14` (desde `main` @ `bb01bb7`). Hora de Chile (`America/Santiago`).
 Sin cambios remotos: InsForge, OAuth y pagos reales quedan para revisión humana.
 
-## Checkpoint 1 — 00:12 → 01:10
+## Checkpoint 1 — 00:12 → 00:29 (hora del último commit)
 
 - Auditoría: Jest 24/24, tsc y ESLint limpios en `main`. La integración PostgreSQL fallaba de forma intermitente
   (la sonda de disponibilidad conectaba con el servidor temporal de `initdb`).
@@ -18,7 +18,7 @@ Sin cambios remotos: InsForge, OAuth y pagos reales quedan para revisión humana
 - Pruebas: Jest 73/73, tsc, ESLint, integración PostgreSQL 23/23.
 - Bloqueo: `gh` sin sesión → no se puede abrir el PR desde la terminal. `git push` sí funciona.
 
-## Checkpoint 2 — 01:10 → 02:05
+## Checkpoint 2 — 00:29 → 00:35 (hora del último commit)
 
 - Finanzas simuladas (`d856b41`): `applyRefund` descartaba reembolsos parciales legítimos más pequeños (deduplicaba
   por monto); ahora deduplica por `refundId` y solo reembolsa pagos aprobados. Neto del proveedor = subtotal − comisión
