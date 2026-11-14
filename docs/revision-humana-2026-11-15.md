@@ -74,6 +74,10 @@ contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authe
 
 ## 8. Riesgos conocidos
 
+- `actor_user_id` es visible para turista y proveedor en `connectical_reservation_events` (desde la migración
+  original) y en `connectical_refunds`: ven el uuid de Auth del admin que actuó, no su correo. Decidir si debe
+  ocultarse (grants por columna o una vista) antes de abrir el portal a usuarios reales.
+
 - `zod < 4.6.6` (alto, agotamiento de memoria) llega vía `@insforge/sdk@1.5.2`, que es la última versión publicada.
   No hay corrección upstream; revisar cuando InsForge publique una actualización.
 - `reservationBackend.ts` (en memoria) sigue el modelo antiguo de una sola fecha. Solo lo usan los tests; la app usa

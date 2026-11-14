@@ -4,7 +4,8 @@
 --   * solo se reembolsa una reserva con pago aprobado;
 --   * la suma de reembolsos nunca supera lo cobrado (amount_cents);
 --   * un reembolso total exige cancelar antes, para no dejar cupo vendido sin cobro;
---   * cada solicitud lleva una clave de idempotencia y reintentarla no duplica dinero.
+--   * cada solicitud lleva una clave de idempotencia y reintentarla no duplica dinero; repetirla con
+--     otro importe o motivo se rechaza.
 -- No contacta ninguna pasarela de pago.
 
 create table if not exists public.connectical_refunds (
@@ -67,7 +68,8 @@ begin
   select * into v_existing from public.connectical_refunds
     where reservation_id = p_reservation_id and idempotency_key = p_idempotency_key;
   if found then
-    if v_existing.amount_cents <> p_amount_cents then
+    -- Una repetición debe ser idéntica; si cambia importe o motivo es otra solicitud con clave reutilizada.
+    if v_existing.amount_cents <> p_amount_cents or v_existing.reason <> btrim(p_reason) then
       raise exception 'refund_idempotency_conflict' using errcode = '23505';
     end if;
     return v_reservation;

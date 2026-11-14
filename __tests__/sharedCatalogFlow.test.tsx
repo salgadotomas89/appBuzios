@@ -67,7 +67,7 @@ test('lists published offers and sends them to the portal instead of the demo tr
   }]);
   const root = await renderApp();
 
-  expect(mocked.listPublishedAvailability).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+  expect(mocked.listPublishedAvailability).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), ['o-1']);
   expect(hasText(root, '7 experiencias para descubrir')).toBe(true);
   expect(hasText(root, 'OFERTA PUBLICADA · SE RESERVA EN EL PORTAL CON PAGO SIMULADO')).toBe(true);
 
@@ -88,4 +88,20 @@ test('falls back to the demo catalog and says so when published offers cannot be
   expect(hasText(root, 'No se pudieron leer las ofertas publicadas; se muestra solo el catálogo de ejemplo.')).toBe(true);
   expect(hasText(root, '6 experiencias para descubrir')).toBe(true);
   expect(mocked.listPublishedAvailability).not.toHaveBeenCalled();
+});
+
+test('does not mark offers as sold out when the inventory read may be truncated', async () => {
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-late', provider_id: 'p-1', category: 'pousadas', title: 'Pousada tardia',
+    base_price_cents: 30000, price_mode: 'night', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue(Array.from({ length: 1000 }, (_, index) => ({
+    offer_id: 'other', service_date: `2099-01-${String((index % 28) + 1).padStart(2, '0')}`,
+    total_units: 0, held_units: 0, sold_units: 0, version: 1, updated_at: '2099-01-01T00:00:00Z',
+  })));
+  const root = await renderApp();
+  await pressText(root, 'Pousada tardia');
+  expect(hasText(root, 'Cupo por confirmar en el portal')).toBe(true);
+  expect(hasText(root, 'Sin cupo publicado')).toBe(false);
+  expect(hasText(root, 'Reservar en el portal')).toBe(true);
 });

@@ -110,8 +110,7 @@ export function ReservationPortal({
   const [offerPriceMode, setOfferPriceMode] = useState<PortalPriceMode>('night');
   const [stock, setStock] = useState('1');
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
-  // La clave se conserva entre reintentos del mismo importe para que el servidor no duplique el reembolso.
-  const [refundTarget, setRefundTarget] = useState<{ reservation: SharedReservation; key: string } | null>(null);
+  const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [message, setMessage] = useState('');
@@ -119,6 +118,9 @@ export function ReservationPortal({
   const mounted = useRef(true);
   // Se incrementa al cambiar los datos de la cotización; una respuesta tardía con otro valor se descarta.
   const quoteRequest = useRef(0);
+  // Una clave por reserva e importe: reintentar, descartar o reabrir el formulario reutiliza la misma,
+  // así una respuesta perdida no duplica el reembolso. Se libera solo tras recargar con éxito.
+  const refundKeys = useRef(new Map<string, string>());
 
   useEffect(() => {
     mounted.current = true;
@@ -300,15 +302,9 @@ export function ReservationPortal({
 
   function openRefund(reservation: SharedReservation) {
     const { maxCents } = refundAllowance(reservation);
-    setRefundTarget({ reservation, key: newIdempotencyKey() });
+    setRefundTarget(reservation);
     setRefundAmount(centsToBrlInput(maxCents));
     setRefundReason('');
-  }
-
-  function changeRefundAmount(value: string) {
-    setRefundAmount(value);
-    // Otro importe es otra solicitud: reutilizar la clave haría que el servidor la rechace.
-    setRefundTarget(current => (current ? { ...current, key: newIdempotencyKey() } : current));
   }
 
   function submitRefund() {
@@ -317,14 +313,14 @@ export function ReservationPortal({
       const amountCents = valueOf(parseBrlToCents(refundAmount), words.refundAmount);
       const reason = refundReason.trim();
       if (!reason) throw new InputValidationError(words.refundReasonRequired);
-      await recordSharedRefund({
-        reservationId: refundTarget.reservation.id,
-        amountCents,
-        reason,
-        idempotencyKey: refundTarget.key,
-      });
+      const keyId = `${refundTarget.id}:${amountCents}`;
+      const idempotencyKey = refundKeys.current.get(keyId) ?? newIdempotencyKey();
+      refundKeys.current.set(keyId, idempotencyKey);
+      await recordSharedRefund({ reservationId: refundTarget.id, amountCents, reason, idempotencyKey });
       setRefundTarget(null);
       if (role) await loadForRole(role);
+      // Con la lista ya actualizada, otro reembolso del mismo importe es una solicitud nueva.
+      refundKeys.current.delete(keyId);
       return words.refundRecorded;
     });
   }
@@ -603,12 +599,12 @@ export function ReservationPortal({
                 {refundTarget ? (
                   <View style={styles.quote}>
                     <Text style={styles.sectionTitle}>{words.refundTitle}</Text>
-                    <Text style={styles.helper}>{brlFromCents(refundTarget.reservation.amount_cents)} · {refundTarget.reservation.id}</Text>
-                    <Text style={styles.helper}>{words.refundMax}: {brlFromCents(refundAllowance(refundTarget.reservation).maxCents)}</Text>
-                    {refundAllowance(refundTarget.reservation).fullRequiresCancellation ? (
+                    <Text style={styles.helper}>{brlFromCents(refundTarget.amount_cents)} · {refundTarget.id}</Text>
+                    <Text style={styles.helper}>{words.refundMax}: {brlFromCents(refundAllowance(refundTarget).maxCents)}</Text>
+                    {refundAllowance(refundTarget).fullRequiresCancellation ? (
                       <Text style={styles.helper}>{words.refundFullNeedsCancel}</Text>
                     ) : null}
-                    <Field label={words.refundAmount} value={refundAmount} onChange={changeRefundAmount} decimal />
+                    <Field label={words.refundAmount} value={refundAmount} onChange={setRefundAmount} decimal />
                     <Field label={words.refundReason} value={refundReason} onChange={setRefundReason} maxLength={MAX_REFUND_REASON_LENGTH} />
                     <Text style={styles.helper}>{words.refundReasonVisible}</Text>
                     <ActionButton title={words.refundSubmit} onPress={submitRefund} disabled={busy} />

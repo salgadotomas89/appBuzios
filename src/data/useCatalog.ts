@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { isInsforgeConfigured } from '../lib/insforge';
 import {
   listPublishedAvailability,
+  PUBLISHED_AVAILABILITY_LIMIT,
   listSharedOffers,
   type SharedInventory,
   type SharedOffer,
@@ -26,7 +27,10 @@ export function useCatalog(sharedEnabled: boolean): Catalog & { source: CatalogS
       try {
         const offers = await listSharedOffers();
         // Sin inventario el catálogo sigue siendo útil; la disponibilidad se confirma en el portal.
-        const inventory = await listPublishedAvailability(buziosIsoDate()).catch(() => null);
+        const rows = await listPublishedAvailability(buziosIsoDate(), offers.map(offer => offer.id)).catch(() => null);
+        // Una lectura truncada podría omitir el cupo de alguna oferta y mostrarla sin cupo:
+        // en ese caso la disponibilidad queda por confirmar en el portal.
+        const inventory = rows && rows.length < PUBLISHED_AVAILABILITY_LIMIT ? rows : null;
         if (!mounted) return;
         setShared({ offers, inventory });
         setSource('shared');

@@ -442,6 +442,9 @@ for n in 1 2 3; do
   dup_pids="$dup_pids $!"
 done
 for pid in $dup_pids; do wait "$pid"; done
+# Every one of the three calls must return the reservation: a failed call leaves its file empty.
+dup_returned=$(cat "$workdir"/dup.* | grep -Ec '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || true)
+[ "$dup_returned" = '3' ] || { echo "Only $dup_returned of 3 duplicate submits returned the reservation" >&2; exit 1; }
 dup_ids=$(sort -u "$workdir"/dup.* | grep -c . || true)
 dup_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_reservations where quote_id = '$dup_quote';" | tail -1)
 dup_held=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
@@ -476,6 +479,9 @@ retry=$(as_user "$admin_user" "select r.refund_cents from public.connectical_adm
 [ "$retry" = '5000' ] || { echo "Refund retry was not idempotent: $retry" >&2; exit 1; }
 if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', 4000, 'Changed amount', '$partial_key');" >/dev/null 2>&1; then
   echo "Reused refund key with a different amount was not rejected" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', 5000, 'Changed reason', '$partial_key');" >/dev/null 2>&1; then
+  echo "Reused refund key with a different reason was not rejected" >&2; exit 1
 fi
 remaining=$((refund_amount - 5000))
 if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', $remaining, 'Full while confirmed', gen_random_uuid());" >/dev/null 2>&1; then
@@ -548,4 +554,51 @@ date_mismatch=$(printf '%s\n' "$date_sql" | docker exec -i "$container" psql -qA
 expected_dates="$(grep -c '"instant"' "$PWD/__tests__/fixtures/buzios-dates.json")||true"
 [ "$date_mismatch" = "$expected_dates" ] || { echo "Búzios date mismatch (count|instants|today): $date_mismatch" >&2; exit 1; }
 echo "PASS app and PostgreSQL agree on the Búzios calendar day around midnight"
+
+# Simulated payment outcomes: pending keeps the hold, a retry can approve or reject it, other
+# travelers cannot pay it, and an elapsed hold cannot be paid.
+pay_offer='55000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$pay_offer', '40000000-0000-4000-8000-000000000001', 'barcos', 'Payment lab boat', 9000, 'person', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$pay_offer', current_date + 80, 3);"
+pay_counters() {
+  docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || sold_units from public.connectical_inventory where offer_id = '$pay_offer';" | tail -1
+}
+pay_hold() {
+  pay_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$pay_offer', current_date + 80, 1, 1, 600)).id;")
+  as_user "$traveler_a" "select (public.connectical_create_reservation_hold('$pay_quote', gen_random_uuid())).id;"
+}
+pending_id=$(pay_hold)
+pending=$(as_user "$traveler_a" "select r.status || '|' || r.payment_status from public.connectical_simulate_payment('$pending_id','pending','pix','LAB-P') r;")
+[ "$pending" = 'pending_payment|pending' ] && [ "$(pay_counters)" = '1/0' ] || { echo "Pending payment mismatch: $pending $(pay_counters)" >&2; exit 1; }
+if as_user "$traveler_b" "select public.connectical_simulate_payment('$pending_id','approved','card','LAB-X');" >/dev/null 2>&1; then
+  echo "Another traveler could pay the reservation" >&2; exit 1
+fi
+approved=$(as_user "$traveler_a" "select r.status from public.connectical_simulate_payment('$pending_id','approved','pix','LAB-P2') r;")
+[ "$approved" = 'confirmed' ] && [ "$(pay_counters)" = '0/1' ] || { echo "Approve after pending mismatch: $approved $(pay_counters)" >&2; exit 1; }
+rejected_id=$(pay_hold)
+as_user "$traveler_a" "select public.connectical_simulate_payment('$rejected_id','pending','card','LAB-R');" >/dev/null
+rejected=$(as_user "$traveler_a" "select r.status || '|' || r.payment_status from public.connectical_simulate_payment('$rejected_id','rejected','card','LAB-R2') r;")
+[ "$rejected" = 'cancelled|rejected' ] && [ "$(pay_counters)" = '0/1' ] || { echo "Reject after pending mismatch: $rejected $(pay_counters)" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$rejected_id', 100, 'Rejected payment', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Refund of a rejected payment was not rejected" >&2; exit 1
+fi
+late_id=$(pay_hold)
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_reservations set hold_expires_at = now() - interval '1 second' where id = '$late_id';"
+if as_user "$traveler_a" "select public.connectical_simulate_payment('$late_id','approved','card','LAB-L');" >/dev/null 2>&1; then
+  echo "Elapsed hold could still be paid" >&2; exit 1
+fi
+if as_user "$traveler_a" "select public.connectical_simulate_payment('$late_id','refund_now','card','LAB-L');" >/dev/null 2>&1; then
+  echo "Unknown payment outcome was accepted" >&2; exit 1
+fi
+echo "PASS simulated payment outcomes: pending, approve or reject after pending, ownership and expiry"
+
+# The read-only checklist operators paste into the trial tenant must pass here too.
+verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)
+verify_rows=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  < "$PWD/supabase/checks/verify_migrations.sql" | grep -c '|t$' || true)
+[ -z "$verify_failed" ] && [ "$verify_rows" -ge 10 ] || { echo "verify_migrations.sql failed: $verify_failed ($verify_rows ok)" >&2; exit 1; }
+echo "PASS supabase/checks/verify_migrations.sql reports every invariant as ok"
 echo "Shared PostgreSQL integration test passed"

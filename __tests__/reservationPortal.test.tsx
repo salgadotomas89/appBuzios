@@ -368,3 +368,31 @@ it('says when an offer has no published availability', async () => {
   await press(root, 'Barco Azul');
   expect(hasText(root, 'El proveedor todavía no publicó cupo para esta oferta.')).toBe(true);
 });
+
+it('reuses the refund key after a failed reload even if the form is reopened or retyped', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  const paid = reservation({ id: 'r-cancelled', status: 'cancelled', payment_status: 'approved' });
+  mocked.listSharedReservations
+    .mockResolvedValueOnce([paid])
+    .mockRejectedValueOnce(new Error('reload timeout'))
+    .mockResolvedValue([{ ...paid, refund_cents: 5000 }]);
+  mocked.recordSharedRefund.mockResolvedValue({ ...paid, refund_cents: 5000 });
+  const root = await render();
+
+  await press(root, 'Reembolsar');
+  await type(root, 'Importe a devolver (BRL)', '50,00');
+  await type(root, 'Motivo', 'Gesto');
+  await press(root, 'Registrar reembolso');
+  // El servidor registró el reembolso pero la recarga falló: la pantalla solo ve el error.
+  expect(hasText(root, 'reload timeout')).toBe(true);
+
+  await press(root, 'Reembolsar');
+  await type(root, 'Importe a devolver (BRL)', '');
+  await type(root, 'Importe a devolver (BRL)', '50,00');
+  await type(root, 'Motivo', 'Gesto');
+  await press(root, 'Registrar reembolso');
+
+  const [first, second] = mocked.recordSharedRefund.mock.calls.map(call => call[0]);
+  expect(second.idempotencyKey).toBe(first.idempotencyKey);
+  expect(hasText(root, 'Reembolso registrado.')).toBe(true);
+});
