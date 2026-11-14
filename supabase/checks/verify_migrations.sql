@@ -22,15 +22,17 @@ with checks(name, ok) as (
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_adjust_stay_inventory', 'connectical_expire_offer_holds', 'connectical_lock_offer',
-          'connectical_create_traveler_profile', 'connectical_system_expire_holds'))),
+          'connectical_create_traveler_profile', 'connectical_system_expire_holds',
+          'connectical_system_run_hold_sweep'))),
     ('app RPCs executable by authenticated',
-      (select count(*) = 11 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
+      (select count(*) = 12 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_quote', 'connectical_create_reservation_hold', 'connectical_simulate_payment',
           'connectical_cancel_reservation', 'connectical_expire_holds', 'connectical_provider_upsert_offer',
           'connectical_provider_publish_inventory', 'connectical_admin_record_refund', 'connectical_today',
-          'connectical_provider_publish_inventory_range', 'connectical_admin_set_provider_active'))),
+          'connectical_provider_publish_inventory_range', 'connectical_admin_set_provider_active',
+          'connectical_admin_sweep_health'))),
     ('anon cannot run reservation, refund or operations RPCs',
       (select bool_and(not has_function_privilege('anon', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -70,8 +72,8 @@ with checks(name, ok) as (
             ('connectical_profiles', 'user_id'),
             ('connectical_providers', 'owner_user_id'),
             ('connectical_quotes', 'traveler_user_id')))),
-    ('no scheduler assumed: system sweep exists but is private',
-      (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'public' and p.proname = 'connectical_system_expire_holds'))
+    ('no scheduler assumed: system sweeps exist but are private',
+      (select count(*) = 2 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname in ('connectical_system_expire_holds', 'connectical_system_run_hold_sweep')))
 )
 select name, coalesce(ok, false) as ok from checks order by name;

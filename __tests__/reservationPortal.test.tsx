@@ -14,7 +14,7 @@ jest.mock('../src/lib/reservationService', () => {
     'listSharedReservations', 'listSharedReservationEvents', 'signInSharedAccount',
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
-    'publishProviderInventoryRange', 'setSharedProviderActive',
+    'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -87,6 +87,7 @@ beforeEach(() => {
   mocked.listProviderOffers.mockResolvedValue([]);
   mocked.listProviderInventory.mockResolvedValue([]);
   mocked.listOfferAvailability.mockResolvedValue([]);
+  mocked.getSweepHealth.mockResolvedValue(null);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -455,4 +456,32 @@ it('separates holds, confirmed gross and provider net and flags inconsistent sta
   expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 1.152,00')).toBe(true);
   expect(hasText(root, 'Estados inconsistentes para revisar: 1')).toBe(true);
   expect(hasText(root, 'confirmada sin pago aprobado · r-odd')).toBe(true);
+});
+
+it('tells admins when no scheduled sweep has run and when runs were partial', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.getSweepHealth.mockResolvedValueOnce({
+    last_success_at: null, last_run_at: null, last_status: null, runs_last_hour: 0,
+    partial_runs_last_hour: 0, overdue_holds: 3, stale: true,
+  });
+  let root = await render();
+  expect(hasText(root, 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona.')).toBe(true);
+  expect(hasText(root, 'Retenciones vencidas esperando barrido: 3')).toBe(true);
+
+  mocked.getSweepHealth.mockResolvedValueOnce({
+    last_success_at: '2099-01-01T12:00:00Z', last_run_at: '2099-01-01T12:20:00Z', last_status: 'partial',
+    runs_last_hour: 4, partial_runs_last_hour: 2, overdue_holds: 0, stale: true,
+  });
+  root = await render('pt');
+  expect(hasText(root, 'Atenção: mais de 15 minutos sem uma execução correta.')).toBe(true);
+  expect(hasText(root, 'Execuções parciais na última hora: 2')).toBe(true);
+});
+
+it('keeps the admin panel working when sweep health is unavailable', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.getSweepHealth.mockRejectedValue(new Error('function does not exist'));
+  const root = await render();
+  expect(hasText(root, 'Barrido de retenciones vencidas')).toBe(false);
+  expect(hasText(root, 'function does not exist')).toBe(false);
+  expect(hasText(root, 'Reservas · 0')).toBe(true);
 });

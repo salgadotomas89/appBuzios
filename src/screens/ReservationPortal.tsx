@@ -29,6 +29,8 @@ import {
   publishProviderInventory,
   publishProviderInventoryRange,
   setSharedProviderActive,
+  getSweepHealth,
+  type SweepHealth,
   recordSharedRefund,
   type SharedInventory,
   type SharedOffer,
@@ -101,6 +103,7 @@ export function ReservationPortal({
   const [providers, setProviders] = useState<SharedProvider[]>([]);
   const [reservations, setReservations] = useState<SharedReservation[]>([]);
   const [events, setEvents] = useState<SharedReservationEvent[]>([]);
+  const [sweepHealth, setSweepHealth] = useState<SweepHealth | null>(null);
   const [providerOffers, setProviderOffers] = useState<SharedOffer[]>([]);
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
   const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
@@ -168,6 +171,11 @@ export function ReservationPortal({
     setEvents(visibleEvents);
     setProviderOffers(ownedOffers);
     setProviderInventory(ownedInventory);
+    if (nextRole === 'admin') {
+      // La salud del barrido es informativa: si la migración 202611140006 falta, no bloquea el panel.
+      const health = await getSweepHealth().catch(() => null);
+      if (mounted.current) setSweepHealth(health);
+    }
   }
 
   useEffect(() => {
@@ -668,6 +676,21 @@ export function ReservationPortal({
                 ) : null}
                 {reservationList('admin_review', visibleReservations)}
               </View>
+              {sweepHealth ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{words.sweepTitle}</Text>
+                  <Text style={sweepHealth.last_success_at ? styles.helper : styles.warning}>
+                    {sweepHealth.last_success_at
+                      ? words.sweepLast.replace('{time}', formatTime(sweepHealth.last_success_at))
+                      : words.sweepNever}
+                  </Text>
+                  {sweepHealth.stale && sweepHealth.last_success_at ? <Text style={styles.warning}>{words.sweepStale}</Text> : null}
+                  {sweepHealth.partial_runs_last_hour ? (
+                    <Text style={styles.warning}>{words.sweepPartial.replace('{count}', String(sweepHealth.partial_runs_last_hour))}</Text>
+                  ) : null}
+                  <Text style={styles.helper}>{words.sweepOverdue.replace('{count}', String(sweepHealth.overdue_holds))}</Text>
+                </View>
+              ) : null}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.history} · {events.length}</Text>
                 {events.map(event => (

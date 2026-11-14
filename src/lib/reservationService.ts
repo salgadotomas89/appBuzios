@@ -338,6 +338,22 @@ export async function setSharedProviderActive(providerId: string, active: boolea
   return callRpc('connectical_admin_set_provider_active', { p_provider_id: providerId, p_active: active });
 }
 
+export type SweepHealth = {
+  last_success_at: string | null;
+  last_run_at: string | null;
+  last_status: 'running' | 'succeeded' | 'partial' | 'skipped' | null;
+  runs_last_hour: number;
+  partial_runs_last_hour: number;
+  overdue_holds: number;
+  stale: boolean;
+};
+
+// Solo administración: estado del barrido programado de retenciones (migración 202611140006).
+export async function getSweepHealth(): Promise<SweepHealth | null> {
+  const rows = await callRpc<SweepHealth[]>('connectical_admin_sweep_health', {});
+  return rows[0] ?? null;
+}
+
 // Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.
 export async function listOfferAvailability(offerId: string, fromDate: string): Promise<SharedInventory[]> {
   const { data, error } = await getClient().database

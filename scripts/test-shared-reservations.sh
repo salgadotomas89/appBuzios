@@ -774,6 +774,66 @@ reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres
 [ -z "$reconcile" ] || { echo "Inventory does not reconcile with reservations:" >&2; echo "$reconcile" >&2; exit 1; }
 echo "PASS every inventory counter reconciles with the reservations covering that night"
 
+# Scheduled sweep: overlap guard, per-offer failure isolation, recovery, health and privileges.
+sweep_offer_ok='5a000000-0000-4000-8000-000000000001'
+sweep_offer_bad='5a000000-0000-4000-8000-000000000002'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published) values
+  ('$sweep_offer_ok', '$lab_provider', 'barcos', 'Sweep ok boat', 9000, 'person', true),
+  ('$sweep_offer_bad', '$lab_provider', 'barcos', 'Sweep drift boat', 9000, 'person', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values
+  ('$sweep_offer_ok', current_date + 140, 2), ('$sweep_offer_bad', current_date + 140, 2);"
+for sweep_offer in "$sweep_offer_ok" "$sweep_offer_bad"; do
+  sweep_quote=$(as_user "$(racer 7)" "select (public.connectical_create_quote('$sweep_offer', current_date + 140, 1, 1, 600)).id;")
+  as_user "$(racer 7)" "select public.connectical_create_reservation_hold('$sweep_quote', gen_random_uuid());" >/dev/null
+done
+docker exec "$container" psql -q -U postgres -d postgres -c "
+update public.connectical_reservations set hold_expires_at = now() - interval '1 second'
+  where offer_id in ('$sweep_offer_ok', '$sweep_offer_bad');
+update public.connectical_inventory set held_units = 0 where offer_id = '$sweep_offer_bad';"
+for actor in "$traveler_a" "$admin_user"; do
+  if as_user "$actor" "select public.connectical_system_run_hold_sweep();" >/dev/null 2>&1; then
+    echo "App role could run the scheduled sweep" >&2; exit 1
+  fi
+done
+# Hold the sweep lock in one session while a second run starts: the second must skip.
+(
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "begin; select pg_advisory_xact_lock(hashtextextended('connectical-hold-sweep', 0)); select pg_sleep(3); commit;" >/dev/null
+) &
+lock_pid=$!
+sleep 1
+skipped=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select (public.connectical_system_run_hold_sweep()).status;" | tail -1)
+wait "$lock_pid"
+[ "$skipped" = 'skipped' ] || { echo "Overlapping sweep did not skip: $skipped" >&2; exit 1; }
+partial=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select r.status || '|' || (r.expired_count >= 1) || '|' || jsonb_array_length(r.failed_offers) || '|' || (r.failed_offers->0->>'offer_id')
+  from public.connectical_system_run_hold_sweep() r;" | tail -1)
+# Earlier checks left other elapsed holds behind, so only "at least one expired" is asserted here.
+[ "$partial" = "partial|true|1|$sweep_offer_bad" ] || { echo "Sweep did not isolate the failing offer: $partial" >&2; exit 1; }
+ok_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select (select status from public.connectical_reservations where offer_id = '$sweep_offer_ok') || '|' ||
+         (select held_units from public.connectical_inventory where offer_id = '$sweep_offer_ok');" | tail -1)
+[ "$ok_state" = 'expired|0' ] || { echo "Healthy offer was not swept: $ok_state" >&2; exit 1; }
+stale_health=$(as_user "$admin_user" "select h.last_status || '|' || h.overdue_holds || '|' || h.partial_runs_last_hour from public.connectical_admin_sweep_health() h;")
+[ "$stale_health" = 'partial|1|1' ] || { echo "Sweep health did not report the partial run: $stale_health" >&2; exit 1; }
+# Recovery: fix the drift and the next run succeeds and releases the remaining hold.
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_inventory set held_units = 1 where offer_id = '$sweep_offer_bad';"
+recovered=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select r.status || '|' || r.expired_count from public.connectical_system_run_hold_sweep() r;" | tail -1)
+healthy=$(as_user "$admin_user" "select h.last_status || '|' || h.overdue_holds || '|' || h.stale from public.connectical_admin_sweep_health() h;")
+[ "$recovered" = 'succeeded|1' ] && [ "$healthy" = 'succeeded|0|false' ] || { echo "Sweep recovery mismatch: $recovered $healthy" >&2; exit 1; }
+idle=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select r.status || '|' || r.expired_count from public.connectical_system_run_hold_sweep() r;" | tail -1)
+[ "$idle" = 'succeeded|0' ] || { echo "Idle sweep mismatch: $idle" >&2; exit 1; }
+if as_user "$traveler_a" "select public.connectical_admin_sweep_health();" >/dev/null 2>&1; then
+  echo "Traveler could read sweep health" >&2; exit 1
+fi
+if as_user "$admin_user" "select count(*) from public.connectical_sweep_runs;" >/dev/null 2>&1; then
+  echo "Sweep run log is readable through the API" >&2; exit 1
+fi
+sweep_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$sweep_reconcile" ] || { echo "Inventory does not reconcile after sweeps: $sweep_reconcile" >&2; exit 1; }
+echo "PASS scheduled sweep skips overlaps, isolates failing offers, recovers and reports health to admins only"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)
