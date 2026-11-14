@@ -594,6 +594,53 @@ if as_user "$traveler_a" "select public.connectical_simulate_payment('$late_id',
 fi
 echo "PASS simulated payment outcomes: pending, approve or reject after pending, ownership and expiry"
 
+# Operations tools: atomic range publishing and admin pause/resume of a provider.
+provider_user='20000000-0000-4000-8000-000000000001'
+lab_provider='40000000-0000-4000-8000-000000000001'
+range_offer='56000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$range_offer', '$lab_provider', 'pousadas', 'Range lab room', 25000, 'night', true);"
+range_count=$(as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 90, 5, 2);")
+range_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) || '|' || min(total_units) || '|' || max(total_units) from public.connectical_inventory where offer_id = '$range_offer';" | tail -1)
+[ "$range_count" = '5' ] && [ "$range_rows" = '5|2|2' ] || { echo "Range publish mismatch: $range_count $range_rows" >&2; exit 1; }
+# The payment-lab boat has one unit sold at current_date + 80: a range lowering it to 0 must fail whole.
+if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$pay_offer', current_date + 78, 5, 0);" >/dev/null 2>&1; then
+  echo "Range publish below committed units was not rejected" >&2; exit 1
+fi
+partial_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_inventory where offer_id = '$pay_offer' and service_date in (current_date + 78, current_date + 79);" | tail -1)
+[ "$partial_rows" = '0' ] || { echo "Failed range publish left $partial_rows partial rows" >&2; exit 1; }
+for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', current_date - 1, 3, 1"; do
+  if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range($bad);" >/dev/null 2>&1; then
+    echo "Invalid range publish was accepted: $bad" >&2; exit 1
+  fi
+done
+if as_user "$traveler_a" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 90, 2, 9);" >/dev/null 2>&1; then
+  echo "Traveler could publish a range" >&2; exit 1
+fi
+echo "PASS providers publish a date range atomically with the single-date rules"
+
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_set_provider_active('$lab_provider', false);" >/dev/null 2>&1; then
+    echo "Non-admin could pause a provider" >&2; exit 1
+  fi
+done
+paused=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_active('$lab_provider', false)).active;")
+[ "$paused" = 'f' ] || { echo "Admin pause failed: $paused" >&2; exit 1; }
+if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$range_offer', current_date + 100, 2, 1);" >/dev/null 2>&1; then
+  echo "Paused provider could publish a range" >&2; exit 1
+fi
+if as_user "$traveler_a" "select public.connectical_create_quote('$range_offer', current_date + 90, 1, 2, 600);" >/dev/null 2>&1; then
+  echo "Traveler could quote a paused provider" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_set_provider_active(gen_random_uuid(), true);" >/dev/null 2>&1; then
+  echo "Unknown provider was not rejected" >&2; exit 1
+fi
+resumed=$(as_user "$admin_user" "select (public.connectical_admin_set_provider_active('$lab_provider', true)).active;")
+quote_ok=$(as_user "$traveler_a" "select (public.connectical_create_quote('$range_offer', current_date + 90, 1, 2, 600)).subtotal_cents;")
+[ "$resumed" = 't' ] && [ "$quote_ok" = '50000' ] || { echo "Admin resume mismatch: $resumed $quote_ok" >&2; exit 1; }
+echo "PASS only admins pause or resume providers, and pausing blocks quotes and publishing"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

@@ -24,18 +24,20 @@ with checks(name, ok) as (
           'connectical_adjust_stay_inventory', 'connectical_expire_offer_holds', 'connectical_lock_offer',
           'connectical_create_traveler_profile', 'connectical_system_expire_holds'))),
     ('app RPCs executable by authenticated',
-      (select count(*) = 9 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
+      (select count(*) = 11 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_quote', 'connectical_create_reservation_hold', 'connectical_simulate_payment',
           'connectical_cancel_reservation', 'connectical_expire_holds', 'connectical_provider_upsert_offer',
-          'connectical_provider_publish_inventory', 'connectical_admin_record_refund', 'connectical_today'))),
-    ('anon cannot run reservation or refund RPCs',
+          'connectical_provider_publish_inventory', 'connectical_admin_record_refund', 'connectical_today',
+          'connectical_provider_publish_inventory_range', 'connectical_admin_set_provider_active'))),
+    ('anon cannot run reservation, refund or operations RPCs',
       (select bool_and(not has_function_privilege('anon', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_reservation_hold', 'connectical_simulate_payment', 'connectical_cancel_reservation',
-          'connectical_admin_record_refund'))),
+          'connectical_admin_record_refund', 'connectical_provider_publish_inventory_range',
+          'connectical_admin_set_provider_active'))),
     ('SECURITY DEFINER functions pin search_path',
       (select bool_and(p.proconfig is not null and exists (
           select 1 from unnest(p.proconfig) cfg where cfg like 'search_path=%'))
