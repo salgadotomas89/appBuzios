@@ -1,3 +1,8 @@
+import { addDays } from '../utils/portalInput';
+
+// Modelo en memoria de las reglas de supabase/migrations para pruebas sin base de datos.
+// La app usa reservationService (PostgreSQL); si cambian las reglas SQL, este modelo debe seguirlas.
+
 export type UserRole = 'traveler' | 'provider' | 'admin';
 export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy';
 export type PriceMode = 'night' | 'person' | 'ticket' | 'group';
@@ -22,6 +27,7 @@ export type UserRecord = {
 
 export type ProviderRecord = {
   id: string;
+  ownerUserId?: string;
   name: string;
   country: string;
   commissionRateBps: number;
@@ -77,6 +83,7 @@ export type ReservationRecord = {
   providerId: string;
   travelerId: string;
   date: string;
+  nights: number;
   quantity: number;
   status: ReservationStatus;
   amountCents: number;
@@ -94,7 +101,12 @@ export type ReservationRecord = {
 
 export type ReservationBackend = {
   createUser: (args: { name: string; role: UserRole; country: string }) => UserRecord;
-  createProvider: (args: { name: string; country: string; commissionRateBps: number }) => ProviderRecord;
+  createProvider: (args: {
+    name: string;
+    country: string;
+    commissionRateBps: number;
+    ownerUserId?: string;
+  }) => ProviderRecord;
   createOffer: (args: {
     providerId: string;
     category: OfferCategory;
@@ -146,8 +158,19 @@ export function createReservationBackend(): ReservationBackend {
     return Math.round(value);
   }
 
-  function getInventoryForOfferDate(offerId: string, date: string): InventoryRecord | null {
-    return inventory.get(`${offerId}:${date}`) ?? null;
+  // Noches cubiertas: [date, date + nights), igual que connectical_adjust_stay_inventory.
+  function stayInventory(offerId: string, date: string, nights: number): Array<InventoryRecord | undefined> {
+    return Array.from({ length: nights }, (_, index) => inventory.get(`${offerId}:${addDays(date, index)}`));
+  }
+
+  function adjustStay(reservation: ReservationRecord, heldDelta: number, soldDelta: number, at: string) {
+    for (const stock of stayInventory(reservation.offerId, reservation.date, reservation.nights)) {
+      if (!stock) continue;
+      stock.heldUnits = Math.max(0, stock.heldUnits + heldDelta);
+      stock.soldUnits = Math.max(0, stock.soldUnits + soldDelta);
+      stock.version += 1;
+      stock.updatedAt = at;
+    }
   }
 
   function canAccessRecord(userId: string, reservationId: string, requestedRole: UserRole) {
@@ -159,7 +182,7 @@ export function createReservationBackend(): ReservationBackend {
       return reservation.travelerId === userId;
     }
     if (requestedRole === 'provider' && user.role === 'provider') {
-      return reservation.providerId === userId;
+      return providers.get(reservation.providerId)?.ownerUserId === userId;
     }
     return false;
   }
@@ -178,10 +201,11 @@ export function createReservationBackend(): ReservationBackend {
       return record;
     },
 
-    createProvider({ name, country, commissionRateBps }) {
+    createProvider({ name, country, commissionRateBps, ownerUserId }) {
       const id = `provider-${Math.random().toString(36).slice(2, 10)}`;
       const record: ProviderRecord = {
         id,
+        ownerUserId,
         name,
         country,
         commissionRateBps,
@@ -235,7 +259,10 @@ export function createReservationBackend(): ReservationBackend {
       if (!provider) {
         throw new Error(`Provider for offer ${offerId} not found`);
       }
-      const subtotalCents = roundCents(offer.basePriceCents * quantity * Math.max(1, nights));
+      if (quantity <= 0 || nights <= 0 || nights > 30 || (offer.priceMode !== 'night' && nights !== 1)) {
+        throw new Error('invalid_quote_input');
+      }
+      const subtotalCents = roundCents(offer.basePriceCents * quantity * nights);
       const serviceFeeCents = roundCents((subtotalCents * serviceFeeRate) / 10_000);
       const travelerTotalCents = subtotalCents + serviceFeeCents;
       const providerCommissionCents = roundCents(
@@ -265,21 +292,25 @@ export function createReservationBackend(): ReservationBackend {
       const quote = quotes.get(quoteId);
       if (!quote) return null;
       if (quote.travelerId !== travelerId) return null;
-      const inventoryKey = `${quote.offerId}:${date}`;
-      const stock = inventory.get(inventoryKey);
-      if (!stock) return null;
-      const availableUnits = Math.max(0, stock.totalUnits - stock.heldUnits - stock.soldUnits);
-      if (availableUnits < quantity) return null;
+      // La reserva hereda cantidad y fechas de la cotización, que solo se puede usar una vez.
+      if (quantity !== quote.quantity || date !== quote.date) return null;
+      if (Array.from(reservations.values()).some(existing => existing.quoteId === quoteId)) return null;
+      const stays = stayInventory(quote.offerId, quote.date, quote.nights);
+      if (stays.some(stock => !stock || stock.totalUnits - stock.heldUnits - stock.soldUnits < quantity)) {
+        return null;
+      }
 
       const provider = providers.get(offers.get(quote.offerId)?.providerId ?? '');
       const reservationId = `res-${Math.random().toString(36).slice(2, 10)}`;
+      const now = nowIso();
       const reservation: ReservationRecord = {
         id: reservationId,
         quoteId: quote.id,
         offerId: quote.offerId,
         providerId: provider?.id ?? '',
         travelerId,
-        date,
+        date: quote.date,
+        nights: quote.nights,
         quantity,
         status: 'held',
         amountCents: quote.travelerTotalCents,
@@ -287,19 +318,12 @@ export function createReservationBackend(): ReservationBackend {
         providerCommissionCents: quote.providerCommissionCents,
         providerCommissionRateBps: quote.providerCommissionRateBps,
         quoteVersion: quote.quoteVersion,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
+        createdAt: now,
+        updatedAt: now,
         refundCents: 0,
-        audit: [{ id: `audit-${Date.now()}`, at: nowIso(), event: 'reservation_held' }],
+        audit: [{ id: `audit-${Date.now()}`, at: now, event: 'reservation_held' }],
       };
-
-      const nextInventory: InventoryRecord = {
-        ...stock,
-        heldUnits: stock.heldUnits + quantity,
-        version: stock.version + 1,
-        updatedAt: nowIso(),
-      };
-      inventory.set(inventoryKey, nextInventory);
+      adjustStay(reservation, quantity, 0, now);
       reservations.set(reservationId, reservation);
       return reservation;
     },
@@ -309,7 +333,7 @@ export function createReservationBackend(): ReservationBackend {
       if (!reservation) {
         throw new Error(`Reservation ${reservationId} not found`);
       }
-      if (reservation.status === 'confirmed' || reservation.status === 'refunded') {
+      if (reservation.status !== 'held' && reservation.status !== 'pending_payment') {
         return reservation;
       }
 
@@ -321,17 +345,13 @@ export function createReservationBackend(): ReservationBackend {
 
       if (action.status === 'approved') {
         reservation.status = 'confirmed';
-        const stock = getInventoryForOfferDate(reservation.offerId, reservation.date);
-        if (stock) {
-          stock.heldUnits = Math.max(0, stock.heldUnits - reservation.quantity);
-          stock.soldUnits += reservation.quantity;
-          stock.version += 1;
-          stock.updatedAt = now;
-        }
+        adjustStay(reservation, -reservation.quantity, reservation.quantity, now);
       } else if (action.status === 'rejected') {
         reservation.status = 'cancelled';
+        adjustStay(reservation, -reservation.quantity, 0, now);
+      } else {
+        reservation.status = 'pending_payment';
       }
-      reservations.set(reservationId, reservation);
       return reservation;
     },
 
@@ -341,39 +361,43 @@ export function createReservationBackend(): ReservationBackend {
         throw new Error(`Reservation ${reservationId} not found`);
       }
       const now = nowIso();
+      if (reservation.status === 'held' || reservation.status === 'pending_payment') {
+        adjustStay(reservation, -reservation.quantity, 0, now);
+      } else if (reservation.status === 'confirmed') {
+        adjustStay(reservation, 0, -reservation.quantity, now);
+      } else {
+        return reservation;
+      }
       reservation.status = 'cancelled';
       reservation.updatedAt = now;
-      reservation.audit.push({
-        id: `audit-${Date.now()}`,
-        at: now,
-        event: `cancelled:${reason}`,
-      });
-      const stock = getInventoryForOfferDate(reservation.offerId, reservation.date);
-      if (stock) {
-        stock.heldUnits = Math.max(0, stock.heldUnits - reservation.quantity);
-        stock.version += 1;
-        stock.updatedAt = now;
-      }
-      reservations.set(reservationId, reservation);
+      reservation.audit.push({ id: `audit-${Date.now()}`, at: now, event: `cancelled:${reason}` });
       return reservation;
     },
 
+    // Mismas invariantes que connectical_admin_record_refund: pago aprobado, nunca más de lo
+    // cobrado y el total solo después de cancelar.
     processRefund(reservationId, { amountCents }) {
       const reservation = reservations.get(reservationId);
       if (!reservation) {
         throw new Error(`Reservation ${reservationId} not found`);
       }
+      if (
+        reservation.paymentStatus !== 'approved' ||
+        (reservation.status !== 'confirmed' && reservation.status !== 'cancelled')
+      ) {
+        throw new Error('refund_not_allowed');
+      }
+      if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error('invalid_refund_input');
+      const refundTotal = reservation.refundCents + amountCents;
+      if (refundTotal > reservation.amountCents) throw new Error('refund_exceeds_paid');
+      if (refundTotal === reservation.amountCents && reservation.status === 'confirmed') {
+        throw new Error('refund_requires_cancellation');
+      }
       const now = nowIso();
-      const actualRefund = Math.min(amountCents, reservation.amountCents);
-      reservation.refundCents += actualRefund;
-      reservation.status = reservation.refundCents >= reservation.amountCents ? 'refunded' : 'cancelled';
+      reservation.refundCents = refundTotal;
+      if (refundTotal === reservation.amountCents) reservation.status = 'refunded';
       reservation.updatedAt = now;
-      reservation.audit.push({
-        id: `audit-${Date.now()}`,
-        at: now,
-        event: `refund:${actualRefund}`,
-      });
-      reservations.set(reservationId, reservation);
+      reservation.audit.push({ id: `audit-${Date.now()}`, at: now, event: `refund:${amountCents}` });
       return reservation;
     },
 

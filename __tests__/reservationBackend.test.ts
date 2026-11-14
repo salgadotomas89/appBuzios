@@ -119,7 +119,9 @@ describe('reservation backend', () => {
       priceMode: 'night',
       currency: 'BRL',
     });
+    // La estancia es de 2 noches: el modelo exige cupo publicado para ambas.
     backend.publishInventory({ offerId: offer.id, date: '2026-12-03', totalUnits: 3 });
+    backend.publishInventory({ offerId: offer.id, date: '2026-12-04', totalUnits: 3 });
     const traveler = backend.createUser({ name: 'Sofia', role: 'traveler', country: 'US' });
     const quote = backend.createQuote({
       travelerId: traveler.id,
@@ -177,6 +179,8 @@ describe('reservation backend', () => {
       date: '2026-12-04',
     });
 
+    // Solo se reembolsa lo cobrado: el pago se aprueba antes de cancelar.
+    backend.simulatePayment(reservation!.id, { status: 'approved', gatewayReference: 'mp-refund' });
     const cancelled = backend.cancelReservation(reservation!.id, { reason: 'traveler_request' });
     expect(cancelled.status).toBe('cancelled');
 
@@ -187,5 +191,116 @@ describe('reservation backend', () => {
     expect(backend.listReservationsForAdmin().length).toBe(1);
     expect(backend.canAccessRecord(admin.id, cancelled.id, 'admin')).toBe(true);
     expect(backend.canAccessRecord(traveler.id, cancelled.id, 'traveler')).toBe(true);
+  });
+
+  function setup(priceMode: 'night' | 'ticket' = 'night') {
+    const backend = createReservationBackend();
+    const providerUser = backend.createUser({ name: 'Owner', role: 'provider', country: 'BR' });
+    const provider = backend.createProvider({
+      name: 'Pousada Regla', country: 'BR', commissionRateBps: 1000, ownerUserId: providerUser.id,
+    });
+    const offer = backend.createOffer({
+      providerId: provider.id, category: 'pousadas', title: 'Regla', basePriceCents: 10000, priceMode,
+    });
+    const travelerA = backend.createUser({ name: 'A', role: 'traveler', country: 'CL' });
+    const travelerB = backend.createUser({ name: 'B', role: 'traveler', country: 'BR' });
+    return { backend, providerUser, provider, offer, travelerA, travelerB };
+  }
+
+  test('holds every night of a stay and rejects overlapping stays', () => {
+    const { backend, offer, travelerA, travelerB } = setup();
+    for (const date of ['2026-12-10', '2026-12-11', '2026-12-12']) {
+      backend.publishInventory({ offerId: offer.id, date, totalUnits: 1 });
+    }
+    const stay = backend.createQuote({
+      travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 2, serviceFeeRate: 600,
+    });
+    expect(backend.reserveOffer({ quoteId: stay.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })?.nights).toBe(2);
+
+    const overlap = backend.createQuote({
+      travelerId: travelerB.id, offerId: offer.id, date: '2026-12-11', quantity: 1, nights: 2, serviceFeeRate: 600,
+    });
+    expect(backend.reserveOffer({ quoteId: overlap.id, travelerId: travelerB.id, quantity: 1, date: '2026-12-11' })).toBeNull();
+
+    const unpublished = backend.createQuote({
+      travelerId: travelerB.id, offerId: offer.id, date: '2026-12-12', quantity: 1, nights: 2, serviceFeeRate: 600,
+    });
+    expect(backend.reserveOffer({ quoteId: unpublished.id, travelerId: travelerB.id, quantity: 1, date: '2026-12-12' })).toBeNull();
+  });
+
+  test('binds the reservation to its quote and allows a quote only once', () => {
+    const { backend, offer, travelerA } = setup();
+    backend.publishInventory({ offerId: offer.id, date: '2026-12-10', totalUnits: 5 });
+    const quote = backend.createQuote({
+      travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 1, serviceFeeRate: 600,
+    });
+    expect(backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 3, date: '2026-12-10' })).toBeNull();
+    expect(backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-11' })).toBeNull();
+    expect(backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })).not.toBeNull();
+    expect(backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })).toBeNull();
+  });
+
+  test('rejects multi-night quotes for non-night offers', () => {
+    const { backend, offer, travelerA } = setup('ticket');
+    expect(() => backend.createQuote({
+      travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 2, serviceFeeRate: 600,
+    })).toThrow('invalid_quote_input');
+  });
+
+  test('releases the right counter on rejection and cancellation, and only once', () => {
+    const { backend, offer, travelerA } = setup();
+    const inventory = backend.publishInventory({ offerId: offer.id, date: '2026-12-10', totalUnits: 2 });
+    const book = () => {
+      const quote = backend.createQuote({
+        travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 1, serviceFeeRate: 600,
+      });
+      return backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })!;
+    };
+    const counters = () => {
+      const current = backend.publishInventory({ offerId: offer.id, date: '2026-12-10', totalUnits: inventory.totalUnits });
+      return `${current.heldUnits}/${current.soldUnits}`;
+    };
+
+    const rejected = book();
+    backend.simulatePayment(rejected.id, { status: 'rejected' });
+    expect(counters()).toBe('0/0');
+
+    const confirmed = book();
+    backend.simulatePayment(confirmed.id, { status: 'approved' });
+    expect(counters()).toBe('0/1');
+    backend.cancelReservation(confirmed.id, { reason: 'traveler_request' });
+    backend.cancelReservation(confirmed.id, { reason: 'traveler_request' });
+    expect(counters()).toBe('0/0');
+  });
+
+  test('refunds never exceed what was charged and need an approved payment', () => {
+    const { backend, offer, travelerA } = setup();
+    backend.publishInventory({ offerId: offer.id, date: '2026-12-10', totalUnits: 2 });
+    const quote = backend.createQuote({
+      travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 1, serviceFeeRate: 600,
+    });
+    const reservation = backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })!;
+    expect(() => backend.processRefund(reservation.id, { amountCents: 100 })).toThrow('refund_not_allowed');
+
+    backend.simulatePayment(reservation.id, { status: 'approved' });
+    expect(backend.processRefund(reservation.id, { amountCents: 600 }).refundCents).toBe(600);
+    expect(() => backend.processRefund(reservation.id, { amountCents: reservation.amountCents - 600 }))
+      .toThrow('refund_requires_cancellation');
+    backend.cancelReservation(reservation.id, { reason: 'traveler_request' });
+    expect(() => backend.processRefund(reservation.id, { amountCents: reservation.amountCents })).toThrow('refund_exceeds_paid');
+    expect(backend.processRefund(reservation.id, { amountCents: reservation.amountCents - 600 }).status).toBe('refunded');
+  });
+
+  test('lets a provider read only reservations of the provider they own', () => {
+    const { backend, providerUser, offer, travelerA, travelerB } = setup();
+    backend.publishInventory({ offerId: offer.id, date: '2026-12-10', totalUnits: 1 });
+    const quote = backend.createQuote({
+      travelerId: travelerA.id, offerId: offer.id, date: '2026-12-10', quantity: 1, nights: 1, serviceFeeRate: 600,
+    });
+    const reservation = backend.reserveOffer({ quoteId: quote.id, travelerId: travelerA.id, quantity: 1, date: '2026-12-10' })!;
+    const stranger = backend.createUser({ name: 'Other provider', role: 'provider', country: 'BR' });
+    expect(backend.canAccessRecord(providerUser.id, reservation.id, 'provider')).toBe(true);
+    expect(backend.canAccessRecord(stranger.id, reservation.id, 'provider')).toBe(false);
+    expect(backend.canAccessRecord(travelerB.id, reservation.id, 'traveler')).toBe(false);
   });
 });
