@@ -24,9 +24,10 @@ with checks(name, ok) as (
           'connectical_adjust_stay_inventory', 'connectical_expire_offer_holds', 'connectical_lock_offer',
           'connectical_create_traveler_profile', 'connectical_system_expire_holds',
           'connectical_system_run_hold_sweep', 'connectical_system_ingest_payment_event',
-          'connectical_redact_reservation', 'connectical_offer_moderation_guard', 'connectical_audit_change'))),
+          'connectical_redact_reservation', 'connectical_offer_moderation_guard', 'connectical_audit_change',
+          'connectical_can_manage_offer'))),
     ('app RPCs executable by authenticated',
-      (select count(*) = 34 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
+      (select count(*) = 36 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_quote', 'connectical_create_reservation_hold', 'connectical_simulate_payment',
@@ -42,7 +43,8 @@ with checks(name, ok) as (
           'connectical_admin_list_offers_for_moderation', 'connectical_admin_list_audit_log',
           'connectical_report_incident', 'connectical_my_incidents', 'connectical_admin_list_incidents',
           'connectical_admin_update_incident', 'connectical_admin_list_users', 'connectical_admin_kpis',
-          'connectical_admin_save_campaign', 'connectical_admin_list_campaigns', 'connectical_active_campaigns'))),
+          'connectical_admin_save_campaign', 'connectical_admin_list_campaigns', 'connectical_active_campaigns',
+          'connectical_add_offer_media', 'connectical_remove_offer_media'))),
     ('anon cannot run reservation, refund or operations RPCs',
       (select bool_and(not has_function_privilege('anon', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -52,7 +54,8 @@ with checks(name, ok) as (
           'connectical_admin_set_provider_active', 'connectical_submit_provider_application',
           'connectical_admin_review_provider_application', 'connectical_admin_set_offer_moderation',
           'connectical_report_incident', 'connectical_admin_update_incident', 'connectical_admin_list_users',
-          'connectical_admin_kpis', 'connectical_admin_save_campaign', 'connectical_admin_list_audit_log'))),
+          'connectical_admin_kpis', 'connectical_admin_save_campaign', 'connectical_admin_list_audit_log',
+          'connectical_add_offer_media', 'connectical_remove_offer_media'))),
     ('SECURITY DEFINER functions pin search_path',
       (select bool_and(p.proconfig is not null and exists (
           select 1 from unnest(p.proconfig) cfg where cfg like 'search_path=%'))

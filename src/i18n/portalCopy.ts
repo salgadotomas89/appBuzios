@@ -278,6 +278,9 @@ const es = {
     invalid_period: 'El periodo no es válido (máximo un año).',
     campaign_not_found: 'No encontramos la campaña.',
     invalid_campaign: 'Revisa la campaña: título de 2 a 80 caracteres y fecha final no anterior a la inicial.',
+    invalid_media: 'La foto no es válida: JPEG, PNG o WebP de hasta 5 MB, entre 600 y 6000 px por lado y con texto alternativo.',
+    media_limit_reached: 'La oferta ya tiene el máximo de 10 fotos.',
+    media_not_found: 'No encontramos la foto.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -524,6 +527,9 @@ const pt: PortalCopy = {
     invalid_period: 'O período não é válido (máximo um ano).',
     campaign_not_found: 'Não encontramos a campanha.',
     invalid_campaign: 'Revise a campanha: título de 2 a 80 caracteres e data final não anterior à inicial.',
+    invalid_media: 'A foto não é válida: JPEG, PNG ou WebP de até 5 MB, entre 600 e 6000 px por lado e com texto alternativo.',
+    media_limit_reached: 'A oferta já tem o máximo de 10 fotos.',
+    media_not_found: 'Não encontramos a foto.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };

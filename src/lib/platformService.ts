@@ -1,5 +1,8 @@
 import type { PortalCategory } from '../i18n/portalCopy';
+import { MediaUploadError, type MediaStorage, uploadOfferImage } from '../media/storageAdapter';
+import type { ImageCandidate } from '../media/imagePolicy';
 import { callRpc } from './reservationService';
+import { insforge } from './insforge';
 
 // Alta de proveedores, administración e incidencias (migraciones 202611150001 y 202611150002).
 // Todas las comprobaciones de permisos ocurren en PostgreSQL; esta capa solo llama a los RPC.
@@ -201,4 +204,56 @@ export async function saveCampaign(input: Omit<Campaign, 'id'> & { id: string | 
 
 export async function listActiveCampaigns(): Promise<Array<Omit<Campaign, 'status'>>> {
   return callRpc('connectical_active_campaigns', {});
+}
+
+export type OfferMedia = {
+  id: string;
+  offer_id: string;
+  url: string;
+  content_type: string;
+  width: number;
+  height: number;
+  alt_text: string;
+  position: number;
+};
+
+// Fotos de varias ofertas en una consulta; la RLS solo devuelve las de ofertas visibles para quien lee.
+export async function listOfferMedia(offerIds: string[]): Promise<OfferMedia[]> {
+  if (!offerIds.length || !insforge) return [];
+  const { data, error } = await insforge.database
+    .from('connectical_offer_media')
+    .select('id, offer_id, url, content_type, width, height, alt_text, position')
+    .in('offer_id', offerIds)
+    .order('position', { ascending: true });
+  if (error) throw new Error(`No se pudieron leer las fotos: ${error.message}`);
+  return (data ?? []) as OfferMedia[];
+}
+
+// Sube al almacenamiento y registra los metadatos. Si el registro falla, borra el archivo subido para
+// no dejar huérfanos. Con el almacenamiento desactivado (sin bucket confirmado) falla antes de subir.
+export async function addOfferPhoto(storage: MediaStorage, offerId: string, candidate: ImageCandidate): Promise<string> {
+  const uploaded = await uploadOfferImage(storage, offerId, candidate);
+  try {
+    return await callRpc<string>('connectical_add_offer_media', {
+      p_offer_id: offerId,
+      p_storage_key: uploaded.key,
+      p_url: uploaded.url,
+      p_content_type: uploaded.type,
+      p_byte_size: uploaded.byteSize,
+      p_width: uploaded.width,
+      p_height: uploaded.height,
+      p_alt_text: uploaded.altText,
+    });
+  } catch (error) {
+    await storage.remove(uploaded.key).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function removeOfferPhoto(storage: MediaStorage, mediaId: string): Promise<void> {
+  const key = await callRpc<string>('connectical_remove_offer_media', { p_media_id: mediaId });
+  // El registro ya no existe; si el archivo no se puede borrar queda para una limpieza posterior.
+  await storage.remove(key).catch(error => {
+    if (!(error instanceof MediaUploadError)) throw error;
+  });
 }

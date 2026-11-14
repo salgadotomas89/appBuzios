@@ -20,7 +20,7 @@ Pegar [`supabase/checks/preflight.sql`](../supabase/checks/preflight.sql) en el 
 | --- | --- |
 | 1. Identidad | PostgreSQL 15 o superior; anotar base, usuario y versión |
 | 2. Extensiones | anotar si `pg_cron` está disponible (decide el scheduler del paso 5) |
-| 3. Auth | las cuatro columnas en `true` |
+| 3. Auth | las cinco columnas en `true` |
 | 4. Objetos `connectical_*` | **ninguna fila**. Si hay filas, detenerse y comparar con las migraciones |
 | 5. Historial de migraciones | anotar lo que aparezca; no tocarlo |
 | 6. Volumen | solo recuentos; anotar |
@@ -39,10 +39,14 @@ Pegar [`supabase/checks/preflight.sql`](../supabase/checks/preflight.sql) en el 
 9. `supabase/migrations/202611140008_payment_events.sql`
 10. `supabase/migrations/202611140009_offer_details.sql`
 11. `supabase/migrations/202611140010_traveler_privacy.sql`
+12. `supabase/migrations/202611150001_provider_onboarding.sql`
+13. `supabase/migrations/202611150002_admin_operations.sql`
+14. `supabase/migrations/202611150003_offer_media.sql`
+15. `supabase/migrations/202611150004_public_catalog_access.sql`
 
 Resultado esperado de cada una: sin errores (los avisos `NOTICE ... skipping` son normales).
 
-Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las once se ensayaron aplicadas dos veces
+Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las quince se ensayaron aplicadas dos veces
 seguidas sin error. No saltar al archivo siguiente hasta que el actual termine sin errores.
 
 Ensayo local de este paso: `npm run test:shared-reservations` (base vacía) y `npm run test:migration-upgrade`

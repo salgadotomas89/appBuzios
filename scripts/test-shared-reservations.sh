@@ -1134,6 +1134,63 @@ visible=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set rol
 [ "$visible" = 'Verão em Búzios' ] || { echo "Active campaigns for anon mismatch: $visible" >&2; exit 1; }
 echo "PASS moderation, audit log, incidents, users, KPIs and campaigns are admin-only and behave as specified"
 
+# Offer photos: metadata only, owner-or-admin writes, key bound to the offer, public only when visible.
+media_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+add_media() { as_user "$1" "select public.connectical_add_offer_media('$mod_offer', '$2', 'https://cdn.example/$2', '$3', $4, $5, $6, '$7');"; }
+for actor in "$traveler_a" "$provider_user"; do
+  if add_media "$actor" "$media_key" image/jpeg 2000 1200 900 'Quarto' >/dev/null 2>&1; then
+    echo "Non-owner could add offer media" >&2; exit 1
+  fi
+done
+other_key="offers/$range_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+for bad in "$other_key|image/jpeg|2000|1200|900|Quarto" "$media_key|image/gif|2000|1200|900|Quarto" \
+  "$media_key|image/jpeg|6000000|1200|900|Quarto" "$media_key|image/jpeg|2000|300|900|Quarto" "$media_key|image/jpeg|2000|1200|900| "; do
+  IFS='|' read -r bkey btype bsize bw bh balt <<EOF
+$bad
+EOF
+  if add_media "$applicant" "$bkey" "$btype" "$bsize" "$bw" "$bh" "$balt" >/dev/null 2>&1; then
+    echo "Invalid offer media accepted: $bad" >&2; exit 1
+  fi
+done
+media_id=$(add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto com vista para o mar')
+if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Duplicada' >/dev/null 2>&1; then
+  echo "Duplicate storage key accepted" >&2; exit 1
+fi
+public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+[ "$public_media" = 'Quarto com vista para o mar' ] || { echo "Visible offer photo not readable by anon: $public_media" >&2; exit 1; }
+if docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select storage_key from public.connectical_offer_media limit 1;" >/dev/null 2>&1; then
+  echo "Storage keys readable by anon" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', 'Revisão de fotos');" >/dev/null
+hidden_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'approved', '');" >/dev/null
+[ "$hidden_media" = '0' ] || { echo "Photos of a suspended offer stayed public" >&2; exit 1; }
+for i in 2 3 4 5 6 7 8 9 10; do
+  k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+  add_media "$applicant" "$k" image/png 3000 1000 1000 "Foto $i" >/dev/null
+done
+k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+if add_media "$applicant" "$k" image/png 3000 1000 1000 'Foto 11' >/dev/null 2>&1; then
+  echo "Eleventh photo accepted" >&2; exit 1
+fi
+if as_user "$provider_user" "select public.connectical_remove_offer_media('$media_id');" >/dev/null 2>&1; then
+  echo "Non-owner could remove offer media" >&2; exit 1
+fi
+removed_key=$(as_user "$applicant" "select public.connectical_remove_offer_media('$media_id');")
+[ "$removed_key" = "$media_key" ] || { echo "Removal did not return the storage key: $removed_key" >&2; exit 1; }
+echo "PASS offer photos: owner-only metadata, key bound to the offer, limits, visibility and removal key"
+
+# Anonymous catalog: visitors without a session read published, visible offers and their inventory.
+anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
+anon_offers=$(anon_read "select count(*) from public.connectical_offers;")
+anon_inventory=$(anon_read "select count(*) from public.connectical_inventory;")
+anon_suspended=$(anon_read "select count(*) from public.connectical_offers where moderation_status <> 'approved' or not published;")
+case "$anon_offers|$anon_inventory" in
+  *ERROR*|0\|*|*\|0) echo "Anonymous catalog read failed: offers=$anon_offers inventory=$anon_inventory" >&2; exit 1 ;;
+esac
+[ "$anon_suspended" = '0' ] || { echo "Anonymous visitors see hidden offers: $anon_suspended" >&2; exit 1; }
+echo "PASS visitors without a session read published offers and inventory, never hidden ones"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

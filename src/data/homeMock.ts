@@ -37,6 +37,8 @@ export type Offer = {
   route?: { es: string; pt: string };
   ticketType?: { es: string; pt: string };
   missingFields?: { es: string[]; pt: string[] };
+  // Fotos autorizadas del proveedor; el texto alternativo lo escribe él en un solo idioma.
+  photos?: Array<{ url: string; alt: string; width: number; height: number }>;
 };
 
 export const homeMock = {
