@@ -31,3 +31,19 @@ Commits: `0a6c588`, `10324b7`, `60b56f1`, `ef6fbd9`, `437716f`, `54c898f`.
 - Catálogo unificado tras `SHARED_CATALOG_ENABLED` (apagado). Las ofertas reales se reservan en el portal.
 - Demo: fechas en calendario de Búzios, sin fechas pasadas; botón de operaciones y etiquetas de accesibilidad localizados.
 - Jest 120/120 · PostgreSQL 30/30 (contadas en la última ejecución) · CI verde en `60b56f1`.
+
+## Checkpoint 2 y cierre (07:54)
+
+Commits después del checkpoint 1: `c9f3a72` (modelo en memoria alineado con SQL), `782a1e8` y `0c2b203` (documentación,
+aviso de motivo visible), `f4625c0` (Podfile), `53d7d21` (`supabase/checks/verify_migrations.sql`), `2a4751e`
+(se elimina `HomeScreen.tsx`, sin uso), `56dd732` (correcciones de la revisión independiente).
+Merge a `main`: `55aa787` (`--no-ff`, push normal). CI de `main`: run 43586721006, ambos jobs en verde.
+
+- Build iOS: compilación Debug para simulador genérico **exitosa** tras subir el mínimo de los pods a iOS 15.
+  Solo compilación: no se ejecutó en ningún simulador porque CoreSimulator está desactualizado (1174.9.2 < 1174.21.0).
+  Android: sin Java ni SDK, no se intentó.
+- Revisión independiente del diff: sin hallazgos graves; dos medios (un reembolso podía registrarse dos veces desde el
+  formulario) y cuatro menores. Corregidos todos menos la visibilidad de `actor_user_id`, que pasa a revisión humana.
+- Resultados finales medidos: Jest 128/128, tsc y ESLint sin errores, integración PostgreSQL 32/32.
+- Tiempo efectivo: 06:56–07:54, unos 58 minutos. No se trabajaron siete horas: el resto del backlog depende del
+  tenant, de decisiones comerciales o de componentes del sistema que requieren a una persona.
