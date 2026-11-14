@@ -35,10 +35,11 @@ Pegar [`supabase/checks/preflight.sql`](../supabase/checks/preflight.sql) en el 
 5. `supabase/migrations/202611140004_operations_tools.sql`
 6. `supabase/migrations/202611140005_hide_internal_ids.sql`
 7. `supabase/migrations/202611140006_sweep_runs.sql`
+8. `supabase/migrations/202611140007_commercial_terms.sql`
 
 Resultado esperado de cada una: sin errores (los avisos `NOTICE ... skipping` son normales).
 
-Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las siete se ensayaron aplicadas dos veces
+Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las ocho se ensayaron aplicadas dos veces
 seguidas sin error. No saltar al archivo siguiente hasta que el actual termine sin errores.
 
 Ensayo local de este paso: `npm run test:shared-reservations` (base vacía) y `npm run test:migration-upgrade`
