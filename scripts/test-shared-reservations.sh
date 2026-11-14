@@ -4,7 +4,7 @@ set -eu
 container="${CONNECTICAL_TEST_CONTAINER:-connectical-reservation-it-$$}"
 owns_container=1
 if [ -n "${CONNECTICAL_TEST_CONTAINER:-}" ]; then owns_container=0; fi
-migration="$PWD/supabase/migrations/202611110001_shared_reservations.sql"
+migrations="$PWD/supabase/migrations"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/connectical-reservation-it.XXXXXX")"
 container_pid=''
 cleanup() {
@@ -22,7 +22,7 @@ fi
 if [ "$owns_container" -eq 1 ]; then
   docker run --name "$container" \
     -e POSTGRES_PASSWORD=connectical_local_test_only \
-    -v "$migration:/tmp/connectical-migration.sql:ro" \
+    -v "$migrations:/tmp/connectical-migrations:ro" \
     postgres:17 >"$workdir/postgres.log" 2>&1 &
   container_pid=$!
 fi
@@ -57,7 +57,14 @@ grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
 SQL
 
-docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f /tmp/connectical-migration.sql >/dev/null
+# Apply every migration in filename order, exactly as an operator would.
+for migration_file in $(docker exec "$container" sh -c 'ls /tmp/connectical-migrations/*.sql' | sort); do
+  docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -f "$migration_file" >/dev/null 2>"$workdir/migration.err" || {
+    cat "$workdir/migration.err" >&2
+    echo "Migration failed: $migration_file" >&2
+    exit 1
+  }
+done
 
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 insert into auth.users (id, raw_user_meta_data) values
@@ -260,4 +267,78 @@ expiry_state=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres
   -c "select (select status from public.connectical_reservations where id='$expired_hold')||'|'||(select held_units from public.connectical_inventory where offer_id='50000000-0000-4000-8000-000000000001')||'|'||(select status from public.connectical_reservations where id='$replacement_hold');" | tail -1)
 [ "$expiry_state" = 'expired|1|held' ] || { echo "Expired hold did not release and reassign inventory: $expiry_state" >&2; exit 1; }
 echo "PASS hold expiration reclaims inventory for the next traveler"
+
+# Runs SQL as an authenticated user and prints the last row; fails when psql fails.
+as_user() {
+  as_user_out=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$1',false);" -c "$2") || return 1
+  printf '%s\n' "$as_user_out" | tail -1
+}
+traveler_a='10000000-0000-4000-8000-000000000001'
+traveler_b='10000000-0000-4000-8000-000000000002'
+pousada='50000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_inventory (offer_id, service_date, total_units) values
+  ('$pousada', current_date + 40, 1), ('$pousada', current_date + 41, 1), ('$pousada', current_date + 42, 1);"
+
+stay_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$pousada', current_date + 40, 1, 2, 600)).id;")
+stay_id=$(as_user "$traveler_a" "select (public.connectical_create_reservation_hold('$stay_quote','70000000-0000-4000-8000-000000000001')).id;")
+stay_nights=$(as_user "$traveler_a" "select nights from public.connectical_reservations where id='$stay_id';")
+[ "$stay_nights" = '2' ] || { echo "Multi-night hold did not persist its nights: $stay_nights" >&2; exit 1; }
+overlap_quote=$(as_user "$traveler_b" "select (public.connectical_create_quote('$pousada', current_date + 41, 1, 1, 600)).id;")
+if as_user "$traveler_b" "select public.connectical_create_reservation_hold('$overlap_quote','70000000-0000-4000-8000-000000000002');" >/dev/null 2>&1; then
+  echo "Overlapping stay on the second night was not rejected" >&2
+  exit 1
+fi
+after_quote=$(as_user "$traveler_b" "select (public.connectical_create_quote('$pousada', current_date + 42, 1, 1, 600)).id;")
+as_user "$traveler_b" "select (public.connectical_create_reservation_hold('$after_quote','70000000-0000-4000-8000-000000000003')).id;" >/dev/null
+stay_counters() {
+  docker exec "$container" psql -qAt -U postgres -d postgres -c "
+    select string_agg(held_units||'/'||sold_units, ',' order by service_date) from public.connectical_inventory
+    where offer_id='$pousada' and service_date between current_date + 40 and current_date + 42;" | tail -1
+}
+[ "$(stay_counters)" = '1/0,1/0,1/0' ] || { echo "Multi-night hold counters mismatch: $(stay_counters)" >&2; exit 1; }
+echo "PASS multi-night hold reserves every night and blocks overlapping stays"
+
+as_user "$traveler_a" "select (public.connectical_simulate_payment('$stay_id','approved','pix','LAB-PIX')).status;" >/dev/null
+[ "$(stay_counters)" = '0/1,0/1,1/0' ] || { echo "Multi-night payment counters mismatch: $(stay_counters)" >&2; exit 1; }
+as_user "$traveler_a" "select (public.connectical_cancel_reservation('$stay_id','integration_test')).status;" >/dev/null
+[ "$(stay_counters)" = '0/0,0/0,1/0' ] || { echo "Multi-night cancellation counters mismatch: $(stay_counters)" >&2; exit 1; }
+echo "PASS multi-night payment and cancellation move every night together"
+
+gap_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$pousada', current_date + 41, 1, 3, 600)).id;")
+if as_user "$traveler_a" "select public.connectical_create_reservation_hold('$gap_quote','70000000-0000-4000-8000-000000000004');" >/dev/null 2>"$workdir/gap.err"; then
+  echo "Stay with unpublished nights was not rejected" >&2
+  exit 1
+fi
+grep -q 'inventory_not_found' "$workdir/gap.err" || { echo "Unexpected error for unpublished nights" >&2; cat "$workdir/gap.err" >&2; exit 1; }
+echo "PASS stay with unpublished nights is rejected"
+
+if as_user "$traveler_a" "select public.connectical_create_quote('$pousada', current_date - 2, 1, 1, 600);" >/dev/null 2>&1; then
+  echo "Quote for a past service date was not rejected" >&2
+  exit 1
+fi
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', current_date - 2, 3);" >/dev/null 2>&1; then
+  echo "Inventory for a past service date was not rejected" >&2
+  exit 1
+fi
+echo "PASS past service dates are rejected for quotes and inventory"
+
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('52000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'barcos', 'Boat lab ticket', 15000, 'person', true);"
+if as_user "$traveler_a" "select public.connectical_create_quote('52000000-0000-4000-8000-000000000001', current_date + 40, 2, 2, 600);" >/dev/null 2>&1; then
+  echo "Multi-night quote for a per-person offer was not rejected" >&2
+  exit 1
+fi
+echo "PASS non-night offers only accept a single service date"
+
+for helper in "connectical_adjust_stay_inventory('$pousada', current_date + 42, 1, -1, 0)" \
+  "connectical_expire_offer_holds('$pousada')" "connectical_lock_offer('$pousada')"; do
+  if as_user "$traveler_a" "select public.$helper;" >/dev/null 2>&1; then
+    echo "Internal helper is executable by authenticated users: $helper" >&2
+    exit 1
+  fi
+done
+echo "PASS internal inventory helpers are not executable by authenticated users"
 echo "Shared PostgreSQL integration test passed"

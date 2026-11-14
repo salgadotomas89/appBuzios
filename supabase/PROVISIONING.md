@@ -1,6 +1,6 @@
 # Provisioning for the InsForge trial project
 
-Apply this only in the verified InsForge **trial** project after the shared-reservations migration has succeeded. Do not run it in production or against Connectical Logistica.
+Apply this only in the verified InsForge **trial** project after both shared-reservation migrations (`202611110001_shared_reservations.sql`, then `202611140001_multi_night_inventory.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
 
 ## Accounts and roles
 
