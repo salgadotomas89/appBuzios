@@ -19,6 +19,7 @@ import {
   listSharedProviders,
   listSharedReservations,
   listSharedReservationEvents,
+  listOfferAvailability,
   ReservationError,
   signInSharedAccount,
   signUpTravelerAccount,
@@ -91,6 +92,7 @@ export function ReservationPortal({
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
   const [selectedProviderOfferId, setSelectedProviderOfferId] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<SharedOffer | null>(null);
+  const [availability, setAvailability] = useState<SharedInventory[] | null>(null);
   const [date, setDate] = useState(buziosIsoDate());
   const [quantity, setQuantity] = useState('1');
   const [nights, setNights] = useState('1');
@@ -227,8 +229,13 @@ export function ReservationPortal({
 
   function selectOffer(offer: SharedOffer) {
     setSelectedOffer(offer);
+    setAvailability(null);
     invalidateQuote();
     if (offer.price_mode !== 'night') setNights('1');
+    run(async () => {
+      const dates = await listOfferAvailability(offer.id, buziosIsoDate());
+      if (mounted.current) setAvailability(dates);
+    });
   }
 
   function createQuote() {
@@ -396,6 +403,29 @@ export function ReservationPortal({
               {selectedOffer ? (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{words.quoteAndBook} · {selectedOffer.title}</Text>
+                  {availability ? (
+                    <>
+                      <Text style={styles.fieldLabel}>{words.availability}</Text>
+                      {availability.some(item => item.total_units - item.held_units - item.sold_units > 0) ? (
+                        <View style={styles.chips}>
+                          {availability
+                            .filter(item => item.total_units - item.held_units - item.sold_units > 0)
+                            .slice(0, 12)
+                            .map(item => (
+                              <Chip
+                                key={item.service_date}
+                                label={`${item.service_date} · ${item.total_units - item.held_units - item.sold_units}`}
+                                selected={date.trim() === item.service_date}
+                                onPress={() => {
+                                  setDate(item.service_date);
+                                  invalidateQuote();
+                                }}
+                              />
+                            ))}
+                        </View>
+                      ) : <Text style={styles.helper}>{words.noAvailability}</Text>}
+                    </>
+                  ) : null}
                   <Field label={perNight ? words.checkIn : words.date} value={date} onChange={value => { setDate(value); invalidateQuote(); }} />
                   <Field label={words.quantity[selectedOffer.price_mode]} value={quantity} onChange={value => { setQuantity(value); invalidateQuote(); }} numeric />
                   {perNight ? (

@@ -13,7 +13,7 @@ jest.mock('../src/lib/reservationService', () => {
     'listProviderInventory', 'listProviderOffers', 'listSharedOffers', 'listSharedProviders',
     'listSharedReservations', 'listSharedReservationEvents', 'signInSharedAccount',
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
-    'upsertProviderOffer', 'publishProviderInventory',
+    'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -85,6 +85,7 @@ beforeEach(() => {
   mocked.listSharedReservationEvents.mockResolvedValue([]);
   mocked.listProviderOffers.mockResolvedValue([]);
   mocked.listProviderInventory.mockResolvedValue([]);
+  mocked.listOfferAvailability.mockResolvedValue([]);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -262,4 +263,27 @@ it('sends the chosen simulated outcome and hides payment actions from admins', a
   expect(hasText(root, 'Pagamento recusado (simulado)')).toBe(true);
   expect(hasText(root, 'custom_event')).toBe(true);
   expect(hasText(root, 'Pagar (simulado)')).toBe(false);
+});
+
+it('shows dates with free units and fills the date when one is chosen', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  const slot = { offer_id: pousada.id, version: 1, updated_at: '2099-01-01T00:00:00Z' };
+  mocked.listOfferAvailability.mockResolvedValue([
+    { ...slot, service_date: '2099-05-01', total_units: 2, held_units: 1, sold_units: 1 },
+    { ...slot, service_date: '2099-05-02', total_units: 3, held_units: 0, sold_units: 1 },
+  ]);
+  const root = await render();
+  await press(root, 'Pousada Porto');
+  expect(mocked.listOfferAvailability).toHaveBeenCalledWith(pousada.id, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+  expect(hasText(root, '2099-05-01 ·')).toBe(false);
+  await press(root, '2099-05-02 · 2');
+  const input = root.findAll(node => node.type === TextInput && node.props.accessibilityLabel === 'Entrada (AAAA-MM-DD)')[0];
+  expect(input.props.value).toBe('2099-05-02');
+});
+
+it('says when an offer has no published availability', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  const root = await render();
+  await press(root, 'Barco Azul');
+  expect(hasText(root, 'El proveedor todavía no publicó cupo para esta oferta.')).toBe(true);
 });

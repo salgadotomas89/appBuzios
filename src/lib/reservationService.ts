@@ -293,3 +293,16 @@ export async function publishProviderInventory(input: {
     p_total_units: input.totalUnits,
   });
 }
+
+// Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.
+export async function listOfferAvailability(offerId: string, fromDate: string): Promise<SharedInventory[]> {
+  const { data, error } = await getClient().database
+    .from('connectical_inventory')
+    .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
+    .eq('offer_id', offerId)
+    .gte('service_date', fromDate)
+    .order('service_date', { ascending: true })
+    .limit(60);
+  if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
+  return (data ?? []) as SharedInventory[];
+}
