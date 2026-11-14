@@ -55,3 +55,17 @@ Merge intermedio a `main`: `a075552` (CI de la rama en verde, run 43640222295).
 - Jest 147/147. PostgreSQL: todas las verificaciones del script pasan (ver CI).
 - Siguiente: detalle de producto (descripción, ubicación, horario, límites por reserva), ingresos del proveedor,
   resultado financiero por reserva, inglés pendiente de revisión, Android.
+
+## Checkpoint 3 (18:49, unos 80 min de reloj desde el inicio)
+
+Commits desde el checkpoint 2: `2e0bf93` (detalle de producto y límites por reserva, migración `202611140009`),
+`35d86ae` (ingresos del proveedor), `c0a140d` (pagos reales tras tres controles; la demo deja de registrar "mercado_pago"),
+`5aee606` (entorno móvil), `85b9b73` (fecha de Búzios que se actualiza sola), `e56e384` (salvaguarda de Zod),
+`9c19fcb` (autenticación y OAuth).
+
+- Diez migraciones; ensayo de actualización y doble aplicación correctos.
+- Hallazgos: el formulario del proveedor guardaba la oferta antes de validar las noches a publicar (corregido); la
+  sesión del SDK no persiste al reabrir la app (documentado, requiere decisión); el build release de Android firma con
+  la clave debug de la plantilla (documentado).
+- Revisión independiente del diff de la tarde en curso.
+- Jest 157/157.
