@@ -674,6 +674,106 @@ cancel_as_provider=$(as_user "$provider_user" "select coalesce(r.traveler_user_i
 [ "$cancel_as_provider" = 'hidden|hidden|cancelled' ] || { echo "Provider cancel returned traveler ids: $cancel_as_provider" >&2; exit 1; }
 echo "PASS internal Auth ids stay out of traveler and provider reads; admins audit them through an RPC"
 
+# Edge cases: several rooms, cancel racing a new hold, rolled-back transactions, expiry mid-flow,
+# and a stay across New Year.
+racer() { printf '11000000-0000-4000-8000-00000000000%s' "$1"; }
+sync_hold() {
+  # $1 user, $2 quote, $3 start epoch, $4 output file
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$1',false);" \
+    -c "select pg_sleep(greatest(0, $3 - extract(epoch from clock_timestamp())));" \
+    -c "select (public.connectical_create_reservation_hold('$2', gen_random_uuid())).id;" >"$4" 2>&1 && echo ok >>"$4" || echo fail >>"$4"
+}
+multi_offer='57000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$multi_offer', '$lab_provider', 'pousadas', 'Three rooms lab', 18000, 'night', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$multi_offer', current_date + 120, 3);"
+multi_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '4 seconds');" | tail -1)
+multi_pids=''
+for g in 1 2 3 4; do
+  multi_quote=$(as_user "$(racer $g)" "select (public.connectical_create_quote('$multi_offer', current_date + 120, 2, 1, 600)).id;")
+  sync_hold "$(racer $g)" "$multi_quote" "$multi_start" "$workdir/multi.$g" &
+  multi_pids="$multi_pids $!"
+done
+for pid in $multi_pids; do wait "$pid"; done
+multi_wins=$(tail -qn1 "$workdir"/multi.* | grep -c '^ok$' || true)
+[ "$multi_wins" = '1' ] || { echo "Two-room requests on three rooms: expected 1 winner, got $multi_wins" >&2; exit 1; }
+single_quote=$(as_user "$(racer 5)" "select (public.connectical_create_quote('$multi_offer', current_date + 120, 1, 1, 600)).id;")
+as_user "$(racer 5)" "select (public.connectical_create_reservation_hold('$single_quote', gen_random_uuid())).id;" >/dev/null
+multi_counters=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || total_units from public.connectical_inventory where offer_id = '$multi_offer';" | tail -1)
+[ "$multi_counters" = '3/3' ] || { echo "Multi-room counters mismatch: $multi_counters" >&2; exit 1; }
+echo "PASS concurrent multi-room requests never exceed capacity and the remaining room is still bookable"
+
+edge_offer='58000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$edge_offer', '$lab_provider', 'pousadas', 'Edge lab room', 21000, 'night', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$edge_offer', current_date + 130, 1);"
+first_quote=$(as_user "$(racer 1)" "select (public.connectical_create_quote('$edge_offer', current_date + 130, 1, 1, 600)).id;")
+first_id=$(as_user "$(racer 1)" "select (public.connectical_create_reservation_hold('$first_quote', gen_random_uuid())).id;")
+as_user "$(racer 1)" "select public.connectical_simulate_payment('$first_id','approved','card','LAB-EDGE');" >/dev/null
+second_quote=$(as_user "$(racer 2)" "select (public.connectical_create_quote('$edge_offer', current_date + 130, 1, 1, 600)).id;")
+edge_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '3 seconds');" | tail -1)
+(
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$(racer 1)',false);" \
+    -c "select pg_sleep(greatest(0, $edge_start - extract(epoch from clock_timestamp())));" \
+    -c "select (public.connectical_cancel_reservation('$first_id', 'traveler_request')).status;" >"$workdir/edge.cancel" 2>&1
+) &
+cancel_pid=$!
+sync_hold "$(racer 2)" "$second_quote" "$edge_start" "$workdir/edge.hold" &
+hold_pid=$!
+wait "$cancel_pid"; wait "$hold_pid"
+grep -q '^cancelled$' "$workdir/edge.cancel" || { echo "Cancel racing a hold did not cancel" >&2; cat "$workdir/edge.cancel" >&2; exit 1; }
+edge_counters=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || sold_units from public.connectical_inventory where offer_id = '$edge_offer';" | tail -1)
+case "$(tail -n1 "$workdir/edge.hold")|$edge_counters" in
+  'ok|1/0'|'fail|0/0') ;;
+  *) echo "Cancel racing a hold left inconsistent state: $(tail -n1 "$workdir/edge.hold") $edge_counters" >&2; exit 1 ;;
+esac
+echo "PASS a cancellation racing a new hold leaves the room either freed or re-held, never both"
+
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$edge_offer', current_date + 131, 1);"
+rollback_quote=$(as_user "$(racer 3)" "select (public.connectical_create_quote('$edge_offer', current_date + 131, 1, 1, 600)).id;")
+docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$(racer 3)',false);" \
+  -c "begin; select (public.connectical_create_reservation_hold('$rollback_quote', gen_random_uuid())).id; rollback;" >/dev/null
+rollback_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select (select count(*) from public.connectical_reservations where quote_id = '$rollback_quote') || '|' ||
+         (select held_units from public.connectical_inventory where offer_id = '$edge_offer' and service_date = current_date + 131);" | tail -1)
+[ "$rollback_state" = '0|0' ] || { echo "Rolled-back hold left residue: $rollback_state" >&2; exit 1; }
+retry_after_rollback=$(as_user "$(racer 3)" "select (public.connectical_create_reservation_hold('$rollback_quote', gen_random_uuid())).status;")
+[ "$retry_after_rollback" = 'held' ] || { echo "Quote unusable after a rolled-back hold: $retry_after_rollback" >&2; exit 1; }
+echo "PASS an interrupted transaction leaves no reservation or held unit and the quote stays usable"
+
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_reservations set hold_expires_at = now() - interval '1 second' where quote_id = '$rollback_quote';"
+late_quote=$(as_user "$(racer 4)" "select (public.connectical_create_quote('$edge_offer', current_date + 131, 1, 1, 600)).id;")
+late_hold=$(as_user "$(racer 4)" "select (public.connectical_create_reservation_hold('$late_quote', gen_random_uuid())).status;")
+expired_state=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select status from public.connectical_reservations where quote_id = '$rollback_quote';" | tail -1)
+[ "$late_hold" = 'held' ] && [ "$expired_state" = 'expired' ] || { echo "Elapsed hold blocked the last room: $late_hold $expired_state" >&2; exit 1; }
+echo "PASS a hold that elapses mid-flow releases the last room to the next traveler"
+
+ny_offer='59000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$ny_offer', '$lab_provider', 'pousadas', 'New Year lab room', 50000, 'night', true);"
+ny_from="make_date(extract(year from current_date)::int + 1, 12, 30)"
+as_user "$provider_user" "select public.connectical_provider_publish_inventory_range('$ny_offer', $ny_from, 4, 1);" >/dev/null
+ny_quote=$(as_user "$(racer 5)" "select (public.connectical_create_quote('$ny_offer', $ny_from, 1, 4, 600)).id;")
+ny_hold=$(as_user "$(racer 5)" "select r.status || '|' || r.nights || '|' || r.amount_cents from public.connectical_create_reservation_hold('$ny_quote', gen_random_uuid()) r;")
+ny_dates=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select string_agg(to_char(service_date, 'MM-DD') || ':' || held_units, ',' order by service_date) from public.connectical_inventory where offer_id = '$ny_offer';" | tail -1)
+[ "$ny_hold" = 'held|4|212000' ] && [ "$ny_dates" = '12-30:1,12-31:1,01-01:1,01-02:1' ] || { echo "New Year stay mismatch: $ny_hold $ny_dates" >&2; exit 1; }
+ny_overlap=$(as_user "$(racer 6)" "select (public.connectical_create_quote('$ny_offer', $ny_from + 2, 1, 1, 600)).id;")
+if as_user "$(racer 6)" "select public.connectical_create_reservation_hold('$ny_overlap', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "New Year's Day was double booked" >&2; exit 1
+fi
+echo "PASS a four-night stay across New Year holds each night and blocks overlaps"
+
+reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$reconcile" ] || { echo "Inventory does not reconcile with reservations:" >&2; echo "$reconcile" >&2; exit 1; }
+echo "PASS every inventory counter reconciles with the reservations covering that night"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)
