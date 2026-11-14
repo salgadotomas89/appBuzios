@@ -24,6 +24,8 @@ select
           where n.nspname = 'auth' and p.proname = 'uid') as has_auth_uid,
   exists (select 1 from information_schema.columns where table_schema = 'auth'
           and table_name = 'users' and column_name = 'raw_user_meta_data') as has_user_metadata,
+  exists (select 1 from information_schema.columns where table_schema = 'auth'
+          and table_name = 'users' and column_name = 'email') as has_user_email,
   (select count(*) from pg_roles where rolname in ('anon', 'authenticated')) = 2 as has_app_roles;
 
 -- 4. Estado previo: objetos de esta funcionalidad que ya existan (se esperan 0 en un tenant nuevo).
