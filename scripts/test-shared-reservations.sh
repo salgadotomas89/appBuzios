@@ -450,4 +450,56 @@ dup_held=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
 [ "$dup_ids" = '1' ] && [ "$dup_rows" = '1' ] && [ "$dup_held" = '1,1' ] || {
   echo "Double submit was not idempotent: ids=$dup_ids rows=$dup_rows held=$dup_held" >&2; exit 1; }
 echo "PASS simultaneous double submit with one idempotency key holds inventory once"
+
+# Refund ledger: admin-only, bounded by what was charged, idempotent, and a full refund
+# requires cancelling first. No commercial policy is computed by the database.
+admin_user='30000000-0000-4000-8000-000000000001'
+refund_id=$(sort -u "$workdir"/dup.* | grep . | head -1)
+refund_amount=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select amount_cents from public.connectical_reservations where id = '$refund_id';" | tail -1)
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', 100, 'before payment', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Refund before an approved payment was not rejected" >&2; exit 1
+fi
+as_user "$dup_user" "select (public.connectical_simulate_payment('$refund_id','approved','card','LAB-REFUND')).status;" >/dev/null
+if as_user "$dup_user" "select public.connectical_admin_record_refund('$refund_id', 100, 'self refund', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Traveler could record their own refund" >&2; exit 1
+fi
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_admin_record_refund('$refund_id', 100, 'provider refund', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Provider could record a refund" >&2; exit 1
+fi
+if as_user "$traveler_a" "insert into public.connectical_refunds (reservation_id, idempotency_key, amount_cents, reason) values ('$refund_id', gen_random_uuid(), 1, 'direct');" >/dev/null 2>&1; then
+  echo "Authenticated user could insert refunds directly" >&2; exit 1
+fi
+partial_key=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1)
+partial=$(as_user "$admin_user" "select r.status || '|' || r.refund_cents from public.connectical_admin_record_refund('$refund_id', 5000, 'Goodwill partial', '$partial_key') r;")
+[ "$partial" = 'confirmed|5000' ] || { echo "Partial refund mismatch: $partial" >&2; exit 1; }
+retry=$(as_user "$admin_user" "select r.refund_cents from public.connectical_admin_record_refund('$refund_id', 5000, 'Goodwill partial', '$partial_key') r;")
+[ "$retry" = '5000' ] || { echo "Refund retry was not idempotent: $retry" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', 4000, 'Changed amount', '$partial_key');" >/dev/null 2>&1; then
+  echo "Reused refund key with a different amount was not rejected" >&2; exit 1
+fi
+remaining=$((refund_amount - 5000))
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', $remaining, 'Full while confirmed', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Full refund of a confirmed reservation was not rejected" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', $((remaining + 1)), 'Too much', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Refund above the charged amount was not rejected" >&2; exit 1
+fi
+as_user "$dup_user" "select (public.connectical_cancel_reservation('$refund_id', 'Traveler cancelled')).status;" >/dev/null
+full=$(as_user "$admin_user" "select r.status || '|' || r.refund_cents from public.connectical_admin_record_refund('$refund_id', $remaining, 'Remaining balance', gen_random_uuid()) r;")
+[ "$full" = "refunded|$refund_amount" ] || { echo "Full refund after cancellation mismatch: $full" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_admin_record_refund('$refund_id', 1, 'After full refund', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "Refund after a full refund was not rejected" >&2; exit 1
+fi
+ledger=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select count(*) || '|' || sum(amount_cents) from public.connectical_refunds where reservation_id = '$refund_id';" | tail -1)
+[ "$ledger" = "2|$refund_amount" ] || { echo "Refund ledger mismatch: $ledger" >&2; exit 1; }
+traveler_view=$(as_user "$dup_user" "select count(*) from public.connectical_refunds where reservation_id = '$refund_id';")
+other_view=$(as_user "$traveler_b" "select count(*) from public.connectical_refunds where reservation_id = '$refund_id';")
+[ "$traveler_view" = '2' ] && [ "$other_view" = '0' ] || {
+  echo "Refund visibility mismatch: owner=$traveler_view other=$other_view" >&2; exit 1; }
+refund_anon=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select has_function_privilege('anon', 'public.connectical_admin_record_refund(uuid,integer,text,uuid)', 'execute')
+    || '|' || has_table_privilege('authenticated', 'public.connectical_refunds', 'insert');" | tail -1)
+[ "$refund_anon" = 'false|false' ] || { echo "Refund privileges too broad: $refund_anon" >&2; exit 1; }
+echo "PASS admin refunds are bounded, idempotent, need cancellation for the full amount and are private"
 echo "Shared PostgreSQL integration test passed"
