@@ -4,8 +4,9 @@ import { discountPercent } from '../utils/format';
 import type { CategoryStat, Offer, OfferCategory } from './homeMock';
 
 // Une el catálogo de ejemplo con las ofertas publicadas en InsForge. Una oferta compartida
-// solo trae lo que el proveedor cargó (título, categoría, precio y modalidad): el resto se
-// marca como faltante en vez de inventarse.
+// solo trae lo que el proveedor cargó (título, categoría, precio, modalidad y, si los completó,
+// descripción, ubicación, punto de encuentro y horario): lo que falta se marca como faltante en
+// vez de inventarse. El proveedor escribe en un solo idioma, que se muestra igual en ES y PT.
 
 export const SHARED_OFFER_PREFIX = 'shared:';
 
@@ -32,6 +33,15 @@ export function sharedOfferToOffer(shared: SharedOffer, inventory: SharedInvento
     (sum, item) => sum + Math.max(0, item.total_units - item.held_units - item.sold_units),
     0,
   );
+  const same = (text: string) => ({ es: text, pt: text });
+  const description = shared.description?.trim() ?? '';
+  const location = shared.location?.trim() ?? '';
+  const meetingPoint = shared.meeting_point?.trim() ?? '';
+  const schedule = shared.schedule?.trim() ?? '';
+  const missing = {
+    es: [...(description ? [] : ['Descripción del proveedor']), 'Qué incluye', 'Política de cancelación'],
+    pt: [...(description ? [] : ['Descrição do fornecedor']), 'O que inclui', 'Política de cancelamento'],
+  };
   return {
     id: `${SHARED_OFFER_PREFIX}${shared.id}`,
     source: 'shared',
@@ -39,26 +49,27 @@ export function sharedOfferToOffer(shared: SharedOffer, inventory: SharedInvento
     icon: CATEGORY_ICONS[shared.category],
     tone: 'soft',
     // El proveedor carga un solo título; se muestra igual en ambos idiomas.
-    title: { es: shared.title, pt: shared.title },
-    location: { es: 'Búzios', pt: 'Búzios' },
+    title: same(shared.title),
+    location: location ? same(location) : same('Búzios'),
+    meetingPoint: meetingPoint ? same(meetingPoint) : undefined,
+    schedule: schedule ? same(schedule) : undefined,
     price: shared.base_price_cents / 100,
     priceUnit: PRICE_UNITS[shared.price_mode],
     priceMode: shared.price_mode,
     // Sin inventario leído no se afirma disponibilidad: el portal la confirma por fecha.
     availability: freeUnits === undefined ? 'limited' : freeUnits > 0 ? 'available' : 'unavailable',
-    description: {
-      es: 'Oferta publicada por un proveedor. La disponibilidad y el precio se confirman al cotizar.',
-      pt: 'Oferta publicada por um fornecedor. A disponibilidade e o preço são confirmados na cotação.',
-    },
+    description: description
+      ? same(description)
+      : {
+          es: 'Oferta publicada por un proveedor. La disponibilidad y el precio se confirman al cotizar.',
+          pt: 'Oferta publicada por um fornecedor. A disponibilidade e o preço são confirmados na cotação.',
+        },
     includes: { es: [], pt: [] },
     cancellation: {
       es: 'Política de cancelación pendiente de definir por Connectical.',
       pt: 'Política de cancelamento pendente de definição pela Connectical.',
     },
-    missingFields: {
-      es: ['Descripción del proveedor', 'Qué incluye', 'Política de cancelación'],
-      pt: ['Descrição do fornecedor', 'O que inclui', 'Política de cancelamento'],
-    },
+    missingFields: missing,
   };
 }
 

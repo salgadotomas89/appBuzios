@@ -36,10 +36,13 @@ Pegar [`supabase/checks/preflight.sql`](../supabase/checks/preflight.sql) en el 
 6. `supabase/migrations/202611140005_hide_internal_ids.sql`
 7. `supabase/migrations/202611140006_sweep_runs.sql`
 8. `supabase/migrations/202611140007_commercial_terms.sql`
+9. `supabase/migrations/202611140008_payment_events.sql`
+10. `supabase/migrations/202611140009_offer_details.sql`
+11. `supabase/migrations/202611140010_traveler_privacy.sql`
 
 Resultado esperado de cada una: sin errores (los avisos `NOTICE ... skipping` son normales).
 
-Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las ocho se ensayaron aplicadas dos veces
+Si una ejecución se corta a mitad, se puede **repetir el mismo archivo**: las once se ensayaron aplicadas dos veces
 seguidas sin error. No saltar al archivo siguiente hasta que el actual termine sin errores.
 
 Ensayo local de este paso: `npm run test:shared-reservations` (base vacía) y `npm run test:migration-upgrade`
@@ -77,6 +80,18 @@ resto se procesa y la ejecución queda como `partial`.
 Solo después de los pasos 1–4: cambiar `SHARED_CATALOG_ENABLED` a `true` en `src/config/featureFlags.ts` en una
 rama de ensayo y probar con dos dispositivos el recorrido del documento de revisión humana. Los pagos siguen
 simulados; `CANCELLATION_POLICY_ENABLED` sigue en `false`.
+
+## 6b. Antes de conectar cualquier pasarela real
+
+Los pagos simulados están encendidos en la base de datos para el ensayo. Antes de conectar una pasarela real
+(y siempre en producción), apagarlos y comprobarlo:
+
+```sql
+update public.connectical_settings set value = 'false', updated_at = now() where key = 'simulated_payments_enabled';
+select value from public.connectical_settings where key = 'simulated_payments_enabled';  -- false
+```
+
+Con el interruptor apagado o sin la fila, `connectical_simulate_payment` rechaza toda llamada.
 
 ## 7. Qué anotar al terminar
 

@@ -86,3 +86,12 @@ it('rejects malformed policies and amounts', () => {
   expect(() => proposeCancellationRefund(tiered, { ...late, serviceFeeCents: 70000 })).toThrow('invalid_amounts');
   expect(() => proposeCancellationRefund(tiered, { ...late, cancelledAt: 'ayer' })).toThrow('invalid_dates');
 });
+
+it('counts earlier refunds against the tier entitlement instead of adding to it', () => {
+  // 50 %: derecho total 35.840; con 20.000 ya devueltos solo quedan 15.840.
+  expect(proposeCancellationRefund(tiered, { ...booking, alreadyRefundedCents: 20000, cancelledAt: at(48), actor: 'traveler' }))
+    .toMatchObject({ refundCents: 15840, retainedCents: 32000 });
+  // Si ya se devolvió más de lo que el tramo concede, no se propone nada más.
+  expect(proposeCancellationRefund(tiered, { ...booking, alreadyRefundedCents: 40000, cancelledAt: at(48), actor: 'traveler' }))
+    .toMatchObject({ refundCents: 0, retainedCents: 27840 });
+});

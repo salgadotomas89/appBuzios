@@ -15,7 +15,7 @@ jest.mock('../src/lib/reservationService', () => {
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
-    'listCommissionTerms', 'setOfferCommission',
+    'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -90,6 +90,7 @@ beforeEach(() => {
   mocked.listOfferAvailability.mockResolvedValue([]);
   mocked.getSweepHealth.mockResolvedValue(null);
   mocked.listCommissionTerms.mockResolvedValue([]);
+  mocked.listPaymentReviews.mockResolvedValue([]);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -175,10 +176,11 @@ it('lets providers publish offers in any category with a BRL price', async () =>
   await type(root, 'Cupo disponible para esa fecha', '12');
   await press(root, 'Publicar oferta y cupo');
 
-  expect(mocked.upsertProviderOffer).toHaveBeenCalledWith({
-    offerId: undefined, category: 'barcos', title: 'Fiesta en barco',
-    basePriceCents: 123456, priceMode: 'person', published: true,
-  });
+  // Se crea sin publicar y se publica al final, con el mismo contenido.
+  expect(mocked.upsertProviderOffer.mock.calls.map(call => call[0])).toEqual([
+    { offerId: undefined, category: 'barcos', title: 'Fiesta en barco', basePriceCents: 123456, priceMode: 'person', published: false },
+    { offerId: 'new-offer', category: 'barcos', title: 'Fiesta en barco', basePriceCents: 123456, priceMode: 'person', published: true },
+  ]);
   expect(mocked.publishProviderInventory).toHaveBeenCalledWith({
     offerId: 'new-offer', serviceDate: '2099-03-01', totalUnits: 12,
   });
@@ -455,7 +457,7 @@ it('separates holds, confirmed gross and provider net and flags inconsistent sta
   expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
   expect(hasText(root, 'Bruto de reservas confirmadas: R$ 1.356,80')).toBe(true);
   // 2 × (678,40 − 38,40 − 64,00)
-  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 1.152,00')).toBe(true);
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 1.152,00')).toBe(true);
   expect(hasText(root, 'Estados inconsistentes para revisar: 1')).toBe(true);
   expect(hasText(root, 'confirmada sin pago aprobado · r-odd')).toBe(true);
 });
@@ -520,4 +522,96 @@ it('shows effective commissions against unapproved references and sets a product
   await press(root, 'Guardar comisión');
   expect(mocked.setOfferCommission).toHaveBeenCalledWith('o-vip', 1850);
   expect(hasText(root, 'Comisión actualizada.')).toBe(true);
+});
+
+it('lists gateway events that need a human decision', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listPaymentReviews.mockResolvedValue([
+    { id: 7, gateway: 'lab', event_id: 'evt-2', reservation_id: 'r1', kind: 'payment_approved', amount_cents: 67840, currency: 'BRL', outcome: 'possible_double_charge', received_at: '2099-01-01T12:00:00Z' },
+    { id: 8, gateway: 'lab', event_id: 'evt-9', reservation_id: null, kind: 'payment_approved', amount_cents: 100, currency: 'BRL', outcome: 'unknown_reservation', received_at: '2099-01-01T12:01:00Z' },
+  ]);
+  const root = await render('pt');
+  expect(hasText(root, 'Eventos do gateway para revisar · 2')).toBe(true);
+  expect(hasText(root, 'possível cobrança dupla · R$ 678,40 BRL')).toBe(true);
+  expect(hasText(root, 'lab · evt-9 · — · 2099-01-01T12:01:00Z')).toBe(true);
+});
+
+it('saves offer details with the offer and enforces per-booking limits for travelers', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockResolvedValue({ ...boat, id: 'offer-boat' });
+  mocked.publishProviderInventory.mockResolvedValue({} as never);
+  mocked.setProviderOfferDetails.mockResolvedValue('offer-boat');
+  let root = await render();
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await type(root, 'Descripción para el turista', ' Escuna de 4 horas ');
+  await type(root, 'Ubicación', 'Praia dos Ossos');
+  await type(root, 'Mínimo por reserva', '2');
+  await type(root, 'Máximo por reserva (vacío = sin máximo)', '1');
+  await press(root, 'Publicar oferta y cupo');
+  expect(hasText(root, 'Máximo por reserva (vacío = sin máximo): debe estar entre 2 y 500.')).toBe(true);
+  expect(mocked.upsertProviderOffer).not.toHaveBeenCalled();
+
+  await type(root, 'Máximo por reserva (vacío = sin máximo)', '12');
+  await press(root, 'Publicar oferta y cupo');
+  expect(mocked.setProviderOfferDetails).toHaveBeenCalledWith({
+    offerId: 'offer-boat', description: 'Escuna de 4 horas', location: 'Praia dos Ossos',
+    meetingPoint: '', schedule: '', minQuantity: 2, maxQuantity: 12,
+  });
+
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedOffers.mockResolvedValue([{ ...boat, description: 'Escuna de 4 horas', location: 'Praia dos Ossos', schedule: 'Saída 10:00', min_quantity: 2, max_quantity: 12 }]);
+  root = await render();
+  await press(root, 'Barco Azul');
+  expect(hasText(root, 'Escuna de 4 horas')).toBe(true);
+  expect(hasText(root, 'Praia dos Ossos · Saída 10:00')).toBe(true);
+  expect(hasText(root, 'Por reserva: entre 2 y 12.')).toBe(true);
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'debe estar entre 2 y 12.')).toBe(true);
+  expect(mocked.createSharedQuote).not.toHaveBeenCalled();
+});
+
+it('shows providers their net income and the platform commission, without counting holds', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid' }),
+    reservation({ id: 'r-held', status: 'held', payment_status: null }),
+    reservation({ id: 'r-cancel', status: 'cancelled', payment_status: 'rejected' }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Tus ingresos')).toBe(true);
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 576,00')).toBe(true);
+  expect(hasText(root, 'Comisión de la plataforma en reservas confirmadas: R$ 64,00')).toBe(true);
+  expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
+});
+
+it('shows travelers what they paid but not the commission between provider and platform', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-mine', provider_commission_rate_bps: null, provider_commission_cents: null }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Cargo servicio turista 6% · R$ 38,40')).toBe(true);
+  expect(hasText(root, 'comisión proveedor')).toBe(false);
+  expect(hasText(root, 'proveedor recibe neto')).toBe(false);
+});
+
+it('publishes a new offer only after its details and inventory are saved, and retries on the same offer', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockImplementation(async input => ({ ...boat, id: 'offer-new', published: input.published }));
+  mocked.setProviderOfferDetails.mockResolvedValue('offer-new');
+  mocked.publishProviderInventory
+    .mockRejectedValueOnce(new Error('network down'))
+    .mockResolvedValue({} as never);
+  const root = await render();
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await press(root, 'Publicar oferta y cupo');
+  expect(hasText(root, 'network down')).toBe(true);
+  // Creada sin publicar y nunca publicada porque el cupo falló.
+  expect(mocked.upsertProviderOffer.mock.calls.map(call => [call[0].offerId, call[0].published])).toEqual([[undefined, false]]);
+
+  await press(root, 'Guardar cambios y cupo');
+  expect(mocked.upsertProviderOffer.mock.calls.slice(1).map(call => [call[0].offerId, call[0].published]))
+    .toEqual([['offer-new', true]]);
+  expect(mocked.publishProviderInventory).toHaveBeenCalledTimes(2);
 });

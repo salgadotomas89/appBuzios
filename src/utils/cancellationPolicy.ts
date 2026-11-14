@@ -115,5 +115,6 @@ export function proposeCancellationRefund(
     policy.serviceFeeRefund === 'always' || (policy.serviceFeeRefund === 'with_subtotal' && subtotalRefund > 0)
       ? serviceFeeCents
       : 0;
-  return result(subtotalRefund + fee, tier ? 'tier' : 'no_tier', tier);
+  // El tramo fija el derecho total; lo ya reembolsado cuenta contra ese derecho.
+  return result(subtotalRefund + fee - alreadyRefundedCents, tier ? 'tier' : 'no_tier', tier);
 }

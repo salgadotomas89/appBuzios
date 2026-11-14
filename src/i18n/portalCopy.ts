@@ -1,6 +1,7 @@
 import type { Language } from '../data/homeMock';
 import type { InputError } from '../utils/portalInput';
 import type { ReservationInconsistency } from '../utils/reservationTotals';
+import type { PaymentReviewOutcome } from '../lib/reservationService';
 
 // Textos del portal de reservas compartidas. Para sumar inglés basta con
 // ampliar `Language` y añadir aquí la entrada `en`; TypeScript exige todas las claves.
@@ -106,6 +107,17 @@ const es = {
   priceBrl: 'Precio BRL (ej. 320,00)',
   units: 'Cupo disponible para esa fecha',
   publishNights: 'Noches a publicar desde esa fecha',
+  offerDescription: 'Descripción para el turista',
+  providerEarnings: 'Tus ingresos',
+  providerCommissionTotal: 'Comisión de la plataforma en reservas confirmadas',
+  providerEarningsHint: 'Importes simulados en BRL. La liquidación real queda pendiente de la pasarela y del contrato.',
+  offerLocation: 'Ubicación',
+  offerMeetingPoint: 'Punto de encuentro',
+  offerSchedule: 'Horario',
+  minQuantity: 'Mínimo por reserva',
+  maxQuantity: 'Máximo por reserva (vacío = sin máximo)',
+  offerDetailsHint: 'Escribe lo que el turista necesita saber. Se muestra tal cual, sin traducción automática.',
+  quantityLimits: 'Por reserva: entre {min} y {max}.',
   publishNightsHint: 'Se publica el mismo cupo para cada noche; si una fecha falla no se guarda ninguna.',
   pauseProvider: 'Pausar',
   resumeProvider: 'Reactivar',
@@ -123,6 +135,15 @@ const es = {
   commissionRateLabel: 'Comisión del producto (%), vacío para usar la del proveedor',
   commissionSave: 'Guardar comisión',
   commissionSaved: 'Comisión actualizada.',
+  paymentReviews: 'Eventos de pasarela para revisar',
+  paymentReviewHint: 'No se aplicaron a ninguna reserva. Un cobro sin reserva o un posible doble cobro requiere decidir una devolución.',
+  paymentReviewOutcomes: {
+    possible_double_charge: 'posible doble cobro',
+    amount_mismatch: 'importe distinto del cotizado',
+    currency_mismatch: 'moneda distinta de BRL',
+    paid_without_reservation: 'cobro con la reserva vencida o cancelada',
+    unknown_reservation: 'reserva desconocida',
+  } satisfies Record<PaymentReviewOutcome, string>,
   sweepTitle: 'Barrido de retenciones vencidas',
   sweepNever: 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona. Las retenciones vencidas se liberan al listar o reservar.',
   sweepLast: 'Última ejecución correcta: {time}',
@@ -149,7 +170,7 @@ const es = {
   netCollected: 'Cobrado neto de reembolsos',
   heldTotal: 'Retenido o pago pendiente (no es ingreso)',
   confirmedGross: 'Bruto de reservas confirmadas',
-  providerNetTotal: 'Neto proveedor de reservas confirmadas',
+  providerNetTotal: 'Neto proveedor de reservas confirmadas, antes de reembolsos',
   statusCounts: 'Retenidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
   inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
   inconsistencies: {
@@ -239,6 +260,9 @@ const es = {
     invalid_provider_state: 'Estado de proveedor no válido.',
     provider_not_found: 'No encontramos el proveedor.',
     invalid_commission_rate: 'La comisión debe estar entre 0 % y 100 %.',
+    invalid_offer_details: 'Revisa el detalle: descripción hasta 2000 caracteres, otros textos hasta 160 y un máximo no menor que el mínimo.',
+    quantity_out_of_range: 'La cantidad está fuera de los límites por reserva de esta oferta.',
+    simulated_payments_disabled: 'Los pagos simulados están desactivados en este entorno.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -314,6 +338,17 @@ const pt: PortalCopy = {
   priceBrl: 'Preço BRL (ex. 320,00)',
   units: 'Vagas disponíveis nessa data',
   publishNights: 'Noites a publicar a partir dessa data',
+  offerDescription: 'Descrição para o turista',
+  providerEarnings: 'Suas receitas',
+  providerCommissionTotal: 'Comissão da plataforma em reservas confirmadas',
+  providerEarningsHint: 'Valores simulados em BRL. A liquidação real depende do gateway e do contrato.',
+  offerLocation: 'Localização',
+  offerMeetingPoint: 'Ponto de encontro',
+  offerSchedule: 'Horário',
+  minQuantity: 'Mínimo por reserva',
+  maxQuantity: 'Máximo por reserva (vazio = sem máximo)',
+  offerDetailsHint: 'Escreva o que o turista precisa saber. É exibido como está, sem tradução automática.',
+  quantityLimits: 'Por reserva: entre {min} e {max}.',
   publishNightsHint: 'A mesma quantidade de vagas é publicada para cada noite; se uma data falhar, nenhuma é salva.',
   pauseProvider: 'Pausar',
   resumeProvider: 'Reativar',
@@ -331,6 +366,15 @@ const pt: PortalCopy = {
   commissionRateLabel: 'Comissão do produto (%), vazio para usar a do fornecedor',
   commissionSave: 'Salvar comissão',
   commissionSaved: 'Comissão atualizada.',
+  paymentReviews: 'Eventos do gateway para revisar',
+  paymentReviewHint: 'Não foram aplicados a nenhuma reserva. Uma cobrança sem reserva ou uma possível cobrança dupla exige decidir uma devolução.',
+  paymentReviewOutcomes: {
+    possible_double_charge: 'possível cobrança dupla',
+    amount_mismatch: 'valor diferente do cotado',
+    currency_mismatch: 'moeda diferente de BRL',
+    paid_without_reservation: 'cobrança com a reserva vencida ou cancelada',
+    unknown_reservation: 'reserva desconhecida',
+  } satisfies Record<PaymentReviewOutcome, string>,
   sweepTitle: 'Varredura de retenções vencidas',
   sweepNever: 'Nenhuma execução correta registrada: o agendador não está instalado ou não funciona. As retenções vencidas são liberadas ao listar ou reservar.',
   sweepLast: 'Última execução correta: {time}',
@@ -357,7 +401,7 @@ const pt: PortalCopy = {
   netCollected: 'Cobrado líquido de reembolsos',
   heldTotal: 'Retido ou pagamento pendente (não é receita)',
   confirmedGross: 'Bruto de reservas confirmadas',
-  providerNetTotal: 'Líquido do fornecedor de reservas confirmadas',
+  providerNetTotal: 'Líquido do fornecedor de reservas confirmadas, antes de reembolsos',
   statusCounts: 'Retidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
   inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
   inconsistencies: {
@@ -447,6 +491,9 @@ const pt: PortalCopy = {
     invalid_provider_state: 'Estado de fornecedor inválido.',
     provider_not_found: 'Não encontramos o fornecedor.',
     invalid_commission_rate: 'A comissão deve estar entre 0 % e 100 %.',
+    invalid_offer_details: 'Revise os detalhes: descrição até 2000 caracteres, outros textos até 160 e um máximo não menor que o mínimo.',
+    quantity_out_of_range: 'A quantidade está fora dos limites por reserva desta oferta.',
+    simulated_payments_disabled: 'Os pagamentos simulados estão desativados neste ambiente.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };

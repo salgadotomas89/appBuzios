@@ -41,3 +41,31 @@ Commits: `eb7d553`, `9358b33`, `58afdf7`, `9a6ffa9`, `ec30bfc`, `9dc9d9a`.
 - Motor de política de cancelación configurable, **apagado** y sin ninguna política cargada.
 - Jest 142/142 · PostgreSQL 41/41.
 - Siguiente: scheduler local, catálogo y recorrido del turista, preflight y checklist de InsForge, Android.
+
+## Checkpoint 2 (18:03, unos 34 min de reloj desde el inicio)
+
+Se incorporó la orden de 7 horas (mismas restricciones). Commits desde el checkpoint 1: `2295a21` (barrido programado
+con registro y salud), `4e8ad0c` (ensayo de actualización en CI), `ce19a3f` (preflight y runbook), `f5d06ad`
+(comisiones por producto y categoría experiencias), `9824d96` (docs), `44eec05` (webhooks idempotentes).
+Merge intermedio a `main`: `a075552` (CI de la rama en verde, run 43640222295).
+
+- Migraciones: ahora **nueve** (`202611140006` barrido, `202611140007` términos comerciales, `202611140008` eventos de
+  pasarela). Ensayadas: base vacía, actualización desde etapas 1 y 4 con datos, y aplicación doble de las nueve.
+- Matriz de estado por módulo: [matriz-estado-modulos.md](matriz-estado-modulos.md).
+- Jest 147/147. PostgreSQL: todas las verificaciones del script pasan (ver CI).
+- Siguiente: detalle de producto (descripción, ubicación, horario, límites por reserva), ingresos del proveedor,
+  resultado financiero por reserva, inglés pendiente de revisión, Android.
+
+## Checkpoint 3 (18:49, unos 80 min de reloj desde el inicio)
+
+Commits desde el checkpoint 2: `2e0bf93` (detalle de producto y límites por reserva, migración `202611140009`),
+`35d86ae` (ingresos del proveedor), `c0a140d` (pagos reales tras tres controles; la demo deja de registrar "mercado_pago"),
+`5aee606` (entorno móvil), `85b9b73` (fecha de Búzios que se actualiza sola), `e56e384` (salvaguarda de Zod),
+`9c19fcb` (autenticación y OAuth).
+
+- Diez migraciones; ensayo de actualización y doble aplicación correctos.
+- Hallazgos: el formulario del proveedor guardaba la oferta antes de validar las noches a publicar (corregido); la
+  sesión del SDK no persiste al reabrir la app (documentado, requiere decisión); el build release de Android firma con
+  la clave debug de la plantilla (documentado).
+- Revisión independiente del diff de la tarde en curso.
+- Jest 157/157.

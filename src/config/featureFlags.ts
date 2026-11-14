@@ -11,3 +11,9 @@ export const SHARED_CATALOG_ENABLED = false;
 // No existe una política comercial aprobada, así que no hay ninguna política cargada y ningún flujo
 // lo consulta todavía. No cambiarlo sin una política aprobada por escrito.
 export const CANCELLATION_POLICY_ENABLED = false;
+
+// Pagos reales: dos controles independientes que deben estar encendidos a la vez, además de un
+// adaptador en vivo implementado (src/payments/gateways.ts, hoy ninguno). Sin contrato con una
+// pasarela ni tarifas confirmadas, ambos quedan apagados y vacíos.
+export const REAL_PAYMENTS_ENABLED = false;
+export const LIVE_PAYMENT_GATEWAYS: readonly ('simulated_gateway' | 'mercado_pago')[] = [];

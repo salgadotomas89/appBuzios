@@ -61,9 +61,10 @@ export function summarizeReservations(reservations: TotalsInput[]): ReservationT
     } else if (reservation.status === 'confirmed') {
       totals.confirmedCount += 1;
       totals.confirmedGrossCents += reservation.amount_cents;
+      // Antes de reembolsos: quién asume un reembolso parcial depende de una política no aprobada.
       totals.providerNetCents +=
-        reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents;
-      totals.commissionCents += reservation.provider_commission_cents;
+        reservation.amount_cents - reservation.service_fee_cents - (reservation.provider_commission_cents ?? 0);
+      totals.commissionCents += reservation.provider_commission_cents ?? 0;
       totals.connecticalFeeCents += reservation.connectical_margin_cents;
     } else if (reservation.status === 'cancelled') {
       totals.cancelledCount += 1;
@@ -148,7 +149,7 @@ export function findInconsistencies(
     if (reservation.status === 'refunded' && reservation.refund_cents !== reservation.amount_cents) {
       add('refunded_incomplete');
     }
-    if (reservation.service_fee_cents + reservation.provider_commission_cents > reservation.amount_cents) {
+    if (reservation.service_fee_cents + (reservation.provider_commission_cents ?? 0) > reservation.amount_cents) {
       add('fees_exceed_amount');
     }
   }
