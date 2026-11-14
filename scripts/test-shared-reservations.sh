@@ -375,4 +375,79 @@ null_actor=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "sele
 [ "$null_actor" -ge 1 ] || { echo "System sweep did not log hold_expired events" >&2; exit 1; }
 [ "$(stay_counters)" = '0/0,0/0,0/0' ] || { echo "System sweep left held units: $(stay_counters)" >&2; exit 1; }
 echo "PASS system hold sweep releases inventory and is not executable by app users"
+
+# Concurrency: parallel sessions race for the last unit. Each session sleeps until the
+# same instant before calling the hold RPC, so the calls genuinely overlap.
+race_offer='53000000-0000-4000-8000-000000000001'
+docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres <<SQL
+update public.connectical_providers set active = true where id = '40000000-0000-4000-8000-000000000001';
+insert into auth.users (id) select ('11000000-0000-4000-8000-00000000000' || g)::uuid from generate_series(1, 8) g;
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$race_offer', '40000000-0000-4000-8000-000000000001', 'pousadas', 'Race lab room', 20000, 'night', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units)
+select '$race_offer', current_date + d, 1 from generate_series(60, 62) d;
+SQL
+race_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '4 seconds');" | tail -1)
+race_pids=''
+for g in 1 2 3 4 5 6 7 8; do
+  racer="11000000-0000-4000-8000-00000000000$g"
+  # Odd racers want nights 60-61, even racers 61-62: every pair overlaps on night 61.
+  start_day=$((60 + (g + 1) % 2))
+  race_quote=$(as_user "$racer" "select (public.connectical_create_quote('$race_offer', current_date + $start_day, 1, 2, 600)).id;")
+  (
+    if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$racer',false);" \
+      -c "select pg_sleep(greatest(0, $race_start - extract(epoch from clock_timestamp())));" \
+      -c "select 'started=' || extract(epoch from clock_timestamp());" \
+      -c "select (public.connectical_create_reservation_hold('$race_quote', gen_random_uuid())).id;" >"$workdir/race-log.$g" 2>&1; then
+      echo ok >"$workdir/race.$g"
+    else
+      echo fail >"$workdir/race.$g"
+    fi
+  ) &
+  race_pids="$race_pids $!"
+done
+for pid in $race_pids; do wait "$pid"; done
+race_spread=$(cat "$workdir"/race-log.* | sed -n 's/^started=//p' | sort -n | awk 'NR==1{min=$1} {max=$1} END{print (NR==8 && max-min < 1) ? "ok" : NR " " max-min}')
+[ "$race_spread" = 'ok' ] || { echo "Racers did not overlap in time: $race_spread" >&2; exit 1; }
+race_wins=$(cat "$workdir"/race.* | grep -c '^ok$' || true)
+[ "$race_wins" = '1' ] || { echo "Expected exactly one concurrent hold to win, got $race_wins" >&2; exit 1; }
+race_counters=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select string_agg(held_units || '/' || sold_units, ',' order by service_date)
+  from public.connectical_inventory where offer_id = '$race_offer';" | tail -1)
+case "$race_counters" in
+  '1/0,1/0,0/0'|'0/0,1/0,1/0') ;;
+  *) echo "Concurrent holds left inconsistent counters: $race_counters" >&2; exit 1 ;;
+esac
+race_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_reservations where offer_id = '$race_offer';" | tail -1)
+[ "$race_rows" = '1' ] || { echo "Concurrent holds created $race_rows reservations" >&2; exit 1; }
+echo "PASS 8 concurrent overlapping holds produce exactly one reservation and no oversell"
+
+# Double submit: the same quote and idempotency key sent twice at once returns one reservation.
+dup_user='11000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_inventory (offer_id, service_date, total_units)
+select '$race_offer', current_date + d, 5 from generate_series(70, 71) d;"
+dup_quote=$(as_user "$dup_user" "select (public.connectical_create_quote('$race_offer', current_date + 70, 1, 2, 600)).id;")
+dup_key=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1)
+dup_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '3 seconds');" | tail -1)
+dup_pids=''
+for n in 1 2 3; do
+  (
+    docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$dup_user',false);" \
+      -c "select pg_sleep(greatest(0, $dup_start - extract(epoch from clock_timestamp())));" \
+      -c "select (public.connectical_create_reservation_hold('$dup_quote', '$dup_key')).id;" 2>/dev/null | tail -1 >"$workdir/dup.$n"
+  ) &
+  dup_pids="$dup_pids $!"
+done
+for pid in $dup_pids; do wait "$pid"; done
+dup_ids=$(sort -u "$workdir"/dup.* | grep -c . || true)
+dup_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_reservations where quote_id = '$dup_quote';" | tail -1)
+dup_held=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select string_agg(held_units::text, ',' order by service_date) from public.connectical_inventory
+  where offer_id = '$race_offer' and service_date >= current_date + 70;" | tail -1)
+[ "$dup_ids" = '1' ] && [ "$dup_rows" = '1' ] && [ "$dup_held" = '1,1' ] || {
+  echo "Double submit was not idempotent: ids=$dup_ids rows=$dup_rows held=$dup_held" >&2; exit 1; }
+echo "PASS simultaneous double submit with one idempotency key holds inventory once"
 echo "Shared PostgreSQL integration test passed"
