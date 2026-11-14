@@ -569,3 +569,17 @@ it('saves offer details with the offer and enforces per-booking limits for trave
   expect(hasText(root, 'debe estar entre 2 y 12.')).toBe(true);
   expect(mocked.createSharedQuote).not.toHaveBeenCalled();
 });
+
+it('shows providers their net income and the platform commission, without counting holds', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid' }),
+    reservation({ id: 'r-held', status: 'held', payment_status: null }),
+    reservation({ id: 'r-cancel', status: 'cancelled', payment_status: 'rejected' }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Tus ingresos')).toBe(true);
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 576,00')).toBe(true);
+  expect(hasText(root, 'Comisión de la plataforma en reservas confirmadas: R$ 64,00')).toBe(true);
+  expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
+});

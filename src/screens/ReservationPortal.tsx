@@ -679,6 +679,11 @@ export function ReservationPortal({
                   <Text style={styles.amount}>{item.total_units - item.held_units - item.sold_units} {words.free}</Text>
                 </View>
               )) : <Text style={styles.helper}>{words.noInventory}</Text>}
+              <Text style={styles.sectionTitle}>{words.providerEarnings}</Text>
+              <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
+              <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
+              <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
+              <Text style={styles.helper}>{words.providerEarningsHint}</Text>
               <Text style={styles.sectionTitle}>{words.receivedReservations}</Text>
               {reservationList('provider_cancelled')}
             </View>
