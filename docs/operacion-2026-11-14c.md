@@ -69,3 +69,16 @@ Commits desde el checkpoint 2: `2e0bf93` (detalle de producto y límites por res
   la clave debug de la plantilla (documentado).
 - Revisión independiente del diff de la tarde en curso.
 - Jest 157/157.
+
+## Checkpoint final (19:05, unos 96 min de reloj desde el inicio a las 17:29)
+
+- Revisión independiente del diff de la tarde: tres hallazgos medios y cuatro menores, todos corregidos en
+  `d84a0e0` (migración `202611140010_traveler_privacy.sql`): uuid de turistas en cotizaciones, comisión B2B visible
+  al turista, pagos simulados sin interruptor en el servidor; además guardado de ofertas no atómico, neto del
+  proveedor sin reembolsos, motor de cancelación con reembolsos previos y rechazo tardío de un intento anterior.
+- Merge a `main`: `279e247` (`--no-ff`, push normal). CI de `main`: run 43646063766 en verde.
+- Once migraciones: base vacía, actualización desde etapas 1 y 4 con datos y aplicación doble, todo correcto.
+- Jest 161/161 (inicio: 128). PostgreSQL: 46 verificaciones en el script de integración (inicio: 32) más el ensayo de
+  actualización en CI.
+- No se ejecutó nada remoto: ni InsForge, ni OAuth, ni pagos reales. iOS solo compila; Android sin JDK ni SDK.
+- No se trabajaron 4 ni 7 horas: unos 96 minutos de reloj. Lo pendiente depende de decisiones humanas o del tenant.
