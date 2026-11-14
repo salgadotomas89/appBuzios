@@ -341,4 +341,17 @@ for helper in "connectical_adjust_stay_inventory('$pousada', current_date + 42, 
   fi
 done
 echo "PASS internal inventory helpers are not executable by authenticated users"
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_upsert_offer(null,'pousadas',repeat('x',121),1000,'night',true);" >/dev/null 2>&1; then
+  echo "Offer title longer than 120 characters was not rejected" >&2
+  exit 1
+fi
+echo "PASS offer titles are limited to 120 characters"
+
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "update public.connectical_providers set active = false where id = '40000000-0000-4000-8000-000000000001';"
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', current_date + 50, 2);" >/dev/null 2>&1; then
+  echo "Paused provider could still publish inventory" >&2
+  exit 1
+fi
+echo "PASS paused provider cannot publish inventory"
 echo "Shared PostgreSQL integration test passed"

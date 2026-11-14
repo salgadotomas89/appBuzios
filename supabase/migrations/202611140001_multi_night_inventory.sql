@@ -9,6 +9,7 @@
 --   * Quotes and inventory cannot target dates before "today" in America/Sao_Paulo.
 --   * Every function that touches an offer's inventory takes the same per-offer
 --     advisory lock, replacing the previous per-date lock keys.
+--   * Paused providers cannot publish inventory; offer titles are 1..120 characters.
 
 alter table public.connectical_reservations
   add column if not exists nights integer not null default 1 check (nights between 1 and 30);
@@ -16,6 +17,7 @@ alter table public.connectical_reservations
 create or replace function public.connectical_today()
 returns date
 language sql stable
+set search_path = pg_catalog
 as $$
   select (now() at time zone 'America/Sao_Paulo')::date
 $$;
@@ -23,6 +25,7 @@ $$;
 create or replace function public.connectical_lock_offer(p_offer_id uuid)
 returns void
 language sql volatile
+set search_path = pg_catalog
 as $$
   select pg_advisory_xact_lock(hashtextextended('connectical-offer:' || p_offer_id::text, 0))
 $$;
@@ -113,6 +116,54 @@ begin
     'connectical-brl-v1'
   ) returning * into v_quote;
   return v_quote;
+end;
+$$;
+
+create or replace function public.connectical_provider_upsert_offer(
+  p_offer_id uuid,
+  p_category text,
+  p_title text,
+  p_base_price_cents integer,
+  p_price_mode text,
+  p_published boolean
+)
+returns public.connectical_offers
+language plpgsql security definer
+set search_path = public, auth
+as $$
+declare
+  v_provider public.connectical_providers;
+  v_offer public.connectical_offers;
+begin
+  if auth.uid() is null then raise exception 'authentication_required' using errcode = '28000'; end if;
+  select * into v_provider from public.connectical_providers
+    where owner_user_id = auth.uid() and active = true;
+  if not found and not public.connectical_is_admin() then
+    raise exception 'provider_not_authorized' using errcode = '42501';
+  end if;
+  if p_category is null or p_category not in ('pousadas', 'barcos', 'noche', 'buggy')
+     or p_price_mode is null or p_price_mode not in ('night', 'person', 'ticket', 'group')
+     or p_base_price_cents is null or p_base_price_cents <= 0
+     or p_title is null or length(trim(p_title)) not between 1 and 120
+     or p_published is null then
+    raise exception 'invalid_offer' using errcode = '22023';
+  end if;
+  if p_offer_id is null then
+    if v_provider.id is null then raise exception 'admin_offer_requires_provider' using errcode = '22023'; end if;
+    insert into public.connectical_offers (
+      provider_id, category, title, base_price_cents, price_mode, published
+    ) values (
+      v_provider.id, p_category, trim(p_title), p_base_price_cents, p_price_mode, p_published
+    ) returning * into v_offer;
+  else
+    update public.connectical_offers set category = p_category, title = trim(p_title),
+      base_price_cents = p_base_price_cents, price_mode = p_price_mode,
+      published = p_published, updated_at = now()
+      where id = p_offer_id and (public.connectical_is_admin() or provider_id = v_provider.id)
+      returning * into v_offer;
+    if not found then raise exception 'offer_not_owned' using errcode = '42501'; end if;
+  end if;
+  return v_offer;
 end;
 $$;
 
@@ -258,6 +309,10 @@ begin
     join public.connectical_providers p on p.id = o.provider_id
     where o.id = p_offer_id and p.owner_user_id = auth.uid()
   ) then raise exception 'offer_not_owned' using errcode = '42501'; end if;
+  if not public.connectical_is_admin() and not exists (
+    select 1 from public.connectical_providers
+    where owner_user_id = auth.uid() and active = true
+  ) then raise exception 'provider_not_authorized' using errcode = '42501'; end if;
   perform public.connectical_lock_offer(p_offer_id);
   insert into public.connectical_inventory (offer_id, service_date, total_units)
     values (p_offer_id, p_service_date, p_total_units)

@@ -60,6 +60,8 @@ const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
 const STATUSES: ReservationStatus[] = ['held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'];
 const MAX_NIGHTS = 30;
 const MAX_UNITS = 500;
+// Igual que el límite de connectical_provider_upsert_offer.
+const MAX_TITLE_LENGTH = 120;
 const DEFAULT_OFFER = { title: 'Pousada laboratorio', price: '320,00' };
 
 type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
@@ -442,7 +444,7 @@ export function ReservationPortal({
               ))}
               <ActionButton title={words.newOffer} secondary onPress={startNewOffer} disabled={busy} />
               <Text style={styles.sectionTitle}>{selectedProviderOfferId ? words.editOffer : words.createOfferTitle}</Text>
-              <Field label={words.offerName} value={offerTitle} onChange={setOfferTitle} />
+              <Field label={words.offerName} value={offerTitle} onChange={setOfferTitle} maxLength={MAX_TITLE_LENGTH} />
               <Text style={styles.fieldLabel}>{words.category}</Text>
               <View style={styles.chips}>
                 {CATEGORIES.map(category => (
@@ -568,12 +570,14 @@ function Field({
   onChange,
   numeric = false,
   decimal = false,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   numeric?: boolean;
   decimal?: boolean;
+  maxLength?: number;
 }) {
   return (
     <View style={styles.field}>
@@ -582,6 +586,7 @@ function Field({
         value={value}
         onChangeText={onChange}
         accessibilityLabel={label}
+        maxLength={maxLength}
         keyboardType={decimal ? 'decimal-pad' : numeric ? 'number-pad' : 'default'}
         style={styles.input}
         placeholderTextColor={colors.muted}
