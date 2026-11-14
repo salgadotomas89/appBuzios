@@ -537,4 +537,15 @@ parity=$(as_user "$traveler_a" "
 expected_parity="$(grep -c '"basePriceCents"' "$PWD/__tests__/fixtures/quote-parity.json")|"
 [ "$parity" = "$expected_parity" ] || { echo "SQL quotes diverge from the parity fixture (count|mismatched cases): $parity" >&2; exit 1; }
 echo "PASS SQL quotes match the shared BRL rounding fixture used by the app tests"
+
+# Búzios calendar day: the app's fixed UTC-3 (buziosIsoDate) must agree with PostgreSQL tzdata.
+date_cases=$(tr -d '\n' < "$PWD/__tests__/fixtures/buzios-dates.json")
+date_sql="select count(*) || '|' || coalesce(string_agg(c.instant, ',') filter (
+    where (c.instant::timestamptz at time zone 'America/Sao_Paulo')::date <> c.\"buziosDate\"::date), '')
+  || '|' || (public.connectical_today() = (now() at time zone 'America/Sao_Paulo')::date)
+  from jsonb_to_recordset(:'cases'::jsonb) as c(instant text, \"buziosDate\" text);"
+date_mismatch=$(printf '%s\n' "$date_sql" | docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -v cases="$date_cases" | tail -1)
+expected_dates="$(grep -c '"instant"' "$PWD/__tests__/fixtures/buzios-dates.json")||true"
+[ "$date_mismatch" = "$expected_dates" ] || { echo "Búzios date mismatch (count|instants|today): $date_mismatch" >&2; exit 1; }
+echo "PASS app and PostgreSQL agree on the Búzios calendar day around midnight"
 echo "Shared PostgreSQL integration test passed"

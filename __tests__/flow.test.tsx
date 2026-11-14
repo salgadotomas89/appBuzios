@@ -220,3 +220,28 @@ test('restores an itinerary and a confirmed booking after remounting the app', a
   expect(hasText(reopenedAgain.root, 'BF-DEMO-001')).toBe(true);
   expect(hasText(reopenedAgain.root, 'R$ 339,20')).toBe(true);
 });
+test('does not let a stored past date be confirmed until it is moved to today or later', async () => {
+  mockStorage.clear();
+  mockStorage.set('@buzios-flow/demo-state-v1', JSON.stringify({
+    schemaVersion: 1,
+    tripItems: [{ id: 'old', offerId: 'pousada-geriba', date: '2020-01-01', quantity: 1, nights: 1 }],
+    bookings: [],
+    serviceFeeRate: 600,
+  }));
+  const renderer = await renderApp(false);
+  const root = renderer.root;
+  pressText(root, 'Mi viaje');
+
+  expect(hasText(root, 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.')).toBe(true);
+  pressText(root, 'Confirmar reserva demo');
+  expect(hasText(root, 'BF-DEMO-001')).toBe(false);
+
+  // Cualquier botón lleva la fecha vencida a hoy; desde hoy no se puede retroceder.
+  pressAccessible(root, 'Día anterior');
+  expect(hasText(root, 'Esta fecha ya pasó en Búzios.')).toBe(false);
+  const previous = root.findAll(node => node.props.accessibilityLabel === 'Día anterior' && typeof node.props.onPress === 'function')[0];
+  expect(previous.props.accessibilityState).toEqual({ disabled: true });
+
+  pressText(root, 'Confirmar reserva demo');
+  expect(hasText(root, 'BF-DEMO-001')).toBe(true);
+});

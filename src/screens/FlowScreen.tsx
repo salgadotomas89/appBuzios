@@ -19,6 +19,7 @@ import type { Catalog } from '../data/catalog';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
+import { buziosIsoDate } from '../utils/portalInput';
 import {
   DEFAULT_DEMO_SERVICE_FEE_RATE,
   DEMO_SERVICE_FEE_RATES,
@@ -76,6 +77,7 @@ const copy = {
     rooms: 'Habitaciones',
     nights: 'Noches',
     addTrip: 'Agregar a Mi viaje',
+    pastDate: 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.',
     operations: 'Reservas compartidas · acceso de operaciones',
     previousDay: 'Día anterior',
     nextDay: 'Día siguiente',
@@ -172,6 +174,7 @@ const copy = {
     rooms: 'Quartos',
     nights: 'Noites',
     addTrip: 'Adicionar à Minha viagem',
+    pastDate: 'Esta data já passou em Búzios. Escolha outra para confirmar.',
     operations: 'Reservas compartilhadas · acesso de operações',
     previousDay: 'Dia anterior',
     nextDay: 'Próximo dia',
@@ -296,7 +299,9 @@ export function FlowScreen() {
   );
   const [storageReady, setStorageReady] = useState(false);
   const [showPricingLab, setShowPricingLab] = useState(false);
-  const [draftDate, setDraftDate] = useState(() => dateKey(new Date()));
+  // Las fechas de servicio son de Búzios, no del dispositivo del turista.
+  const today = buziosIsoDate();
+  const [draftDate, setDraftDate] = useState(today);
   const [draftQuantity, setDraftQuantity] = useState(1);
   const [draftNights, setDraftNights] = useState(1);
   const words = copy[language];
@@ -355,7 +360,7 @@ export function FlowScreen() {
 
   function openOffer(offer: Offer) {
     setSelectedOfferId(offer.id);
-    setDraftDate(dateKey(new Date()));
+    setDraftDate(today);
     setDraftQuantity(1);
     setDraftNights(1);
     setScreen('detail');
@@ -388,7 +393,7 @@ export function FlowScreen() {
   }
 
   function confirmBooking() {
-    if (pricedItems.length === 0) return;
+    if (pricedItems.length === 0 || pricedItems.some(entry => entry.item.date < today)) return;
     const bookingId = `BF-DEMO-${String(bookings.length + 1).padStart(3, '0')}`;
     const payment = createPaymentIntent({
       bookingId,
@@ -502,6 +507,7 @@ export function FlowScreen() {
             onDate={setDraftDate}
             onQuantity={setDraftQuantity}
             onNights={setDraftNights}
+            today={today}
             onAdd={() => addToTrip(selectedOffer)}
             addLabel={selectedOffer.source === 'shared' ? (words.bookInPortal as string) : (words.addTrip as string)}
             onBack={() => changeScreen('explore')}
@@ -522,6 +528,7 @@ export function FlowScreen() {
             onUpdate={updateTripItem}
             onRemove={itemId => setTripItems(items => items.filter(item => item.id !== itemId))}
             onConfirm={confirmBooking}
+            today={today}
             onBooking={booking => {
               setBookings(current => [booking, ...current.filter(item => item.id !== booking.id)]);
               setScreen('confirmation');
@@ -759,6 +766,7 @@ function DetailView({
   onAdd,
   addLabel,
   onBack,
+  today,
 }: {
   offer: Offer;
   language: Language;
@@ -772,6 +780,7 @@ function DetailView({
   onAdd: () => void;
   addLabel: string;
   onBack: () => void;
+  today: string;
 }) {
   const canBook = offer.availability === 'available' || offer.availability === 'limited';
   const categorySpecific = [
@@ -832,7 +841,7 @@ function DetailView({
       ) : canBook ? (
         <View style={styles.bookingControls}>
           <Text style={styles.controlLabel}>{offer.priceMode === 'night' ? words.stayDate : words.date}</Text>
-          <DateStepper value={date} language={language} onChange={onDate} />
+          <DateStepper value={date} min={today} language={language} onChange={onDate} />
           {offer.priceMode === 'night' ? (
             <>
               <Text style={styles.controlLabel}>{words.rooms}</Text>
@@ -867,6 +876,7 @@ function TripView({
   onUpdate,
   onRemove,
   onConfirm,
+  today,
   onBooking,
   onExplore,
 }: {
@@ -883,6 +893,7 @@ function TripView({
   onUpdate: (itemId: string, update: Partial<TripItem>) => void;
   onRemove: (itemId: string) => void;
   onConfirm: () => void;
+  today: string;
   onBooking: (booking: Booking) => void;
   onExplore: () => void;
 }) {
@@ -906,7 +917,8 @@ function TripView({
                   </Pressable>
                 </View>
                 <Text style={styles.controlLabel}>{offer.priceMode === 'night' ? words.stayDate : words.date}</Text>
-                <DateStepper value={item.date} language={language} onChange={date => onUpdate(item.id, { date })} />
+                <DateStepper value={item.date} min={today} language={language} onChange={date => onUpdate(item.id, { date })} />
+                {item.date < today ? <Text style={styles.warningTitle}>{words.pastDate}</Text> : null}
                 {offer.priceMode === 'night' ? (
                   <>
                     <Text style={styles.controlLabel}>{words.rooms}</Text>
@@ -948,7 +960,11 @@ function TripView({
               onRate={onServiceFeeRate}
             />
           ) : null}
-          <PrimaryButton title={words.confirm as string} onPress={onConfirm} />
+          <PrimaryButton
+            title={words.confirm as string}
+            onPress={onConfirm}
+            disabled={items.some(({ item }) => item.date < today)}
+          />
         </>
       ) : (
         <EmptyState title={words.emptyTrip as string} note={words.emptyTripNote as string} action={words.explore as string} onAction={onExplore} />
@@ -1162,15 +1178,33 @@ function FilterPill({ label, active, onPress }: { label: string; active: boolean
   );
 }
 
-function DateStepper({ value, language, onChange }: { value: string; language: Language; onChange: (value: string) => void }) {
+function DateStepper({
+  value,
+  min,
+  language,
+  onChange,
+}: {
+  value: string;
+  min: string;
+  language: Language;
+  onChange: (value: string) => void;
+}) {
   const words = copy[language];
+  const previous = moveDate(value, -1);
+  // Una fecha guardada que ya pasó salta a hoy con cualquiera de los dos botones.
   return (
     <View style={styles.stepper}>
-      <Pressable onPress={() => onChange(moveDate(value, -1))} style={styles.stepperButton} accessibilityLabel={words.previousDay as string}>
+      <Pressable
+        onPress={() => onChange(previous < min ? min : previous)}
+        disabled={value === min}
+        accessibilityState={{ disabled: value === min }}
+        style={[styles.stepperButton, value <= min && styles.buttonDisabled]}
+        accessibilityLabel={words.previousDay as string}
+      >
         <Text style={styles.stepperSign}>−</Text>
       </Pressable>
       <Text style={styles.stepperValue}>{formatDate(value, language)}</Text>
-      <Pressable onPress={() => onChange(moveDate(value, 1))} style={styles.stepperButton} accessibilityLabel={words.nextDay as string}>
+      <Pressable onPress={() => onChange(value < min ? min : moveDate(value, 1))} style={styles.stepperButton} accessibilityLabel={words.nextDay as string}>
         <Text style={styles.stepperSign}>+</Text>
       </Pressable>
     </View>
