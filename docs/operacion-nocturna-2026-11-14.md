@@ -30,3 +30,12 @@ Sin cambios remotos: InsForge, OAuth y pagos reales quedan para revisión humana
 - Revisión independiente del diff: sin fallos graves; 5 detalles menores corregidos (`94c5fc1`).
 - Dependencias: `zod < 4.6.6` (alto) llega vía `@insforge/sdk@1.5.2`, que es la última versión; sin corrección upstream.
 - Pruebas: Jest 77/77, tsc, ESLint, integración PostgreSQL 25/25.
+
+## Checkpoint 3 — 00:35 → 00:44
+
+- Portal (`8d8b05d`): resultado de pago simulado elegible (aprobado, rechazado, pendiente), reintento de pago en
+  reservas retenidas o pendientes con hora de vencimiento, historial de admin con eventos traducidos.
+- Migración `202611140002_system_hold_sweep.sql` (`d3469e4`): `connectical_system_expire_holds()` para un scheduler
+  confiable, sin acceso para `anon`/`authenticated`. No se instaló ningún scheduler.
+- Pendientes para la revisión humana: [revision-humana-2026-11-15.md](revision-humana-2026-11-15.md).
+- Pruebas: Jest 79/79, tsc, ESLint, integración PostgreSQL 26/26.
