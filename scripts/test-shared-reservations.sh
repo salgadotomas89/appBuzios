@@ -27,14 +27,18 @@ if [ "$owns_container" -eq 1 ]; then
   container_pid=$!
 fi
 
-attempt=0
-until docker exec "$container" psql -qAt -U postgres -d postgres -c 'select 1' >/dev/null 2>&1; do
-  attempt=$((attempt + 1))
-  if [ "$attempt" -gt 100 ]; then
-    echo "Disposable PostgreSQL did not become ready" >&2
-    exit 1
-  fi
-done
+# The image's init phase runs a temporary socket-only server and then restarts it.
+# Probing over TCP waits for the final server instead of that temporary one.
+wait_for_postgres() {
+  attempt=0
+  until docker exec "$container" psql -qAt -h 127.0.0.1 -U postgres -d postgres -c 'select 1' >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 150 ]; then return 1; fi
+    sleep 0.2
+  done
+}
+
+wait_for_postgres || { echo "Disposable PostgreSQL did not become ready" >&2; exit 1; }
 
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 create role anon nologin;
@@ -215,11 +219,7 @@ traveler_b_view=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postg
 echo "PASS traveler own-row visibility, provider/inventory visibility, isolation, admin totals, commissions and history"
 
 docker restart "$container" >/dev/null
-attempt=0
-until docker exec "$container" psql -qAt -U postgres -d postgres -c 'select 1' >/dev/null 2>&1; do
-  attempt=$((attempt + 1))
-  if [ "$attempt" -gt 100 ]; then echo "PostgreSQL restart failed" >&2; exit 1; fi
-done
+wait_for_postgres || { echo "PostgreSQL restart failed" >&2; exit 1; }
 persisted=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "select status||'|'||amount_cents from public.connectical_reservations where id='$reservation_id';" | tail -1)
 [ "$persisted" = 'confirmed|33920' ] || { echo "Reservation was not recovered after database restart" >&2; exit 1; }
