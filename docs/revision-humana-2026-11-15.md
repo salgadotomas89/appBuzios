@@ -12,7 +12,7 @@ Bitácora técnica: [operacion-nocturna-2026-11-14.md](operacion-nocturna-2026-1
 
 ## 2. Aplicar las migraciones en el tenant de ensayo
 
-**Checklist paso a paso actualizado: [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md)** (ocho migraciones,
+**Checklist paso a paso actualizado: [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md)** (nueve migraciones,
 preflight y verificación de solo lectura, decisión del scheduler). La lista de abajo es la original de cuatro.
 
 En este orden, cada una en una ejecución separada, y luego las verificaciones del preflight:

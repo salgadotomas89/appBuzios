@@ -367,6 +367,30 @@ export async function setOfferCommission(offerId: string, rateBps: number | null
   return data as number | null;
 }
 
+export type PaymentReviewOutcome =
+  | 'possible_double_charge'
+  | 'amount_mismatch'
+  | 'currency_mismatch'
+  | 'paid_without_reservation'
+  | 'unknown_reservation';
+
+export type PaymentReview = {
+  id: number;
+  gateway: string;
+  event_id: string;
+  reservation_id: string | null;
+  kind: 'payment_approved' | 'payment_rejected' | 'payment_pending';
+  amount_cents: number;
+  currency: string;
+  outcome: PaymentReviewOutcome;
+  received_at: string;
+};
+
+// Solo administración (migración 202611140008): eventos de pasarela que no se aplicaron.
+export async function listPaymentReviews(): Promise<PaymentReview[]> {
+  return callRpc('connectical_admin_list_payment_reviews', {});
+}
+
 export type SweepHealth = {
   last_success_at: string | null;
   last_run_at: string | null;

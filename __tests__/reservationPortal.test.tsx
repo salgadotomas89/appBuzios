@@ -15,7 +15,7 @@ jest.mock('../src/lib/reservationService', () => {
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
-    'listCommissionTerms', 'setOfferCommission',
+    'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -90,6 +90,7 @@ beforeEach(() => {
   mocked.listOfferAvailability.mockResolvedValue([]);
   mocked.getSweepHealth.mockResolvedValue(null);
   mocked.listCommissionTerms.mockResolvedValue([]);
+  mocked.listPaymentReviews.mockResolvedValue([]);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -520,4 +521,16 @@ it('shows effective commissions against unapproved references and sets a product
   await press(root, 'Guardar comisión');
   expect(mocked.setOfferCommission).toHaveBeenCalledWith('o-vip', 1850);
   expect(hasText(root, 'Comisión actualizada.')).toBe(true);
+});
+
+it('lists gateway events that need a human decision', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listPaymentReviews.mockResolvedValue([
+    { id: 7, gateway: 'lab', event_id: 'evt-2', reservation_id: 'r1', kind: 'payment_approved', amount_cents: 67840, currency: 'BRL', outcome: 'possible_double_charge', received_at: '2099-01-01T12:00:00Z' },
+    { id: 8, gateway: 'lab', event_id: 'evt-9', reservation_id: null, kind: 'payment_approved', amount_cents: 100, currency: 'BRL', outcome: 'unknown_reservation', received_at: '2099-01-01T12:01:00Z' },
+  ]);
+  const root = await render('pt');
+  expect(hasText(root, 'Eventos do gateway para revisar · 2')).toBe(true);
+  expect(hasText(root, 'possível cobrança dupla · R$ 678,40 BRL')).toBe(true);
+  expect(hasText(root, 'lab · evt-9 · — · 2099-01-01T12:01:00Z')).toBe(true);
 });

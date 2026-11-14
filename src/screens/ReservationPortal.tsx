@@ -31,6 +31,8 @@ import {
   setSharedProviderActive,
   getSweepHealth,
   listCommissionTerms,
+  listPaymentReviews,
+  type PaymentReview,
   setOfferCommission,
   type CommissionTerm,
   type SweepHealth,
@@ -109,6 +111,7 @@ export function ReservationPortal({
   const [events, setEvents] = useState<SharedReservationEvent[]>([]);
   const [sweepHealth, setSweepHealth] = useState<SweepHealth | null>(null);
   const [commissionTerms, setCommissionTerms] = useState<CommissionTerm[]>([]);
+  const [paymentReviews, setPaymentReviews] = useState<PaymentReview[]>([]);
   const [commissionEdit, setCommissionEdit] = useState<{ offerId: string; value: string } | null>(null);
   const [providerOffers, setProviderOffers] = useState<SharedOffer[]>([]);
   const [providerInventory, setProviderInventory] = useState<SharedInventory[]>([]);
@@ -179,13 +182,16 @@ export function ReservationPortal({
     setProviderInventory(ownedInventory);
     if (nextRole === 'admin') {
       // La salud del barrido es informativa: si la migración 202611140006 falta, no bloquea el panel.
-      const [health, terms] = await Promise.all([
+      // Secciones informativas: si falta una migración opcional, el resto del panel sigue funcionando.
+      const [health, terms, reviews] = await Promise.all([
         getSweepHealth().catch(() => null),
         listCommissionTerms().catch(() => []),
+        listPaymentReviews().catch(() => []),
       ]);
       if (mounted.current) {
         setSweepHealth(health);
         setCommissionTerms(terms);
+        setPaymentReviews(reviews);
       }
     }
   }
@@ -699,6 +705,18 @@ export function ReservationPortal({
                 ) : null}
                 {reservationList('admin_review', visibleReservations)}
               </View>
+              {paymentReviews.length ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>{words.paymentReviews} · {paymentReviews.length}</Text>
+                  <Text style={styles.warning}>{words.paymentReviewHint}</Text>
+                  {paymentReviews.map(review => (
+                    <View key={review.id} style={styles.eventRow}>
+                      <Text style={styles.offerName}>{words.paymentReviewOutcomes[review.outcome] ?? review.outcome} · {brlFromCents(review.amount_cents)} {review.currency}</Text>
+                      <Text selectable style={styles.helper}>{review.gateway} · {review.event_id} · {review.reservation_id ?? '—'} · {review.received_at}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               {commissionTerms.length ? (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{words.commissionTerms}</Text>

@@ -874,6 +874,62 @@ if as_user "$admin_user" "select count(*) from public.connectical_commission_ref
 fi
 echo "PASS experiences category, admin-only product commissions frozen per quote and hidden from providers"
 
+# Gateway webhooks: idempotent ingestion, exact BRL amount, no double confirmation, late payments.
+pg_offer='5b000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+values ('$pg_offer', '$lab_provider', 'noche', 'Webhook lab club', 12000, 'ticket', true);
+insert into public.connectical_inventory (offer_id, service_date, total_units) values ('$pg_offer', current_date + 160, 5);"
+webhook_hold() {
+  wq=$(as_user "$(racer 8)" "select (public.connectical_create_quote('$pg_offer', current_date + 160, 1, 1, 600)).id;")
+  as_user "$(racer 8)" "select r.id || '|' || r.amount_cents from public.connectical_create_reservation_hold('$wq', gen_random_uuid()) r;"
+}
+ingest() {
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+    select e.outcome || '|' || e.needs_review from public.connectical_system_ingest_payment_event($1) e;" | tail -1
+}
+pg_counters() { docker exec "$container" psql -qAt -U postgres -d postgres -c "select held_units || '/' || sold_units from public.connectical_inventory where offer_id = '$pg_offer';" | tail -1; }
+if as_user "$admin_user" "select public.connectical_system_ingest_payment_event('lab', 'x', gen_random_uuid(), 'payment_approved', 1, 'BRL');" >/dev/null 2>&1; then
+  echo "App role could ingest gateway events" >&2; exit 1
+fi
+w1=$(webhook_hold); w1_id=${w1%%|*}; w1_amount=${w1#*|}
+[ "$(ingest "'lab', 'evt-1', '$w1_id', 'payment_approved', $w1_amount, 'BRL', 'pix', 'LAB-W1'")" = 'applied_confirmed|false' ] || { echo "Matching webhook was not applied" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-1', '$w1_id', 'payment_approved', $w1_amount, 'BRL', 'pix', 'LAB-W1'")" = 'applied_confirmed|false' ] || { echo "Webhook retry changed the outcome" >&2; exit 1; }
+[ "$(pg_counters)" = '0/1' ] || { echo "Webhook retry touched inventory twice: $(pg_counters)" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-2', '$w1_id', 'payment_approved', $w1_amount, 'BRL', 'card', 'LAB-W1B'")" = 'possible_double_charge|true' ] || { echo "Second charge was not flagged" >&2; exit 1; }
+w2=$(webhook_hold); w2_id=${w2%%|*}; w2_amount=${w2#*|}
+[ "$(ingest "'lab', 'evt-3', '$w2_id', 'payment_approved', $((w2_amount - 1)), 'BRL'")" = 'amount_mismatch|true' ] || { echo "Amount mismatch was applied" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-4', '$w2_id', 'payment_approved', $w2_amount, 'USD'")" = 'currency_mismatch|true' ] || { echo "Non-BRL event was applied" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-5', '$w2_id', 'payment_pending', 0, 'BRL', 'pix'")" = 'applied_pending|false' ] || { echo "Pending webhook not applied" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-6', '$w2_id', 'payment_rejected', 0, 'BRL', 'pix'")" = 'applied_rejected|false' ] || { echo "Rejected webhook not applied" >&2; exit 1; }
+w3=$(webhook_hold); w3_id=${w3%%|*}; w3_amount=${w3#*|}
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_reservations set hold_expires_at = now() - interval '1 second' where id = '$w3_id';"
+[ "$(ingest "'lab', 'evt-7', '$w3_id', 'payment_approved', $w3_amount, 'BRL'")" = 'paid_without_reservation|true' ] || { echo "Late payment revived an elapsed hold" >&2; exit 1; }
+[ "$(ingest "'lab', 'evt-8', gen_random_uuid(), 'payment_approved', 100, 'BRL'")" = 'unknown_reservation|true' ] || { echo "Unknown reservation event not flagged" >&2; exit 1; }
+w4=$(webhook_hold); w4_id=${w4%%|*}; w4_amount=${w4#*|}
+wh_start=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select extract(epoch from clock_timestamp() + interval '3 seconds');" | tail -1)
+wh_pids=''
+for n in 1 2 3; do
+  (
+    docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "select pg_sleep(greatest(0, $wh_start - extract(epoch from clock_timestamp())));" \
+      -c "select (public.connectical_system_ingest_payment_event('lab', 'evt-race', '$w4_id', 'payment_approved', $w4_amount, 'BRL')).outcome;" 2>&1 | tail -1 >"$workdir/wh.$n"
+  ) &
+  wh_pids="$wh_pids $!"
+done
+for pid in $wh_pids; do wait "$pid"; done
+wh_outcomes=$(sort -u "$workdir"/wh.* | tr '\n' ' ')
+wh_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_payment_events where event_id = 'evt-race';" | tail -1)
+[ "$wh_outcomes" = 'applied_confirmed ' ] && [ "$wh_rows" = '1' ] || { echo "Concurrent webhook retries: outcomes=$wh_outcomes rows=$wh_rows" >&2; exit 1; }
+reviews=$(as_user "$admin_user" "select string_agg(outcome, ',' order by id) from public.connectical_admin_list_payment_reviews() where gateway = 'lab';")
+[ "$reviews" = 'possible_double_charge,amount_mismatch,currency_mismatch,paid_without_reservation,unknown_reservation' ] || { echo "Admin review list mismatch: $reviews" >&2; exit 1; }
+if as_user "$traveler_a" "select public.connectical_admin_list_payment_reviews();" >/dev/null 2>&1; then
+  echo "Traveler could list payment reviews" >&2; exit 1
+fi
+wh_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
+[ -z "$wh_reconcile" ] || { echo "Inventory does not reconcile after webhooks: $wh_reconcile" >&2; exit 1; }
+echo "PASS gateway events apply once, need the exact BRL amount, flag double charges and late payments"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

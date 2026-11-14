@@ -1,6 +1,6 @@
 # Provisioning for the InsForge trial project
 
-Step-by-step operator checklist (Spanish): [`docs/runbook-insforge-ensayo.md`](../docs/runbook-insforge-ensayo.md). It covers the read-only [`checks/preflight.sql`](checks/preflight.sql), all eight migrations in order, verification, reconciliation and the scheduler decision.
+Step-by-step operator checklist (Spanish): [`docs/runbook-insforge-ensayo.md`](../docs/runbook-insforge-ensayo.md). It covers the read-only [`checks/preflight.sql`](checks/preflight.sql), all nine migrations in order, verification, reconciliation and the scheduler decision.
 
 Apply this only in the verified InsForge **trial** project after the shared-reservation migrations (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql`, `202611140002_system_hold_sweep.sql`, then `202611140003_refund_ledger.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
 

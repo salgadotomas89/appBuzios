@@ -1,6 +1,7 @@
 import type { Language } from '../data/homeMock';
 import type { InputError } from '../utils/portalInput';
 import type { ReservationInconsistency } from '../utils/reservationTotals';
+import type { PaymentReviewOutcome } from '../lib/reservationService';
 
 // Textos del portal de reservas compartidas. Para sumar inglés basta con
 // ampliar `Language` y añadir aquí la entrada `en`; TypeScript exige todas las claves.
@@ -123,6 +124,15 @@ const es = {
   commissionRateLabel: 'Comisión del producto (%), vacío para usar la del proveedor',
   commissionSave: 'Guardar comisión',
   commissionSaved: 'Comisión actualizada.',
+  paymentReviews: 'Eventos de pasarela para revisar',
+  paymentReviewHint: 'No se aplicaron a ninguna reserva. Un cobro sin reserva o un posible doble cobro requiere decidir una devolución.',
+  paymentReviewOutcomes: {
+    possible_double_charge: 'posible doble cobro',
+    amount_mismatch: 'importe distinto del cotizado',
+    currency_mismatch: 'moneda distinta de BRL',
+    paid_without_reservation: 'cobro con la reserva vencida o cancelada',
+    unknown_reservation: 'reserva desconocida',
+  } satisfies Record<PaymentReviewOutcome, string>,
   sweepTitle: 'Barrido de retenciones vencidas',
   sweepNever: 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona. Las retenciones vencidas se liberan al listar o reservar.',
   sweepLast: 'Última ejecución correcta: {time}',
@@ -331,6 +341,15 @@ const pt: PortalCopy = {
   commissionRateLabel: 'Comissão do produto (%), vazio para usar a do fornecedor',
   commissionSave: 'Salvar comissão',
   commissionSaved: 'Comissão atualizada.',
+  paymentReviews: 'Eventos do gateway para revisar',
+  paymentReviewHint: 'Não foram aplicados a nenhuma reserva. Uma cobrança sem reserva ou uma possível cobrança dupla exige decidir uma devolução.',
+  paymentReviewOutcomes: {
+    possible_double_charge: 'possível cobrança dupla',
+    amount_mismatch: 'valor diferente do cotado',
+    currency_mismatch: 'moeda diferente de BRL',
+    paid_without_reservation: 'cobrança com a reserva vencida ou cancelada',
+    unknown_reservation: 'reserva desconhecida',
+  } satisfies Record<PaymentReviewOutcome, string>,
   sweepTitle: 'Varredura de retenções vencidas',
   sweepNever: 'Nenhuma execução correta registrada: o agendador não está instalado ou não funciona. As retenções vencidas são liberadas ao listar ou reservar.',
   sweepLast: 'Última execução correta: {time}',
