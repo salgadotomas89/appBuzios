@@ -86,7 +86,8 @@ describe('payment engine', () => {
 
     expect(quote.currency).toBe('USD');
     expect(quote.rate).toBeGreaterThan(0);
-    expect(quote.source).toContain('Mercado Pago');
+    expect(quote.isDemoRate).toBe(true);
+    expect(quote.source).toContain('demostración');
     expect(quote.validAt).toBeTruthy();
     expect(quote.amount).toBeGreaterThan(0);
   });
@@ -112,7 +113,8 @@ describe('payment engine', () => {
     });
 
     expect(splitBlocked.settlementMode).toBe('b2b_conciliation');
-    expect(splitBlocked.netToProviderCents).toBe(120_000 - 12_000);
+    // El total incluye el cargo del turista (5.000), que no es del proveedor.
+    expect(splitBlocked.netToProviderCents).toBe(120_000 - 5_000 - 12_000);
     expect(splitBlocked.notes).toContain(NO_SPLIT_AVAILABLE);
   });
 
@@ -135,11 +137,35 @@ describe('payment engine', () => {
       gatewayReference: 'mp-pix-1',
     });
 
-    const refunded = applyRefund(approved, { amountCents: 80_000, reason: 'partial_refund' });
+    const refunded = applyRefund(approved, { refundId: 'rf-1', amountCents: 80_000, reason: 'partial_refund' });
     expect(refunded.state).toBe('partially_refunded');
     expect(refunded.refundedCents).toBe(80_000);
 
-    const duplicate = applyRefund(approved, { amountCents: 80_000, reason: 'duplicate_refund' });
+    const duplicate = applyRefund(refunded, { refundId: 'rf-1', amountCents: 80_000, reason: 'duplicate_refund' });
     expect(duplicate.refundedCents).toBe(80_000);
+    expect(duplicate.notes).toContain('duplicate refund ignored: rf-1');
+
+    // Un segundo reembolso parcial más pequeño es legítimo y debe sumarse.
+    const second = applyRefund(duplicate, { refundId: 'rf-2', amountCents: 10_000, reason: 'second_partial' });
+    expect(second.refundedCents).toBe(90_000);
+    expect(second.state).toBe('partially_refunded');
+
+    const capped = applyRefund(second, { refundId: 'rf-3', amountCents: 999_999, reason: 'full_refund' });
+    expect(capped.refundedCents).toBe(250_000);
+    expect(capped.state).toBe('refunded');
+  });
+
+  test('does not refund payments that were never approved', () => {
+    const intent = createPaymentIntent({
+      bookingId: 'BK-105',
+      amountCents: 50_000,
+      travelerCountry: 'CL',
+      travelerHasCpf: false,
+    });
+    const rejected = finalizePaymentIntent(intent, { status: 'rejected' });
+    const result = applyRefund(rejected, { refundId: 'rf-x', amountCents: 50_000, reason: 'customer' });
+    expect(result.refundedCents).toBe(0);
+    expect(result.state).toBe('rejected');
+    expect(applyRefund(intent, { refundId: 'rf-y', amountCents: 1, reason: 'pending' }).refundedCents).toBe(0);
   });
 });
