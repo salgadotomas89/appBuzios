@@ -930,6 +930,31 @@ wh_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postg
 [ -z "$wh_reconcile" ] || { echo "Inventory does not reconcile after webhooks: $wh_reconcile" >&2; exit 1; }
 echo "PASS gateway events apply once, need the exact BRL amount, flag double charges and late payments"
 
+# Offer details and per-booking quantity limits.
+boat_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'barcos', 'Details lab schooner', 9000, 'person', true)).id;")
+as_user "$provider_user" "select public.connectical_provider_publish_inventory('$boat_offer', current_date + 170, 40);" >/dev/null
+for actor in "$traveler_a" "$(racer 1)"; do
+  if as_user "$actor" "select public.connectical_provider_set_offer_details('$boat_offer', 'x', '', '', '', 1, null);" >/dev/null 2>&1; then
+    echo "Non-owner could edit offer details" >&2; exit 1
+  fi
+done
+for bad in "repeat('x', 2001), '', '', '', 1, null" "'ok', '', '', '', 5, 2" "'ok', '', '', '', 0, null" "'ok', repeat('x', 161), '', '', 1, null"; do
+  if as_user "$provider_user" "select public.connectical_provider_set_offer_details('$boat_offer', $bad);" >/dev/null 2>&1; then
+    echo "Invalid offer details accepted: $bad" >&2; exit 1
+  fi
+done
+as_user "$provider_user" "select public.connectical_provider_set_offer_details('$boat_offer', '  Passeio de escuna de 4 horas.  ', 'Praia dos Ossos', 'Cais da Praia dos Ossos', 'Saída 10:00', 2, 12);" >/dev/null
+details=$(as_user "$traveler_a" "select description || '|' || location || '|' || meeting_point || '|' || schedule || '|' || min_quantity || '|' || max_quantity from public.connectical_offers where id = '$boat_offer';")
+[ "$details" = 'Passeio de escuna de 4 horas.|Praia dos Ossos|Cais da Praia dos Ossos|Saída 10:00|2|12' ] || { echo "Offer details mismatch: $details" >&2; exit 1; }
+for qty in 1 13; do
+  if as_user "$traveler_a" "select public.connectical_create_quote('$boat_offer', current_date + 170, $qty, 1, 600);" >/dev/null 2>&1; then
+    echo "Quantity $qty outside 2-12 was accepted" >&2; exit 1
+  fi
+done
+in_range=$(as_user "$traveler_a" "select (public.connectical_create_quote('$boat_offer', current_date + 170, 12, 1, 600)).subtotal_cents;")
+[ "$in_range" = '108000' ] || { echo "Quantity at the limit mismatch: $in_range" >&2; exit 1; }
+echo "PASS providers describe their offers and quotes respect per-booking quantity limits"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

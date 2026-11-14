@@ -66,7 +66,18 @@ export type SharedOffer = {
   price_mode: PortalPriceMode;
   currency: 'BRL';
   published: boolean;
+  // Detalle de la migración 202611140009; vacío si el proveedor no lo cargó.
+  description?: string;
+  location?: string;
+  meeting_point?: string;
+  schedule?: string;
+  min_quantity?: number;
+  max_quantity?: number | null;
 };
+
+export const OFFER_COLUMNS =
+  'id, provider_id, category, title, base_price_cents, price_mode, currency, published, ' +
+  'description, location, meeting_point, schedule, min_quantity, max_quantity';
 
 export type SharedProvider = {
   id: string;
@@ -264,19 +275,19 @@ export async function listSharedReservationEvents(): Promise<SharedReservationEv
 export async function listSharedOffers(): Promise<SharedOffer[]> {
   const { data, error } = await getClient().database
     .from('connectical_offers')
-    .select('id, provider_id, category, title, base_price_cents, price_mode, currency, published')
+    .select(OFFER_COLUMNS)
     .eq('published', true);
   if (error) throw new Error(`No se pudieron leer ofertas: ${error.message}`);
-  return (data ?? []) as SharedOffer[];
+  return (data ?? []) as unknown as SharedOffer[];
 }
 
 export async function listProviderOffers(): Promise<SharedOffer[]> {
   const { data, error } = await getClient().database
     .from('connectical_offers')
-    .select('id, provider_id, category, title, base_price_cents, price_mode, currency, published')
+    .select(OFFER_COLUMNS)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudieron leer ofertas del proveedor: ${error.message}`);
-  return (data ?? []) as SharedOffer[];
+  return (data ?? []) as unknown as SharedOffer[];
 }
 
 export async function listProviderInventory(): Promise<SharedInventory[]> {
@@ -330,6 +341,27 @@ export async function publishProviderInventoryRange(input: {
     p_from_date: input.fromDate,
     p_nights: input.nights,
     p_total_units: input.totalUnits,
+  });
+}
+
+// Propietario activo o administración. Textos acotados en SQL; min/max son por reserva.
+export async function setProviderOfferDetails(input: {
+  offerId: string;
+  description: string;
+  location: string;
+  meetingPoint: string;
+  schedule: string;
+  minQuantity: number;
+  maxQuantity: number | null;
+}): Promise<string> {
+  return callRpc('connectical_provider_set_offer_details', {
+    p_offer_id: input.offerId,
+    p_description: input.description,
+    p_location: input.location,
+    p_meeting_point: input.meetingPoint,
+    p_schedule: input.schedule,
+    p_min_quantity: input.minQuantity,
+    p_max_quantity: input.maxQuantity,
   });
 }
 

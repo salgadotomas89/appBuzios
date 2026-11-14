@@ -25,7 +25,7 @@ with checks(name, ok) as (
           'connectical_create_traveler_profile', 'connectical_system_expire_holds',
           'connectical_system_run_hold_sweep', 'connectical_system_ingest_payment_event'))),
     ('app RPCs executable by authenticated',
-      (select count(*) = 16 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
+      (select count(*) = 17 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in (
           'connectical_create_quote', 'connectical_create_reservation_hold', 'connectical_simulate_payment',
@@ -34,7 +34,7 @@ with checks(name, ok) as (
           'connectical_provider_publish_inventory_range', 'connectical_admin_set_provider_active',
           'connectical_admin_sweep_health', 'connectical_admin_set_provider_commission',
           'connectical_admin_set_offer_commission', 'connectical_admin_list_commission_terms',
-          'connectical_admin_list_payment_reviews'))),
+          'connectical_admin_list_payment_reviews', 'connectical_provider_set_offer_details'))),
     ('anon cannot run reservation, refund or operations RPCs',
       (select bool_and(not has_function_privilege('anon', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace

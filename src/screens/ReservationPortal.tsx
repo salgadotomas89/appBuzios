@@ -28,6 +28,7 @@ import {
   upsertProviderOffer,
   publishProviderInventory,
   publishProviderInventoryRange,
+  setProviderOfferDetails,
   setSharedProviderActive,
   getSweepHealth,
   listCommissionTerms,
@@ -87,6 +88,10 @@ const MAX_REFUND_REASON_LENGTH = 500;
 // Igual que el límite de connectical_provider_publish_inventory_range.
 const MAX_PUBLISH_NIGHTS = 90;
 const DEFAULT_OFFER = { title: 'Pousada laboratorio', price: '320,00' };
+// Límites de connectical_provider_set_offer_details.
+const MAX_DESCRIPTION_LENGTH = 2000;
+const MAX_DETAIL_LENGTH = 160;
+const EMPTY_DETAILS = { description: '', location: '', meetingPoint: '', schedule: '', minQuantity: '1', maxQuantity: '' };
 
 type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
 
@@ -129,6 +134,7 @@ export function ReservationPortal({
   const [offerPrice, setOfferPrice] = useState(DEFAULT_OFFER.price);
   const [offerCategory, setOfferCategory] = useState<PortalCategory>('pousadas');
   const [offerPriceMode, setOfferPriceMode] = useState<PortalPriceMode>('night');
+  const [offerDetails, setOfferDetails] = useState(EMPTY_DETAILS);
   const [stock, setStock] = useState('1');
   const [publishNights, setPublishNights] = useState('1');
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
@@ -293,7 +299,10 @@ export function ReservationPortal({
         parseIsoDate(date, buziosIsoDate()),
         perNight ? words.checkIn : words.date,
       );
-      const units = valueOf(parseCount(quantity, { max: MAX_UNITS }), words.quantity[selectedOffer.price_mode]);
+      const units = valueOf(
+        parseCount(quantity, { min: selectedOffer.min_quantity ?? 1, max: selectedOffer.max_quantity ?? MAX_UNITS }),
+        words.quantity[selectedOffer.price_mode],
+      );
       const stayNights = perNight ? valueOf(parseCount(nights, { max: MAX_NIGHTS }), words.nights) : 1;
       const nextQuote = await createSharedQuote({
         offerId: selectedOffer.id,
@@ -386,6 +395,14 @@ export function ReservationPortal({
     setOfferPrice(centsToBrlInput(offer.base_price_cents));
     setOfferCategory(offer.category);
     setOfferPriceMode(offer.price_mode);
+    setOfferDetails({
+      description: offer.description ?? '',
+      location: offer.location ?? '',
+      meetingPoint: offer.meeting_point ?? '',
+      schedule: offer.schedule ?? '',
+      minQuantity: String(offer.min_quantity ?? 1),
+      maxQuantity: offer.max_quantity ? String(offer.max_quantity) : '',
+    });
   }
 
   function startNewOffer() {
@@ -394,6 +411,7 @@ export function ReservationPortal({
     setOfferPrice(DEFAULT_OFFER.price);
     setOfferCategory('pousadas');
     setOfferPriceMode('night');
+    setOfferDetails(EMPTY_DETAILS);
   }
 
   function saveOffer() {
@@ -403,6 +421,12 @@ export function ReservationPortal({
       const basePriceCents = valueOf(parseBrlToCents(offerPrice), words.priceBrl);
       const serviceDate = valueOf(parseIsoDate(date, buziosIsoDate()), words.date);
       const totalUnits = valueOf(parseCount(stock, { min: 0, max: MAX_UNITS }), words.units);
+      // Todo se valida antes de la primera llamada para no dejar una oferta guardada a medias.
+      const minQuantity = valueOf(parseCount(offerDetails.minQuantity, { max: MAX_UNITS }), words.minQuantity);
+      const maxQuantity = offerDetails.maxQuantity.trim()
+        ? valueOf(parseCount(offerDetails.maxQuantity, { min: minQuantity, max: MAX_UNITS }), words.maxQuantity)
+        : null;
+      const nightsToPublish = valueOf(parseCount(publishNights, { max: MAX_PUBLISH_NIGHTS }), words.publishNights);
       const offer = await upsertProviderOffer({
         offerId: selectedProviderOfferId ?? undefined,
         category: offerCategory,
@@ -411,12 +435,20 @@ export function ReservationPortal({
         priceMode: offerPriceMode,
         published: true,
       });
-      const nightsToPublish = valueOf(parseCount(publishNights, { max: MAX_PUBLISH_NIGHTS }), words.publishNights);
       if (nightsToPublish === 1) {
         await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
       } else {
         await publishProviderInventoryRange({ offerId: offer.id, fromDate: serviceDate, nights: nightsToPublish, totalUnits });
       }
+      await setProviderOfferDetails({
+        offerId: offer.id,
+        description: offerDetails.description.trim(),
+        location: offerDetails.location.trim(),
+        meetingPoint: offerDetails.meetingPoint.trim(),
+        schedule: offerDetails.schedule.trim(),
+        minQuantity,
+        maxQuantity,
+      });
       setSelectedProviderOfferId(offer.id);
       if (role) await loadForRole(role);
       return words.offerSaved;
@@ -501,6 +533,17 @@ export function ReservationPortal({
               {selectedOffer ? (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{words.quoteAndBook} · {selectedOffer.title}</Text>
+                  {selectedOffer.description ? <Text style={styles.helper}>{selectedOffer.description}</Text> : null}
+                  {[selectedOffer.location, selectedOffer.meeting_point, selectedOffer.schedule].some(Boolean) ? (
+                    <Text style={styles.helper}>{[selectedOffer.location, selectedOffer.meeting_point, selectedOffer.schedule].filter(Boolean).join(' · ')}</Text>
+                  ) : null}
+                  {(selectedOffer.min_quantity ?? 1) > 1 || selectedOffer.max_quantity ? (
+                    <Text style={styles.helper}>
+                      {words.quantityLimits
+                        .replace('{min}', String(selectedOffer.min_quantity ?? 1))
+                        .replace('{max}', String(selectedOffer.max_quantity ?? MAX_UNITS))}
+                    </Text>
+                  ) : null}
                   {availability ? (
                     <>
                       <Text style={styles.fieldLabel}>{words.availability}</Text>
@@ -614,6 +657,13 @@ export function ReservationPortal({
                 ))}
               </View>
               <Field label={words.priceBrl} value={offerPrice} onChange={setOfferPrice} decimal />
+              <Field label={words.offerDescription} value={offerDetails.description} onChange={description => setOfferDetails({ ...offerDetails, description })} maxLength={MAX_DESCRIPTION_LENGTH} multiline />
+              <Field label={words.offerLocation} value={offerDetails.location} onChange={location => setOfferDetails({ ...offerDetails, location })} maxLength={MAX_DETAIL_LENGTH} />
+              <Field label={words.offerMeetingPoint} value={offerDetails.meetingPoint} onChange={meetingPoint => setOfferDetails({ ...offerDetails, meetingPoint })} maxLength={MAX_DETAIL_LENGTH} />
+              <Field label={words.offerSchedule} value={offerDetails.schedule} onChange={schedule => setOfferDetails({ ...offerDetails, schedule })} maxLength={MAX_DETAIL_LENGTH} />
+              <Field label={words.minQuantity} value={offerDetails.minQuantity} onChange={minQuantity => setOfferDetails({ ...offerDetails, minQuantity })} numeric />
+              <Field label={words.maxQuantity} value={offerDetails.maxQuantity} onChange={maxQuantity => setOfferDetails({ ...offerDetails, maxQuantity })} numeric />
+              <Text style={styles.helper}>{words.offerDetailsHint}</Text>
               <Field label={words.date} value={date} onChange={setDate} />
               <Field label={words.units} value={stock} onChange={setStock} numeric />
               <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
@@ -883,6 +933,7 @@ function Field({
   numeric = false,
   decimal = false,
   maxLength,
+  multiline = false,
 }: {
   label: string;
   value: string;
@@ -890,6 +941,7 @@ function Field({
   numeric?: boolean;
   decimal?: boolean;
   maxLength?: number;
+  multiline?: boolean;
 }) {
   return (
     <View style={styles.field}>
@@ -899,6 +951,7 @@ function Field({
         onChangeText={onChange}
         accessibilityLabel={label}
         maxLength={maxLength}
+        multiline={multiline}
         keyboardType={decimal ? 'decimal-pad' : numeric ? 'number-pad' : 'default'}
         style={styles.input}
         placeholderTextColor={colors.muted}

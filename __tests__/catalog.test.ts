@@ -53,3 +53,20 @@ it('lists shared offers first and counts them per category', () => {
   expect(catalog.activeOffers).toBe(homeMock.activeOffers + 1);
   expect(sharedOfferId(homeMock.offers[0])).toBeNull();
 });
+
+it('uses the provider details when present and only lists what is still missing', () => {
+  const offer = sharedOfferToOffer({
+    ...shared, description: ' Escuna com parada para mergulho. ', location: 'Praia dos Ossos',
+    meeting_point: 'Cais', schedule: 'Saída 10:00', min_quantity: 2, max_quantity: 12,
+  }, null);
+  expect(offer.description).toEqual({ es: 'Escuna com parada para mergulho.', pt: 'Escuna com parada para mergulho.' });
+  expect(offer.location.pt).toBe('Praia dos Ossos');
+  expect(offer.meetingPoint?.es).toBe('Cais');
+  expect(offer.schedule?.es).toBe('Saída 10:00');
+  expect(offer.missingFields?.es).toEqual(['Qué incluye', 'Política de cancelación']);
+  // Sin detalle cargado se usa un texto genérico y la ubicación general.
+  const bare = sharedOfferToOffer(shared, null);
+  expect(bare.location.es).toBe('Búzios');
+  expect(bare.meetingPoint).toBeUndefined();
+  expect(bare.missingFields?.es[0]).toBe('Descripción del proveedor');
+});

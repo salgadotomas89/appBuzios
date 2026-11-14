@@ -15,7 +15,7 @@ jest.mock('../src/lib/reservationService', () => {
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
-    'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews',
+    'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -533,4 +533,39 @@ it('lists gateway events that need a human decision', async () => {
   expect(hasText(root, 'Eventos do gateway para revisar · 2')).toBe(true);
   expect(hasText(root, 'possível cobrança dupla · R$ 678,40 BRL')).toBe(true);
   expect(hasText(root, 'lab · evt-9 · — · 2099-01-01T12:01:00Z')).toBe(true);
+});
+
+it('saves offer details with the offer and enforces per-booking limits for travelers', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockResolvedValue({ ...boat, id: 'offer-boat' });
+  mocked.publishProviderInventory.mockResolvedValue({} as never);
+  mocked.setProviderOfferDetails.mockResolvedValue('offer-boat');
+  let root = await render();
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await type(root, 'Descripción para el turista', ' Escuna de 4 horas ');
+  await type(root, 'Ubicación', 'Praia dos Ossos');
+  await type(root, 'Mínimo por reserva', '2');
+  await type(root, 'Máximo por reserva (vacío = sin máximo)', '1');
+  await press(root, 'Publicar oferta y cupo');
+  expect(hasText(root, 'Máximo por reserva (vacío = sin máximo): debe estar entre 2 y 500.')).toBe(true);
+  expect(mocked.upsertProviderOffer).not.toHaveBeenCalled();
+
+  await type(root, 'Máximo por reserva (vacío = sin máximo)', '12');
+  await press(root, 'Publicar oferta y cupo');
+  expect(mocked.setProviderOfferDetails).toHaveBeenCalledWith({
+    offerId: 'offer-boat', description: 'Escuna de 4 horas', location: 'Praia dos Ossos',
+    meetingPoint: '', schedule: '', minQuantity: 2, maxQuantity: 12,
+  });
+
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedOffers.mockResolvedValue([{ ...boat, description: 'Escuna de 4 horas', location: 'Praia dos Ossos', schedule: 'Saída 10:00', min_quantity: 2, max_quantity: 12 }]);
+  root = await render();
+  await press(root, 'Barco Azul');
+  expect(hasText(root, 'Escuna de 4 horas')).toBe(true);
+  expect(hasText(root, 'Praia dos Ossos · Saída 10:00')).toBe(true);
+  expect(hasText(root, 'Por reserva: entre 2 y 12.')).toBe(true);
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'debe estar entre 2 y 12.')).toBe(true);
+  expect(mocked.createSharedQuote).not.toHaveBeenCalled();
 });
