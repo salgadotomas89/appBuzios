@@ -610,6 +610,7 @@ export function ReservationPortal({
                     ) : null}
                     <Field label={words.refundAmount} value={refundAmount} onChange={changeRefundAmount} decimal />
                     <Field label={words.refundReason} value={refundReason} onChange={setRefundReason} maxLength={MAX_REFUND_REASON_LENGTH} />
+                    <Text style={styles.helper}>{words.refundReasonVisible}</Text>
                     <ActionButton title={words.refundSubmit} onPress={submitRefund} disabled={busy} />
                     <ActionButton title={words.refundDiscard} onPress={() => setRefundTarget(null)} disabled={busy} secondary />
                   </View>
