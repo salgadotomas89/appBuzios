@@ -28,6 +28,7 @@ export type SharedReservation = {
   provider_commission_rate_bps: number;
   provider_commission_cents: number;
   connectical_margin_cents: number;
+  refund_cents: number;
   quote_version: string;
   created_at: string;
   updated_at: string;
@@ -166,6 +167,22 @@ export async function cancelSharedReservation(
   return callRpc('connectical_cancel_reservation', {
     p_reservation_id: reservationId,
     p_reason: reason,
+  });
+}
+
+// Solo administración. Registra un importe ya decidido; la base de datos no aplica política
+// comercial, solo impide superar lo cobrado y duplicar la misma solicitud.
+export async function recordSharedRefund(input: {
+  reservationId: string;
+  amountCents: number;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<SharedReservation> {
+  return callRpc('connectical_admin_record_refund', {
+    p_reservation_id: input.reservationId,
+    p_amount_cents: input.amountCents,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
   });
 }
 

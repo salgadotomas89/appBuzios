@@ -13,7 +13,7 @@ jest.mock('../src/lib/reservationService', () => {
     'listProviderInventory', 'listProviderOffers', 'listSharedOffers', 'listSharedProviders',
     'listSharedReservations', 'listSharedReservationEvents', 'signInSharedAccount',
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
-    'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability',
+    'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -35,7 +35,7 @@ function reservation(overrides: Partial<SharedReservation>): SharedReservation {
     service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', hold_expires_at: null,
     payment_status: null, payment_method: null, amount_cents: 67840,
     service_fee_rate_bps: 600, service_fee_cents: 3840, provider_commission_rate_bps: 1000,
-    provider_commission_cents: 6400, connectical_margin_cents: 3840, quote_version: 'connectical-brl-v1',
+    provider_commission_cents: 6400, connectical_margin_cents: 3840, refund_cents: 0, quote_version: 'connectical-brl-v1',
     created_at: '2099-01-01T00:00:00Z', updated_at: '2099-01-01T00:00:00Z',
     ...overrides,
   };
@@ -199,6 +199,7 @@ it('filters admin reservations by status and shows provider net without the trav
   const root = await render();
 
   expect(hasText(root, 'Reservas · 2')).toBe(true);
+  expect(hasText(root, 'Comisión proveedor de reservas confirmadas: R$ 64,00')).toBe(true);
   // Subtotal 640,00 − comisión 64,00; el cargo del turista no es del proveedor.
   expect(hasText(root, 'proveedor recibe neto sujeto a conciliación: R$ 576,00')).toBe(true);
   expect(hasText(root, 'Pousada Porto · 2099-01-10 → 2099-01-12 · ×1')).toBe(true);
@@ -206,7 +207,87 @@ it('filters admin reservations by status and shows provider net without the trav
   await press(root, 'Cancelada');
   expect(hasText(root, 'Reservas · 1')).toBe(true);
   expect(hasText(root, 'r-confirmed')).toBe(false);
-  expect(hasText(root, 'Comisión proveedor (snapshot): R$ 64,00')).toBe(true);
+  // Una reserva cancelada no genera comisión ni cargo de servicio.
+  expect(hasText(root, 'Comisión proveedor de reservas confirmadas: R$ 0,00')).toBe(true);
+  expect(hasText(root, 'Cargo de servicio de reservas confirmadas: R$ 0,00')).toBe(true);
+});
+
+it('shows collected, refunded and pending-review totals to admins', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid', payment_status: 'approved' }),
+    reservation({ id: 'r-partial', status: 'cancelled', payment_status: 'approved', refund_cents: 10000 }),
+    reservation({ id: 'r-refunded', status: 'refunded', payment_status: 'approved', refund_cents: 67840 }),
+    reservation({ id: 'r-expired', status: 'expired' }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Cobrado (simulado): R$ 2.035,20 · Reembolsado (simulado): R$ 778,40')).toBe(true);
+  expect(hasText(root, 'Cobrado neto de reembolsos: R$ 1.256,80')).toBe(true);
+  expect(hasText(root, 'Canceladas con cobro sin reembolso completo: 1.')).toBe(true);
+  expect(hasText(root, 'R$ 100,00 reembolsado')).toBe(true);
+});
+
+it('records an admin refund with a stable idempotency key across retries', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid', payment_status: 'approved' }),
+    reservation({ id: 'r-unpaid', status: 'held' }),
+  ]);
+  mocked.recordSharedRefund
+    .mockRejectedValueOnce(new Error('Network request failed'))
+    .mockResolvedValueOnce(reservation({ id: 'r-paid', payment_status: 'approved', refund_cents: 5000 }));
+  const root = await render();
+
+  // Solo la reserva pagada ofrece reembolso.
+  expect(root.findAll(node => node.props.accessibilityLabel === 'Reembolsar r-paid').length).toBeGreaterThan(0);
+  expect(root.findAll(node => node.props.accessibilityLabel === 'Reembolsar r-unpaid')).toHaveLength(0);
+
+  await press(root, 'Reembolsar');
+  // Confirmada: el máximo deja un centavo, el total exige cancelar antes.
+  expect(hasText(root, 'Máximo reembolsable: R$ 678,39')).toBe(true);
+  expect(hasText(root, 'Para devolver el total, cancela primero la reserva.')).toBe(true);
+
+  await press(root, 'Registrar reembolso');
+  expect(hasText(root, 'Indica el motivo del reembolso.')).toBe(true);
+  expect(mocked.recordSharedRefund).not.toHaveBeenCalled();
+
+  await type(root, 'Importe a devolver (BRL)', '50,00');
+  await type(root, 'Motivo', '  Gesto comercial  ');
+  await press(root, 'Registrar reembolso');
+  expect(hasText(root, 'Network request failed')).toBe(true);
+  await press(root, 'Registrar reembolso');
+
+  expect(mocked.recordSharedRefund).toHaveBeenCalledTimes(2);
+  const [first, second] = mocked.recordSharedRefund.mock.calls.map(call => call[0]);
+  expect(first).toEqual({ reservationId: 'r-paid', amountCents: 5000, reason: 'Gesto comercial', idempotencyKey: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) });
+  expect(second.idempotencyKey).toBe(first.idempotencyKey);
+  expect(hasText(root, 'Reembolso registrado.')).toBe(true);
+  expect(hasText(root, 'Registrar reembolso simulado')).toBe(false);
+});
+
+it('uses a new idempotency key when the refund amount changes', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-cancelled', status: 'cancelled', payment_status: 'approved' }),
+  ]);
+  mocked.recordSharedRefund
+    .mockRejectedValueOnce(service.toReservationError('connectical_admin_record_refund', 'refund_exceeds_paid'))
+    .mockResolvedValueOnce(reservation({ status: 'refunded', payment_status: 'approved', refund_cents: 67840 }));
+  const root = await render('pt');
+
+  await press(root, 'Reembolsar');
+  // Cancelada: se puede devolver el total.
+  expect(hasText(root, 'Máximo reembolsável: R$ 678,40')).toBe(true);
+  await type(root, 'Motivo', 'Cancelamento');
+  await type(root, 'Valor a devolver (BRL)', '700,00');
+  await press(root, 'Registrar reembolso');
+  expect(hasText(root, 'O reembolso excede o que resta a devolver.')).toBe(true);
+  await type(root, 'Valor a devolver (BRL)', '678,40');
+  await press(root, 'Registrar reembolso');
+
+  const [first, second] = mocked.recordSharedRefund.mock.calls.map(call => call[0]);
+  expect(second.amountCents).toBe(67840);
+  expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
 });
 
 it('cancels a reservation with the role-specific reason', async () => {
