@@ -39,3 +39,12 @@ Sin cambios remotos: InsForge, OAuth y pagos reales quedan para revisión humana
   confiable, sin acceso para `anon`/`authenticated`. No se instaló ningún scheduler.
 - Pendientes para la revisión humana: [revision-humana-2026-11-15.md](revision-humana-2026-11-15.md).
 - Pruebas: Jest 79/79, tsc, ESLint, integración PostgreSQL 25/25.
+
+## Checkpoint 4 — 00:39 → 00:42 (cierre)
+
+- Turista: fechas con cupo publicado como chips (`ff9bcf6`). README actualizado (`6d1bffc`).
+- Integración: merge `--no-ff` de `work/night-2026-11-14` en `main` → `f51461e`, sin force push. CI de `main`
+  (run `43552970878`): ambos jobs en verde.
+- Pruebas finales: Jest 81/81, tsc, ESLint, integración PostgreSQL 25/25 (local y en GitHub Actions).
+- No ejecutado: builds iOS/Android, cualquier operación contra InsForge remoto, OAuth y pagos reales.
+- Punto de reanudación: [revision-humana-2026-11-15.md](revision-humana-2026-11-15.md), sección 1.
