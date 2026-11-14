@@ -41,3 +41,17 @@ Commits: `eb7d553`, `9358b33`, `58afdf7`, `9a6ffa9`, `ec30bfc`, `9dc9d9a`.
 - Motor de política de cancelación configurable, **apagado** y sin ninguna política cargada.
 - Jest 142/142 · PostgreSQL 41/41.
 - Siguiente: scheduler local, catálogo y recorrido del turista, preflight y checklist de InsForge, Android.
+
+## Checkpoint 2 (18:03, unos 34 min de reloj desde el inicio)
+
+Se incorporó la orden de 7 horas (mismas restricciones). Commits desde el checkpoint 1: `2295a21` (barrido programado
+con registro y salud), `4e8ad0c` (ensayo de actualización en CI), `ce19a3f` (preflight y runbook), `f5d06ad`
+(comisiones por producto y categoría experiencias), `9824d96` (docs), `44eec05` (webhooks idempotentes).
+Merge intermedio a `main`: `a075552` (CI de la rama en verde, run 43640222295).
+
+- Migraciones: ahora **nueve** (`202611140006` barrido, `202611140007` términos comerciales, `202611140008` eventos de
+  pasarela). Ensayadas: base vacía, actualización desde etapas 1 y 4 con datos, y aplicación doble de las nueve.
+- Matriz de estado por módulo: [matriz-estado-modulos.md](matriz-estado-modulos.md).
+- Jest 147/147. PostgreSQL: todas las verificaciones del script pasan (ver CI).
+- Siguiente: detalle de producto (descripción, ubicación, horario, límites por reserva), ingresos del proveedor,
+  resultado financiero por reserva, inglés pendiente de revisión, Android.
