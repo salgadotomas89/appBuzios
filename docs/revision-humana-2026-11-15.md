@@ -17,8 +17,10 @@ En este orden, cada una en una ejecución separada, y luego las verificaciones d
 1. `supabase/migrations/202611110001_shared_reservations.sql`
 2. `supabase/migrations/202611140001_multi_night_inventory.sql`: inventario por noche, fechas pasadas, endurecimiento.
 3. `supabase/migrations/202611140002_system_hold_sweep.sql`: barrido sin sesión para un scheduler futuro.
+4. `supabase/migrations/202611140003_refund_ledger.sql`: registro de reembolsos simulados solo para administración
+   (añadida en la continuación del sábado por la mañana, ver [operacion-2026-11-14b.md](operacion-2026-11-14b.md)).
 
-Las tres pasan contra `postgres:17` local (`npm run test:shared-reservations`) y en GitHub Actions. **No** se probaron
+Las cuatro pasan contra `postgres:17` local (`npm run test:shared-reservations`) y en GitHub Actions. **No** se probaron
 contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authenticated` y del trigger sobre
 `auth.users` hay que confirmarla allí.
 
@@ -38,12 +40,20 @@ contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authe
 ## 5. Decisiones comerciales y financieras
 
 - Comisión de Buggy (sigue pendiente).
-- Política de cancelación y reembolso: hoy turista, proveedor y admin pueden cancelar una reserva confirmada sin
-  penalización y sin registrar reembolso (`refund_cents` queda en 0). Hay que definir plazos, porcentajes y quién asume
-  cada coste antes de cobrar.
+- Política de cancelación y reembolso: turista, proveedor y admin pueden cancelar una reserva confirmada sin
+  penalización. Desde la migración `202611140003` la administración puede registrar a mano un reembolso simulado
+  (tope en lo cobrado, idempotente, el total solo tras cancelar), pero **no hay ninguna política automática**: hay que
+  definir plazos, porcentajes y quién asume cada coste antes de cobrar. El panel admin avisa de las reservas
+  canceladas con cobro sin reembolso completo para revisarlas caso a caso.
 - Tarifas reales de la pasarela (Pix y tarjeta), liquidación, FX, cuotas, impuestos y contracargos. Las tasas FX de la
   demo están fijas y etiquetadas como demostración.
 - Validar proveedores y tarifas reales; todo el catálogo actual es ficticio.
+
+## 5b. Catálogo compartido
+
+- `SHARED_CATALOG_ENABLED` (en `src/config/featureFlags.ts`) está apagado. Encenderlo solo después de aplicar las
+  migraciones en el tenant de ensayo y comprobar que las ofertas publicadas allí son de prueba. Las ofertas reales se
+  reservan en el portal; el viaje demo no consume cupo.
 
 ## 6. GitHub
 
@@ -54,8 +64,13 @@ contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authe
 
 ## 7. Dispositivos
 
-- Build iOS y Android: no se ejecutaron esta noche. Sigue pendiente el acceso a CoreSimulator/Xcode documentado en el
-  README.
+- Build iOS y Android: no se ejecutaron esta noche. El sábado por la mañana se intentó un build para simulador:
+  - Xcode 27.2 rechazaba el target de recursos de AsyncStorage (iOS 13.0, mínimo admitido 15.0); el Podfile ahora
+    eleva esos targets al mínimo de React Native. Resultado del build: ver la bitácora de la continuación.
+  - `CoreSimulator is out of date (1174.9.2 < 1174.21.0)`: hay que abrir Xcode o ejecutar `xcodebuild -runFirstLaunch`
+    para instalar los componentes del sistema (requiere aprobación del administrador del equipo). Sin eso no hay
+    dispositivos simulados y `xcrun simctl` se cuelga.
+  - Android: no hay Java ni Android SDK en el equipo.
 
 ## 8. Riesgos conocidos
 

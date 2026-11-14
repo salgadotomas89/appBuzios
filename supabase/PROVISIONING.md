@@ -37,6 +37,8 @@ select has_table_privilege('authenticated', 'public.connectical_refunds', 'inser
 select relrowsecurity from pg_class where oid = 'public.connectical_refunds'::regclass;                -- expect true
 ```
 
+For a single read-only pass/fail table, paste [`checks/verify_migrations.sql`](checks/verify_migrations.sql) into the SQL Editor after the migrations: every row must show `ok = true`. It only runs `SELECT`, and it accepts either missing write privileges or RLS without write policies, so it does not raise false alarms if the platform grants broad table privileges by default.
+
 The same checks run against a disposable `postgres:17` container with `npm run test:shared-reservations`.
 
 ## Accounts and roles
