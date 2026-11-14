@@ -318,6 +318,26 @@ export async function publishProviderInventory(input: {
   });
 }
 
+// Mismo cupo para `nights` noches desde `fromDate`, en una sola transacción (máximo 90).
+export async function publishProviderInventoryRange(input: {
+  offerId: string;
+  fromDate: string;
+  nights: number;
+  totalUnits: number;
+}): Promise<number> {
+  return callRpc('connectical_provider_publish_inventory_range', {
+    p_offer_id: input.offerId,
+    p_from_date: input.fromDate,
+    p_nights: input.nights,
+    p_total_units: input.totalUnits,
+  });
+}
+
+// Solo administración. Pausar bloquea cotizaciones y publicaciones nuevas; no toca reservas existentes.
+export async function setSharedProviderActive(providerId: string, active: boolean): Promise<SharedProvider> {
+  return callRpc('connectical_admin_set_provider_active', { p_provider_id: providerId, p_active: active });
+}
+
 // Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.
 export async function listOfferAvailability(offerId: string, fromDate: string): Promise<SharedInventory[]> {
   const { data, error } = await getClient().database

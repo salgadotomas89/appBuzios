@@ -27,6 +27,8 @@ import {
   simulateSharedPayment,
   upsertProviderOffer,
   publishProviderInventory,
+  publishProviderInventoryRange,
+  setSharedProviderActive,
   recordSharedRefund,
   type SharedInventory,
   type SharedOffer,
@@ -69,6 +71,8 @@ const MAX_UNITS = 500;
 const MAX_TITLE_LENGTH = 120;
 // Igual que el límite de connectical_admin_record_refund.
 const MAX_REFUND_REASON_LENGTH = 500;
+// Igual que el límite de connectical_provider_publish_inventory_range.
+const MAX_PUBLISH_NIGHTS = 90;
 const DEFAULT_OFFER = { title: 'Pousada laboratorio', price: '320,00' };
 
 type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
@@ -109,6 +113,7 @@ export function ReservationPortal({
   const [offerCategory, setOfferCategory] = useState<PortalCategory>('pousadas');
   const [offerPriceMode, setOfferPriceMode] = useState<PortalPriceMode>('night');
   const [stock, setStock] = useState('1');
+  const [publishNights, setPublishNights] = useState('1');
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | null>(null);
   const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
@@ -325,6 +330,14 @@ export function ReservationPortal({
     });
   }
 
+  function toggleProvider(provider: SharedProvider) {
+    run(async () => {
+      await setSharedProviderActive(provider.id, !provider.active);
+      if (role) await loadForRole(role);
+      return words.providerUpdated;
+    });
+  }
+
   function editProviderOffer(offer: SharedOffer) {
     setSelectedProviderOfferId(offer.id);
     setOfferTitle(offer.title);
@@ -356,7 +369,12 @@ export function ReservationPortal({
         priceMode: offerPriceMode,
         published: true,
       });
-      await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
+      const nightsToPublish = valueOf(parseCount(publishNights, { max: MAX_PUBLISH_NIGHTS }), words.publishNights);
+      if (nightsToPublish === 1) {
+        await publishProviderInventory({ offerId: offer.id, serviceDate, totalUnits });
+      } else {
+        await publishProviderInventoryRange({ offerId: offer.id, fromDate: serviceDate, nights: nightsToPublish, totalUnits });
+      }
       setSelectedProviderOfferId(offer.id);
       if (role) await loadForRole(role);
       return words.offerSaved;
@@ -555,6 +573,8 @@ export function ReservationPortal({
               <Field label={words.priceBrl} value={offerPrice} onChange={setOfferPrice} decimal />
               <Field label={words.date} value={date} onChange={setDate} />
               <Field label={words.units} value={stock} onChange={setStock} numeric />
+              <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
+              <Text style={styles.helper}>{words.publishNightsHint}</Text>
               <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
               <Text style={styles.sectionTitle}>{words.myInventory}</Text>
               {providerInventory.length ? providerInventory.map(item => (
@@ -576,10 +596,21 @@ export function ReservationPortal({
                 <Text style={styles.sectionTitle}>{words.providers} · {providers.length}</Text>
                 {providers.map(provider => (
                   <View key={provider.id} style={styles.row}>
-                    <Text style={styles.offerName}>{provider.name}</Text>
-                    <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
+                    <View style={styles.flex}>
+                      <Text style={styles.offerName}>{provider.name}</Text>
+                      <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => toggleProvider(provider)}
+                      disabled={busy}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${provider.active ? words.pauseProvider : words.resumeProvider} ${provider.name}`}
+                    >
+                      <Text style={styles.link}>{provider.active ? words.pauseProvider : words.resumeProvider}</Text>
+                    </Pressable>
                   </View>
                 ))}
+                {providers.length ? <Text style={styles.helper}>{words.pauseHint}</Text> : null}
               </View>
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>

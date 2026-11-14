@@ -14,6 +14,7 @@ jest.mock('../src/lib/reservationService', () => {
     'listSharedReservations', 'listSharedReservationEvents', 'signInSharedAccount',
     'signUpTravelerAccount', 'signOutSharedAccount', 'simulateSharedPayment',
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
+    'publishProviderInventoryRange', 'setSharedProviderActive',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -395,4 +396,46 @@ it('reuses the refund key after a failed reload even if the form is reopened or 
   const [first, second] = mocked.recordSharedRefund.mock.calls.map(call => call[0]);
   expect(second.idempotencyKey).toBe(first.idempotencyKey);
   expect(hasText(root, 'Reembolso registrado.')).toBe(true);
+});
+
+it('publishes a range of nights in one call and keeps single dates on the single-date RPC', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.upsertProviderOffer.mockResolvedValue({ ...pousada, id: 'offer-new' });
+  mocked.publishProviderInventory.mockResolvedValue({} as never);
+  mocked.publishProviderInventoryRange.mockResolvedValue(7);
+  const root = await render();
+
+  await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
+  await type(root, 'Cupo disponible para esa fecha', '3');
+  await type(root, 'Noches a publicar desde esa fecha', '7');
+  await press(root, 'Publicar oferta y cupo');
+  expect(mocked.publishProviderInventoryRange).toHaveBeenCalledWith({
+    offerId: 'offer-new', fromDate: '2099-03-01', nights: 7, totalUnits: 3,
+  });
+  expect(mocked.publishProviderInventory).not.toHaveBeenCalled();
+
+  await type(root, 'Noches a publicar desde esa fecha', '91');
+  await press(root, 'Guardar cambios y cupo');
+  expect(hasText(root, 'Noches a publicar desde esa fecha: debe estar entre 1 y 90.')).toBe(true);
+  expect(mocked.publishProviderInventoryRange).toHaveBeenCalledTimes(1);
+
+  await type(root, 'Noches a publicar desde esa fecha', '1');
+  await press(root, 'Guardar cambios y cupo');
+  expect(mocked.publishProviderInventory).toHaveBeenCalledWith({ offerId: 'offer-new', serviceDate: '2099-03-01', totalUnits: 3 });
+});
+
+it('lets admins pause and resume providers', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedProviders
+    .mockResolvedValueOnce([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: true }])
+    .mockResolvedValue([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false }]);
+  mocked.setSharedProviderActive.mockResolvedValue({ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false });
+  const root = await render('pt');
+
+  expect(hasText(root, 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.')).toBe(true);
+  await press(root, 'Pausar');
+  expect(mocked.setSharedProviderActive).toHaveBeenCalledWith('p1', false);
+  expect(hasText(root, 'Fornecedor atualizado.')).toBe(true);
+  expect(hasText(root, '10% · pausado')).toBe(true);
+  expect(root.findAll(node => node.props.accessibilityLabel === 'Reativar Pousada Sol').length).toBeGreaterThan(0);
 });
