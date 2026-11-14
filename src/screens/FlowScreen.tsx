@@ -19,7 +19,7 @@ import { CATEGORY_ICONS, type Catalog } from '../data/catalog';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
-import { buziosIsoDate } from '../utils/portalInput';
+import { useBuziosToday } from '../hooks/useBuziosToday';
 import { selectGateway } from '../payments/gateways';
 import {
   DEFAULT_DEMO_SERVICE_FEE_RATE,
@@ -301,7 +301,7 @@ export function FlowScreen() {
   const [storageReady, setStorageReady] = useState(false);
   const [showPricingLab, setShowPricingLab] = useState(false);
   // Las fechas de servicio son de Búzios, no del dispositivo del turista.
-  const today = buziosIsoDate();
+  const today = useBuziosToday();
   const [draftDate, setDraftDate] = useState(today);
   const [draftQuantity, setDraftQuantity] = useState(1);
   const [draftNights, setDraftNights] = useState(1);
