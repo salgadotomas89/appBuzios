@@ -405,7 +405,7 @@ export function FlowScreen() {
           />
         ) : null}
         {screen === 'operations' ? (
-          <ReservationPortal onClose={() => setScreen('home')} />
+          <ReservationPortal onClose={() => setScreen('home')} language={language} />
         ) : null}
         {screen === 'explore' ? (
           <ExploreView
