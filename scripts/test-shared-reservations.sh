@@ -502,4 +502,39 @@ refund_anon=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
     || '|' || has_table_privilege('authenticated', 'public.connectical_refunds', 'insert');" | tail -1)
 [ "$refund_anon" = 'false|false' ] || { echo "Refund privileges too broad: $refund_anon" >&2; exit 1; }
 echo "PASS admin refunds are bounded, idempotent, need cancellation for the full amount and are private"
+
+# BRL rounding parity: __tests__/pricingParity.test.ts checks the app against the same fixture.
+parity_cases=$(tr -d '\n' < "$PWD/__tests__/fixtures/quote-parity.json")
+docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -v cases="$parity_cases" <<'SQL'
+create table public.lab_quote_parity as
+  select row_number() over () as n, c.*
+  from jsonb_to_recordset(:'cases'::jsonb) as c(
+    "basePriceCents" integer, quantity integer, nights integer, "serviceFeeRateBps" integer,
+    "commissionRateBps" integer, "subtotalCents" integer, "serviceFeeCents" integer,
+    "travelerTotalCents" integer, "providerCommissionCents" integer);
+insert into auth.users (id)
+  select ('12000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid from public.lab_quote_parity;
+insert into public.connectical_providers (id, owner_user_id, name, country_code, commission_rate_bps)
+  select ('41000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+         ('12000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+         'Parity provider ' || n, 'BR', "commissionRateBps"
+  from public.lab_quote_parity;
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published)
+  select ('54000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+         ('41000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+         'pousadas', 'Parity offer ' || n, "basePriceCents", 'night', true
+  from public.lab_quote_parity;
+grant select on public.lab_quote_parity to authenticated;
+SQL
+parity=$(as_user "$traveler_a" "
+  select count(*) || '|' || coalesce(string_agg(c.n::text, ',') filter (where
+    (q.subtotal_cents, q.service_fee_cents, q.traveler_total_cents, q.provider_commission_cents)
+    is distinct from (c.\"subtotalCents\", c.\"serviceFeeCents\", c.\"travelerTotalCents\", c.\"providerCommissionCents\")), '')
+  from public.lab_quote_parity c
+  cross join lateral public.connectical_create_quote(
+    ('54000000-0000-4000-8000-' || lpad(c.n::text, 12, '0'))::uuid, current_date + 35,
+    c.quantity, c.nights, c.\"serviceFeeRateBps\") q;")
+expected_parity="$(grep -c '"basePriceCents"' "$PWD/__tests__/fixtures/quote-parity.json")|"
+[ "$parity" = "$expected_parity" ] || { echo "SQL quotes diverge from the parity fixture (count|mismatched cases): $parity" >&2; exit 1; }
+echo "PASS SQL quotes match the shared BRL rounding fixture used by the app tests"
 echo "Shared PostgreSQL integration test passed"

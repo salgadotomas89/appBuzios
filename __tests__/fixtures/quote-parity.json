@@ -1,0 +1,134 @@
+[
+  {
+    "basePriceCents": 32000,
+    "quantity": 1,
+    "nights": 2,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1000,
+    "subtotalCents": 64000,
+    "serviceFeeCents": 3840,
+    "travelerTotalCents": 67840,
+    "providerCommissionCents": 6400
+  },
+  {
+    "basePriceCents": 12345,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 400,
+    "commissionRateBps": 1500,
+    "subtotalCents": 12345,
+    "serviceFeeCents": 494,
+    "travelerTotalCents": 12839,
+    "providerCommissionCents": 1852
+  },
+  {
+    "basePriceCents": 12345,
+    "quantity": 3,
+    "nights": 1,
+    "serviceFeeRateBps": 800,
+    "commissionRateBps": 1800,
+    "subtotalCents": 37035,
+    "serviceFeeCents": 2963,
+    "travelerTotalCents": 39998,
+    "providerCommissionCents": 6666
+  },
+  {
+    "basePriceCents": 125,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 400,
+    "commissionRateBps": 1000,
+    "subtotalCents": 125,
+    "serviceFeeCents": 5,
+    "travelerTotalCents": 130,
+    "providerCommissionCents": 13
+  },
+  {
+    "basePriceCents": 25,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1800,
+    "subtotalCents": 25,
+    "serviceFeeCents": 2,
+    "travelerTotalCents": 27,
+    "providerCommissionCents": 5
+  },
+  {
+    "basePriceCents": 10,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1500,
+    "subtotalCents": 10,
+    "serviceFeeCents": 1,
+    "travelerTotalCents": 11,
+    "providerCommissionCents": 2
+  },
+  {
+    "basePriceCents": 4000000,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1000,
+    "subtotalCents": 4000000,
+    "serviceFeeCents": 240000,
+    "travelerTotalCents": 4240000,
+    "providerCommissionCents": 400000
+  },
+  {
+    "basePriceCents": 99999,
+    "quantity": 7,
+    "nights": 30,
+    "serviceFeeRateBps": 800,
+    "commissionRateBps": 1800,
+    "subtotalCents": 20999790,
+    "serviceFeeCents": 1679983,
+    "travelerTotalCents": 22679773,
+    "providerCommissionCents": 3779962
+  },
+  {
+    "basePriceCents": 1,
+    "quantity": 1,
+    "nights": 1,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1000,
+    "subtotalCents": 1,
+    "serviceFeeCents": 0,
+    "travelerTotalCents": 1,
+    "providerCommissionCents": 0
+  },
+  {
+    "basePriceCents": 33333,
+    "quantity": 2,
+    "nights": 3,
+    "serviceFeeRateBps": 600,
+    "commissionRateBps": 1500,
+    "subtotalCents": 199998,
+    "serviceFeeCents": 12000,
+    "travelerTotalCents": 211998,
+    "providerCommissionCents": 30000
+  },
+  {
+    "basePriceCents": 8900,
+    "quantity": 4,
+    "nights": 1,
+    "serviceFeeRateBps": 400,
+    "commissionRateBps": 1800,
+    "subtotalCents": 35600,
+    "serviceFeeCents": 1424,
+    "travelerTotalCents": 37024,
+    "providerCommissionCents": 6408
+  },
+  {
+    "basePriceCents": 45050,
+    "quantity": 2,
+    "nights": 5,
+    "serviceFeeRateBps": 800,
+    "commissionRateBps": 2000,
+    "subtotalCents": 450500,
+    "serviceFeeCents": 36040,
+    "travelerTotalCents": 486540,
+    "providerCommissionCents": 90100
+  }
+]
