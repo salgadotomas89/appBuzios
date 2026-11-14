@@ -354,4 +354,12 @@ if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_pro
   exit 1
 fi
 echo "PASS paused provider cannot publish inventory"
+privileges=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+  select string_agg(p.proname || '=' || has_function_privilege('authenticated', p.oid, 'execute'), ',' order by p.proname)
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname in ('connectical_adjust_stay_inventory', 'connectical_expire_offer_holds',
+    'connectical_lock_offer', 'connectical_create_traveler_profile', 'connectical_create_quote');" | tail -1)
+expected='connectical_adjust_stay_inventory=false,connectical_create_quote=true,connectical_create_traveler_profile=false,connectical_expire_offer_holds=false,connectical_lock_offer=false'
+[ "$privileges" = "$expected" ] || { echo "Unexpected EXECUTE privileges: $privileges" >&2; exit 1; }
+echo "PASS EXECUTE privileges match the provisioning checklist"
 echo "Shared PostgreSQL integration test passed"

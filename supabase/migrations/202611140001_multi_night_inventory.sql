@@ -434,6 +434,8 @@ revoke all on function public.connectical_lock_offer(uuid) from public, anon, au
 revoke all on function public.connectical_adjust_stay_inventory(uuid, date, integer, integer, integer)
   from public, anon, authenticated;
 revoke all on function public.connectical_expire_offer_holds(uuid) from public, anon, authenticated;
+-- Trigger functions run with the trigger's privileges; nobody needs to call this one directly.
+revoke all on function public.connectical_create_traveler_profile() from public, anon, authenticated;
 revoke all on function public.connectical_today() from public;
 grant execute on function public.connectical_today() to anon, authenticated;
 
