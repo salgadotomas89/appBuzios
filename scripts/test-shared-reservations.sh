@@ -362,4 +362,17 @@ privileges=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -
 expected='connectical_adjust_stay_inventory=false,connectical_create_quote=true,connectical_create_traveler_profile=false,connectical_expire_offer_holds=false,connectical_lock_offer=false'
 [ "$privileges" = "$expected" ] || { echo "Unexpected EXECUTE privileges: $privileges" >&2; exit 1; }
 echo "PASS EXECUTE privileges match the provisioning checklist"
+# Traveler B still holds the night at current_date + 42 from the multi-night checks.
+if as_user "$traveler_a" "select public.connectical_system_expire_holds();" >/dev/null 2>&1; then
+  echo "System hold sweep is executable by authenticated users" >&2
+  exit 1
+fi
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "update public.connectical_reservations set hold_expires_at = now() - interval '1 second' where status = 'held' and offer_id = '$pousada' and service_date = current_date + 42;"
+swept=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select public.connectical_system_expire_holds();" | tail -1)
+[ "$swept" -ge 1 ] || { echo "System sweep expired nothing: $swept" >&2; exit 1; }
+null_actor=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_reservation_events where event_type = 'hold_expired' and actor_user_id is null;" | tail -1)
+[ "$null_actor" -ge 1 ] || { echo "System sweep did not log hold_expired events" >&2; exit 1; }
+[ "$(stay_counters)" = '0/0,0/0,0/0' ] || { echo "System sweep left held units: $(stay_counters)" >&2; exit 1; }
+echo "PASS system hold sweep releases inventory and is not executable by app users"
 echo "Shared PostgreSQL integration test passed"

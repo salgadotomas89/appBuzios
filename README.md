@@ -52,7 +52,7 @@ Catálogo y disponibilidad de aliados; administración para proveedores; persist
 
 El backend local anterior sigue separado: `src/lib/reservationBackend.ts` conserva usuarios, proveedores, ofertas, inventario, cotizaciones y reservas en `Map` de memoria; `src/lib/demoStorage.ts` guarda itinerarios y confirmaciones de demostración en AsyncStorage del dispositivo. Ninguno de esos dos medios comparte reservas entre dispositivos.
 
-La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/` (`202611110001_shared_reservations.sql` y después `202611140001_multi_night_inventory.sql`); el bloqueo de cupos por cada noche de la estancia, el rechazo de fechas pasadas (hora de São Paulo), la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
+La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/` (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql` y `202611140002_system_hold_sweep.sql`, en ese orden); el bloqueo de cupos por cada noche de la estancia, el rechazo de fechas pasadas (hora de São Paulo), la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
 
 En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotización muestra subtotal, porcentaje, cargo y total BRL. La reserva conserva el porcentaje elegido (`service_fee_rate_bps`), los centavos del cargo, el total y la comisión del proveedor como valores separados para que el panel de administración los pueda revisar.
 
@@ -66,12 +66,12 @@ En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotizació
 
 ### Despliegue/provisionamiento manual
 
-1. Revisa y aplica las migraciones en orden de nombre (`202611110001`, luego `202611140001`) en el SQL Editor del proyecto InsForge; no ejecutes el seed de laboratorio contra producción.
+1. Revisa y aplica las migraciones en orden de nombre (`202611110001`, `202611140001`, `202611140002`) en el SQL Editor del proyecto InsForge; no ejecutes el seed de laboratorio contra producción.
 2. Registra cuentas mediante Auth. Para usuarios operativos, cambia su perfil solo desde el SQL Editor confiable, después de validar identidad y autorización.
 3. Usa el flujo exacto con placeholders y validaciones de [supabase/PROVISIONING.md](supabase/PROVISIONING.md) para asignar el perfil `provider`, crear su fila y asignar `admin` únicamente a una cuenta verificada. La tabla `connectical_providers` almacena comisión en puntos base.
 4. Inicia la app, abre “Reservas compartidas · acceso de operaciones” e inicia sesión. Turistas pueden registrarse; proveedores publican oferta/cupo, turistas cotizan y hacen el hold, y admin ve totales snapshots.
 
-La expiración no tiene cron instalado: los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
+La expiración no tiene cron instalado (la función `connectical_system_expire_holds` queda lista para un scheduler confiable, pero no hay ninguno configurado): los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
 
 No se incluye una clave `service_role` en la app ni en este repositorio. La migración no activa cobros reales; tarjeta y Pix pasan solo por el simulador. La liquidación continúa en conciliación B2B y requiere revisión comercial/legal/bancaria antes de habilitar una pasarela.
 

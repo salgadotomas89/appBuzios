@@ -1,6 +1,6 @@
 # Provisioning for the InsForge trial project
 
-Apply this only in the verified InsForge **trial** project after both shared-reservation migrations (`202611110001_shared_reservations.sql`, then `202611140001_multi_night_inventory.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
+Apply this only in the verified InsForge **trial** project after the shared-reservation migrations (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql`, then `202611140002_system_hold_sweep.sql`) have succeeded. Do not run it in production or against Connectical Logistica.
 
 ## Preflight (read-only, before applying the migrations)
 
@@ -22,7 +22,7 @@ select exists (select 1 from information_schema.columns where table_schema = 'au
 ```
 
 3. If `connectical_%` tables already exist, do not re-run blindly: compare with the migrations first.
-4. Apply `202611110001_shared_reservations.sql`, then `202611140001_multi_night_inventory.sql`, each in its own run. Then verify:
+4. Apply `202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql` and `202611140002_system_hold_sweep.sql` in that order, each in its own run. Then verify:
 
 ```sql
 select column_name from information_schema.columns
@@ -31,7 +31,7 @@ select p.proname, has_function_privilege('authenticated', p.oid, 'execute') as a
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname like 'connectical_%' order by 1;
 -- Expect false for connectical_adjust_stay_inventory, connectical_expire_offer_holds, connectical_lock_offer
--- and connectical_create_traveler_profile; true for the RPCs the app calls.
+-- connectical_create_traveler_profile and connectical_system_expire_holds; true for the RPCs the app calls.
 ```
 
 The same checks run against a disposable `postgres:17` container with `npm run test:shared-reservations`.
@@ -130,4 +130,10 @@ order by p.role;
 
 The current SQL does **not** install a scheduler. Holds expire at their `hold_expires_at` timestamp, but the row status and inventory counter are reconciled lazily when an authenticated session lists reservations (the app calls `connectical_expire_holds`) or when a traveler tries to reserve the same offer (any date, since migration `202611140001`). Thus elapsed holds cannot block a subsequent hold on that slot, but an unused slot's displayed database counters may remain stale until a sweep-triggering request. To run a one-off sweep from an authenticated app session, call the RPC `connectical_expire_holds`; do not grant anonymous execution.
 
-A periodic Supabase/InsForge scheduled function/cron can be configured later after confirming platform support and cadence. It is intentionally not assumed by this migration.
+A periodic scheduler is still **not installed**. Migration `202611140002` adds `public.connectical_system_expire_holds()`, which needs no user session and is not executable by `anon` or `authenticated`. Once InsForge scheduling support and cadence are confirmed, a trusted job can run:
+
+```sql
+select public.connectical_system_expire_holds();  -- returns the number of holds expired
+```
+
+Suggested cadence: every 1–5 minutes (holds last 10 minutes). Until that job exists, expiry stays lazy as described above.
