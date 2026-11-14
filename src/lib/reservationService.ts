@@ -323,3 +323,16 @@ export async function listOfferAvailability(offerId: string, fromDate: string): 
   if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
   return (data ?? []) as SharedInventory[];
 }
+
+// Inventario de todas las ofertas publicadas desde una fecha, en una sola consulta para el catálogo.
+// Los contadores de retenciones vencidas pueden estar desfasados hasta el siguiente barrido.
+export async function listPublishedAvailability(fromDate: string): Promise<SharedInventory[]> {
+  const { data, error } = await getClient().database
+    .from('connectical_inventory')
+    .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
+    .gte('service_date', fromDate)
+    .order('service_date', { ascending: true })
+    .limit(1000);
+  if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
+  return (data ?? []) as SharedInventory[];
+}

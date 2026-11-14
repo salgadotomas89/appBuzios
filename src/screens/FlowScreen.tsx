@@ -14,6 +14,9 @@ import { homeMock as data } from '../data/homeMock';
 import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
+import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
+import type { Catalog } from '../data/catalog';
+import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
 import {
@@ -45,9 +48,17 @@ const copy = {
     all: 'Todas',
     search: 'Buscar por nombre o lugar',
     results: 'ofertas de ejemplo',
+    sharedResults: 'ofertas',
     noResults: 'No encontramos ofertas con esa búsqueda.',
     noCategory: 'Todavía no hay ofertas en esta categoría.',
     example: 'EJEMPLO · NO ES UNA RESERVA REAL',
+    sharedExample: 'OFERTA PUBLICADA · SE RESERVA EN EL PORTAL CON PAGO SIMULADO',
+    sharedAvailable: 'Cupo publicado por el proveedor',
+    sharedUnavailable: 'Sin cupo publicado',
+    sharedUnknown: 'Cupo por confirmar en el portal',
+    bookInPortal: 'Reservar en el portal',
+    catalogFallback: 'No se pudieron leer las ofertas publicadas; se muestra solo el catálogo de ejemplo.',
+    catalogLoading: 'Cargando ofertas publicadas…',
     available: 'Disponible en demo',
     limited: 'Cupos limitados · demo',
     unavailable: 'Sin disponibilidad',
@@ -65,6 +76,13 @@ const copy = {
     rooms: 'Habitaciones',
     nights: 'Noches',
     addTrip: 'Agregar a Mi viaje',
+    operations: 'Reservas compartidas · acceso de operaciones',
+    previousDay: 'Día anterior',
+    nextDay: 'Día siguiente',
+    decreaseQuantity: 'Disminuir cantidad',
+    increaseQuantity: 'Aumentar cantidad',
+    decreaseNights: 'Quitar una noche',
+    increaseNights: 'Sumar una noche',
     missing: 'Falta información para reservar',
     trip: 'Mi viaje',
     emptyTrip: 'Tu viaje empieza aquí',
@@ -126,9 +144,17 @@ const copy = {
     all: 'Todas',
     search: 'Buscar por nome ou lugar',
     results: 'ofertas de exemplo',
+    sharedResults: 'ofertas',
     noResults: 'Não encontramos ofertas com essa busca.',
     noCategory: 'Ainda não há ofertas nesta categoria.',
     example: 'EXEMPLO · NÃO É UMA RESERVA REAL',
+    sharedExample: 'OFERTA PUBLICADA · RESERVA NO PORTAL COM PAGAMENTO SIMULADO',
+    sharedAvailable: 'Vagas publicadas pelo fornecedor',
+    sharedUnavailable: 'Sem vagas publicadas',
+    sharedUnknown: 'Vagas a confirmar no portal',
+    bookInPortal: 'Reservar no portal',
+    catalogFallback: 'Não foi possível ler as ofertas publicadas; mostrando só o catálogo de exemplo.',
+    catalogLoading: 'Carregando ofertas publicadas…',
     available: 'Disponível na demo',
     limited: 'Poucas vagas · demo',
     unavailable: 'Sem disponibilidade',
@@ -146,6 +172,13 @@ const copy = {
     rooms: 'Quartos',
     nights: 'Noites',
     addTrip: 'Adicionar à Minha viagem',
+    operations: 'Reservas compartilhadas · acesso de operações',
+    previousDay: 'Dia anterior',
+    nextDay: 'Próximo dia',
+    decreaseQuantity: 'Diminuir quantidade',
+    increaseQuantity: 'Aumentar quantidade',
+    decreaseNights: 'Remover uma noite',
+    increaseNights: 'Adicionar uma noite',
     missing: 'Faltam informações para reservar',
     trip: 'Minha viagem',
     emptyTrip: 'Sua viagem começa aqui',
@@ -237,6 +270,12 @@ function categoryName(category: OfferCategory, language: Language) {
 
 function availabilityLabel(offer: Offer, language: Language) {
   const words = copy[language];
+  if (offer.source === 'shared') {
+    // En ofertas compartidas 'limited' significa que no se pudo leer el inventario.
+    if (offer.availability === 'available') return words.sharedAvailable as string;
+    if (offer.availability === 'unavailable') return words.sharedUnavailable as string;
+    return words.sharedUnknown as string;
+  }
   if (offer.availability === 'limited') return words.limited as string;
   if (offer.availability === 'unavailable') return words.unavailable as string;
   if (offer.availability === 'incomplete') return words.incomplete as string;
@@ -261,10 +300,12 @@ export function FlowScreen() {
   const [draftQuantity, setDraftQuantity] = useState(1);
   const [draftNights, setDraftNights] = useState(1);
   const words = copy[language];
-  const selectedOffer = data.offers.find(offer => offer.id === selectedOfferId);
+  const catalog = useCatalog(SHARED_CATALOG_ENABLED);
+  const selectedOffer = catalog.offers.find(offer => offer.id === selectedOfferId);
+  // Solo las ofertas de ejemplo entran al viaje demo; las compartidas se reservan en el portal.
   const pricedItems = useMemo(
-    () => priceTripItems(tripItems, data.offers),
-    [tripItems],
+    () => priceTripItems(tripItems, catalog.offers.filter(offer => offer.source !== 'shared')),
+    [tripItems, catalog.offers],
   );
   const policy = {
     ...DEFAULT_DEMO_PRICING_POLICY,
@@ -295,7 +336,7 @@ export function FlowScreen() {
       serviceFeeRate,
     }).catch(error => console.warn('No se pudo guardar el viaje demo', error));
   }, [bookings, serviceFeeRate, storageReady, tripItems]);
-  const matchingOffers = data.offers.filter(offer => {
+  const matchingOffers = catalog.offers.filter(offer => {
     const categoryMatch = !selectedCategory || offer.category === selectedCategory;
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const searchMatch =
@@ -322,6 +363,11 @@ export function FlowScreen() {
 
   function addToTrip(offer: Offer) {
     if (offer.availability === 'unavailable' || offer.availability === 'incomplete') return;
+    if (offer.source === 'shared') {
+      // El viaje demo no consume cupo; una oferta real se cotiza y retiene en el portal.
+      setScreen('operations');
+      return;
+    }
     setTripItems(items => [
       ...items,
       {
@@ -423,6 +469,7 @@ export function FlowScreen() {
             onExplore={() => openExplore()}
             onOffer={openOffer}
             onOperations={() => setScreen('operations')}
+            catalog={catalog}
           />
         ) : null}
         {screen === 'operations' ? (
@@ -433,6 +480,8 @@ export function FlowScreen() {
             language={language}
             words={words}
             offers={matchingOffers}
+            categories={catalog.categories}
+            catalogSource={catalog.source}
             selectedCategory={selectedCategory}
             query={query}
             onQuery={setQuery}
@@ -454,6 +503,7 @@ export function FlowScreen() {
             onQuantity={setDraftQuantity}
             onNights={setDraftNights}
             onAdd={() => addToTrip(selectedOffer)}
+            addLabel={selectedOffer.source === 'shared' ? (words.bookInPortal as string) : (words.addTrip as string)}
             onBack={() => changeScreen('explore')}
           />
         ) : null}
@@ -546,6 +596,12 @@ function Header({
   );
 }
 
+function CatalogNotice({ source, words }: { source: CatalogSource; words: Words }) {
+  if (source === 'loading') return <Text style={styles.exampleCaption}>{words.catalogLoading}</Text>;
+  if (source === 'demo_fallback') return <Text style={styles.exampleCaption}>{words.catalogFallback}</Text>;
+  return null;
+}
+
 function HomeView({
   language,
   words,
@@ -554,6 +610,7 @@ function HomeView({
   onExplore,
   onOffer,
   onOperations,
+  catalog,
 }: {
   language: Language;
   words: Words;
@@ -562,6 +619,7 @@ function HomeView({
   onExplore: () => void;
   onOffer: (offer: Offer) => void;
   onOperations: () => void;
+  catalog: Catalog & { source: CatalogSource };
 }) {
   return (
     <>
@@ -570,15 +628,18 @@ function HomeView({
         <Text style={styles.heroKicker}>BÚZIOS · BRASIL</Text>
         <Text style={styles.heroTitle}>{words.title}</Text>
         <View style={styles.heroDetails}>
-          <Text style={styles.heroSummary}>{data.activeOffers} {words.offerSummary}</Text>
-          <View style={styles.savingsBadge}>
-            <Text style={styles.savingsText}>{words.savings} {data.maxDiscount}%</Text>
-          </View>
+          <Text style={styles.heroSummary}>{catalog.activeOffers} {words.offerSummary}</Text>
+          {catalog.maxDiscount > 0 ? (
+            <View style={styles.savingsBadge}>
+              <Text style={styles.savingsText}>{words.savings} {catalog.maxDiscount}%</Text>
+            </View>
+          ) : null}
         </View>
       </View>
+      <CatalogNotice source={catalog.source} words={words} />
       <SectionHeading title={words.categories} trailing="04" />
       <View style={styles.categoryGrid}>
-        {data.categories.map(category => (
+        {catalog.categories.map(category => (
           <Pressable
             key={category.id}
             accessibilityRole="button"
@@ -587,21 +648,21 @@ function HomeView({
           >
             <Icon name={category.id === 'pousadas' ? 'bed' : category.id === 'barcos' ? 'boat' : category.id === 'noche' ? 'music' : 'buggy'} size={21} color={colors.sea} />
             <Text style={styles.homeCategoryName}>{category.label[language]}</Text>
-            <Text style={styles.categoryCount}>{category.count} · demo</Text>
+            <Text style={styles.categoryCount}>{category.count}{catalog.source === 'shared' ? '' : ' · demo'}</Text>
           </Pressable>
         ))}
       </View>
       <SectionHeading title={words.featured} trailing="BRL" />
       <View style={styles.offerList}>
-        {data.offers.slice(0, 4).map(offer => (
+        {catalog.offers.slice(0, 4).map(offer => (
           <View key={offer.id}>
             <OfferRow offer={offer} language={language} onPress={() => onOffer(offer)} />
-            <Text style={styles.exampleCaption}>{words.example}</Text>
+            <Text style={styles.exampleCaption}>{offer.source === 'shared' ? words.sharedExample : words.example}</Text>
           </View>
         ))}
       </View>
       <PrimaryButton title={words.explore} onPress={onExplore} />
-      <PrimaryButton title="Reservas compartidas · acceso de operaciones" onPress={onOperations} />
+      <PrimaryButton title={words.operations as string} onPress={onOperations} />
     </>
   );
 }
@@ -610,6 +671,8 @@ function ExploreView({
   language,
   words,
   offers,
+  categories,
+  catalogSource,
   selectedCategory,
   query,
   onQuery,
@@ -621,6 +684,8 @@ function ExploreView({
   language: Language;
   words: Words;
   offers: Offer[];
+  categories: Catalog['categories'];
+  catalogSource: CatalogSource;
   selectedCategory: OfferCategory | null;
   query: string;
   onQuery: (value: string) => void;
@@ -643,7 +708,7 @@ function ExploreView({
       />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         <FilterPill label={words.all as string} active={!selectedCategory} onPress={() => onCategory(null)} />
-        {data.categories.map(category => (
+        {categories.map(category => (
           <FilterPill
             key={category.id}
             label={category.label[language]}
@@ -652,7 +717,8 @@ function ExploreView({
           />
         ))}
       </ScrollView>
-      <Text style={styles.resultCount}>{offers.length} {words.results}</Text>
+      <CatalogNotice source={catalogSource} words={words} />
+      <Text style={styles.resultCount}>{offers.length} {catalogSource === 'shared' ? words.sharedResults : words.results}</Text>
       {offers.length ? (
         <View style={styles.offerList}>
           {offers.map(offer => (
@@ -691,6 +757,7 @@ function DetailView({
   onQuantity,
   onNights,
   onAdd,
+  addLabel,
   onBack,
 }: {
   offer: Offer;
@@ -703,6 +770,7 @@ function DetailView({
   onQuantity: (quantity: number) => void;
   onNights: (nights: number) => void;
   onAdd: () => void;
+  addLabel: string;
   onBack: () => void;
 }) {
   const canBook = offer.availability === 'available' || offer.availability === 'limited';
@@ -723,7 +791,7 @@ function DetailView({
         <Text style={styles.detailCategory}>{categoryName(offer.category, language).toUpperCase()}</Text>
         <Text style={styles.detailLocation}>{offer.location[language]}</Text>
       </View>
-      <Text style={styles.demoLabel}>{words.example}</Text>
+      <Text style={styles.demoLabel}>{offer.source === 'shared' ? words.sharedExample : words.example}</Text>
       <Text style={styles.detailTitle}>{offer.title[language]}</Text>
       <Text style={styles.detailAvailability}>{availabilityLabel(offer, language)}</Text>
       {offer.price !== undefined ? (
@@ -759,24 +827,26 @@ function DetailView({
           {offer.missingFields[language].map(value => <Bullet key={value} text={value} />)}
         </View>
       ) : null}
-      {canBook ? (
+      {canBook && offer.source === 'shared' ? (
+        <PrimaryButton title={addLabel} onPress={onAdd} />
+      ) : canBook ? (
         <View style={styles.bookingControls}>
           <Text style={styles.controlLabel}>{offer.priceMode === 'night' ? words.stayDate : words.date}</Text>
           <DateStepper value={date} language={language} onChange={onDate} />
           {offer.priceMode === 'night' ? (
             <>
               <Text style={styles.controlLabel}>{words.rooms}</Text>
-              <NumberStepper value={quantity} onChange={onQuantity} min={1} max={5} />
+              <NumberStepper value={quantity} onChange={onQuantity} min={1} max={5} labels={[words.decreaseQuantity as string, words.increaseQuantity as string]} />
               <Text style={styles.controlLabel}>{words.nights}</Text>
-              <NumberStepper value={nights} onChange={onNights} min={1} max={14} />
+              <NumberStepper value={nights} onChange={onNights} min={1} max={14} labels={[words.decreaseNights as string, words.increaseNights as string]} />
             </>
           ) : (
             <>
               <Text style={styles.controlLabel}>{words.quantity}</Text>
-              <NumberStepper value={quantity} onChange={onQuantity} min={1} max={8} />
+              <NumberStepper value={quantity} onChange={onQuantity} min={1} max={8} labels={[words.decreaseQuantity as string, words.increaseQuantity as string]} />
             </>
           )}
-          <PrimaryButton title={words.addTrip as string} onPress={onAdd} />
+          <PrimaryButton title={addLabel} onPress={onAdd} />
         </View>
       ) : null}
     </>
@@ -840,14 +910,14 @@ function TripView({
                 {offer.priceMode === 'night' ? (
                   <>
                     <Text style={styles.controlLabel}>{words.rooms}</Text>
-                    <NumberStepper value={item.quantity} min={1} max={5} onChange={quantity => onUpdate(item.id, { quantity })} />
+                    <NumberStepper value={item.quantity} min={1} max={5} onChange={quantity => onUpdate(item.id, { quantity })} labels={[words.decreaseQuantity as string, words.increaseQuantity as string]} />
                     <Text style={styles.controlLabel}>{words.nights}</Text>
-                    <NumberStepper value={item.nights} min={1} max={14} onChange={nights => onUpdate(item.id, { nights })} />
+                    <NumberStepper value={item.nights} min={1} max={14} onChange={nights => onUpdate(item.id, { nights })} labels={[words.decreaseNights as string, words.increaseNights as string]} />
                   </>
                 ) : (
                   <>
                     <Text style={styles.controlLabel}>{quantityUnit(offer, words)}</Text>
-                    <NumberStepper value={item.quantity} min={1} max={8} onChange={quantity => onUpdate(item.id, { quantity })} />
+                    <NumberStepper value={item.quantity} min={1} max={8} onChange={quantity => onUpdate(item.id, { quantity })} labels={[words.decreaseQuantity as string, words.increaseQuantity as string]} />
                   </>
                 )}
                 <View style={styles.lineTotal}>
@@ -1093,27 +1163,40 @@ function FilterPill({ label, active, onPress }: { label: string; active: boolean
 }
 
 function DateStepper({ value, language, onChange }: { value: string; language: Language; onChange: (value: string) => void }) {
+  const words = copy[language];
   return (
     <View style={styles.stepper}>
-      <Pressable onPress={() => onChange(moveDate(value, -1))} style={styles.stepperButton} accessibilityLabel="Día anterior">
+      <Pressable onPress={() => onChange(moveDate(value, -1))} style={styles.stepperButton} accessibilityLabel={words.previousDay as string}>
         <Text style={styles.stepperSign}>−</Text>
       </Pressable>
       <Text style={styles.stepperValue}>{formatDate(value, language)}</Text>
-      <Pressable onPress={() => onChange(moveDate(value, 1))} style={styles.stepperButton} accessibilityLabel="Día siguiente">
+      <Pressable onPress={() => onChange(moveDate(value, 1))} style={styles.stepperButton} accessibilityLabel={words.nextDay as string}>
         <Text style={styles.stepperSign}>+</Text>
       </Pressable>
     </View>
   );
 }
 
-function NumberStepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (value: number) => void }) {
+function NumberStepper({
+  value,
+  min,
+  max,
+  onChange,
+  labels,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  labels: [decrease: string, increase: string];
+}) {
   return (
     <View style={styles.stepper}>
-      <Pressable onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton} accessibilityLabel="Disminuir cantidad">
+      <Pressable onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton} accessibilityLabel={labels[0]}>
         <Text style={styles.stepperSign}>−</Text>
       </Pressable>
       <Text style={styles.stepperValue}>{value}</Text>
-      <Pressable onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton} accessibilityLabel="Aumentar cantidad">
+      <Pressable onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton} accessibilityLabel={labels[1]}>
         <Text style={styles.stepperSign}>+</Text>
       </Pressable>
     </View>

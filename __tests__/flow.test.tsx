@@ -107,7 +107,7 @@ test('prices lodging by nights and removes it from the trip', async () => {
   pressText(root, 'Pousadas');
   pressText(root, 'Pousada Maravista');
   pressText(root, 'Agregar a Mi viaje');
-  pressAccessible(root, 'Aumentar cantidad', 1);
+  pressAccessible(root, 'Sumar una noche');
 
   expect(hasText(root, 'R$ 640,00')).toBe(true);
   expect(hasText(root, 'R$ 38,40')).toBe(true);
@@ -129,6 +129,23 @@ test('switches language and keeps unavailable listings out of the trip', async (
   expect(hasText(root, 'Sem disponibilidade')).toBe(true);
   expect(hasText(root, 'Faltam informações para reservar')).toBe(true);
   expect(hasText(root, 'Adicionar à Minha viagem')).toBe(false);
+});
+
+test('localizes the operations entry and stepper labels in Portuguese', async () => {
+  const renderer = await renderApp();
+  const root = renderer.root;
+
+  pressText(root, 'PT');
+  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(true);
+  pressText(root, 'Pousadas');
+  pressText(root, 'Pousada Maravista');
+  const labels = root
+    .findAll(node => typeof node.props.onPress === 'function' && typeof node.props.accessibilityLabel === 'string')
+    .map(node => node.props.accessibilityLabel);
+  expect(labels).toEqual(expect.arrayContaining([
+    'Dia anterior', 'Próximo dia', 'Aumentar quantidade', 'Adicionar uma noite',
+  ]));
+  expect(labels).not.toContain('Aumentar cantidad');
 });
 
 test('filters the catalog across all four categories', async () => {
