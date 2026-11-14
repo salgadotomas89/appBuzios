@@ -194,6 +194,9 @@ const es = {
     refund_not_allowed: 'Solo se reembolsan reservas confirmadas o canceladas con pago aprobado.',
     refund_exceeds_paid: 'El reembolso supera lo que queda por devolver.',
     refund_requires_cancellation: 'Para devolver el total, cancela primero la reserva.',
+    invalid_inventory_range: 'El rango debe tener entre 1 y 90 noches.',
+    invalid_provider_state: 'Estado de proveedor no válido.',
+    provider_not_found: 'No encontramos el proveedor.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -359,6 +362,9 @@ const pt: PortalCopy = {
     refund_not_allowed: 'Só são reembolsadas reservas confirmadas ou canceladas com pagamento aprovado.',
     refund_exceeds_paid: 'O reembolso excede o que resta a devolver.',
     refund_requires_cancellation: 'Para devolver o total, cancele a reserva primeiro.',
+    invalid_inventory_range: 'O intervalo deve ter entre 1 e 90 noites.',
+    invalid_provider_state: 'Estado de fornecedor inválido.',
+    provider_not_found: 'Não encontramos o fornecedor.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };

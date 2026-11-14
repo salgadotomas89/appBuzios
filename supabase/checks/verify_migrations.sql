@@ -57,6 +57,19 @@ with checks(name, ok) as (
         where n.nspname = 'public' and c.relkind = 'r'
           and c.relname in ('connectical_reservations', 'connectical_inventory', 'connectical_quotes',
                             'connectical_reservation_events', 'connectical_refunds'))),
+    -- Identificadores de Auth: solo se pueden leer los que RLS limita a su dueño (perfil propio,
+    -- proveedor propio, cotización propia). Una columna *_user_id nueva falla aquí hasta revisarla.
+    ('app roles cannot read internal Auth ids of other people',
+      (select coalesce(bool_and(not has_column_privilege(r.role, format('public.%I', c.table_name)::regclass,
+                                                         c.column_name, 'SELECT')), true)
+        from information_schema.columns c
+        cross join (values ('anon'), ('authenticated')) as r(role)
+        where c.table_schema = 'public' and c.table_name like 'connectical\_%'
+          and (c.column_name like '%user_id' or c.column_name = 'idempotency_key')
+          and (c.table_name, c.column_name) not in (
+            ('connectical_profiles', 'user_id'),
+            ('connectical_providers', 'owner_user_id'),
+            ('connectical_quotes', 'traveler_user_id')))),
     ('no scheduler assumed: system sweep exists but is private',
       (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname = 'connectical_system_expire_holds'))

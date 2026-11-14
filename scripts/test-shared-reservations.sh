@@ -641,6 +641,39 @@ quote_ok=$(as_user "$traveler_a" "select (public.connectical_create_quote('$rang
 [ "$resumed" = 't' ] && [ "$quote_ok" = '50000' ] || { echo "Admin resume mismatch: $resumed $quote_ok" >&2; exit 1; }
 echo "PASS only admins pause or resume providers, and pausing blocks quotes and publishing"
 
+# Internal Auth ids: travelers and providers never read who acted, nor the provider the traveler's id.
+leak_reservation=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select id from public.connectical_reservations where provider_id = '$lab_provider' and status = 'confirmed' order by created_at limit 1;" | tail -1)
+leak_traveler=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select traveler_user_id from public.connectical_reservations where id = '$leak_reservation';" | tail -1)
+for probe in \
+  "$leak_traveler|select actor_user_id from public.connectical_reservation_events limit 1" \
+  "$provider_user|select actor_user_id from public.connectical_reservation_events limit 1" \
+  "$provider_user|select traveler_user_id from public.connectical_reservations limit 1" \
+  "$provider_user|select * from public.connectical_reservations limit 1" \
+  "$leak_traveler|select actor_user_id from public.connectical_refunds limit 1" \
+  "$leak_traveler|select idempotency_key from public.connectical_refunds limit 1" \
+  "$admin_user|select actor_user_id from public.connectical_reservation_events limit 1"; do
+  probe_user=${probe%%|*}; probe_sql=${probe#*|}
+  if as_user "$probe_user" "$probe_sql" >/dev/null 2>&1; then
+    echo "Internal id readable by $probe_user: $probe_sql" >&2; exit 1
+  fi
+done
+owner_events=$(as_user "$leak_traveler" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+provider_events=$(as_user "$provider_user" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+stranger_events=$(as_user "$traveler_b" "select count(id) from public.connectical_reservation_events where reservation_id = '$leak_reservation';")
+[ "$owner_events" -ge 2 ] && [ "$provider_events" = "$owner_events" ] && [ "$stranger_events" = '0' ] || {
+  echo "Event visibility changed: owner=$owner_events provider=$provider_events stranger=$stranger_events" >&2; exit 1; }
+audit_actors=$(as_user "$admin_user" "select count(*) filter (where actor_user_id is not null) from public.connectical_admin_list_reservation_events('$leak_reservation');")
+[ "$audit_actors" -ge 1 ] || { echo "Admin audit lost the actor ids: $audit_actors" >&2; exit 1; }
+for actor in "$leak_traveler" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_list_reservation_events(null, 10);" >/dev/null 2>&1; then
+    echo "Non-admin could read the audit with actor ids" >&2; exit 1
+  fi
+done
+cancel_as_provider=$(as_user "$provider_user" "select coalesce(r.traveler_user_id::text, 'hidden') || '|' || coalesce(r.idempotency_key::text, 'hidden') || '|' || r.status from public.connectical_cancel_reservation('$leak_reservation', 'provider_cancelled') r;")
+[ "$cancel_as_provider" = 'hidden|hidden|cancelled' ] || { echo "Provider cancel returned traveler ids: $cancel_as_provider" >&2; exit 1; }
+echo "PASS internal Auth ids stay out of traveler and provider reads; admins audit them through an RPC"
+
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$PWD/supabase/checks/verify_migrations.sql" | grep -v '|t$' || true)

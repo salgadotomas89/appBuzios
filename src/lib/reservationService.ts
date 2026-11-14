@@ -13,9 +13,8 @@ export type SharedReservation = {
   quote_id: string;
   offer_id: string;
   provider_id: string;
-  traveler_user_id: string;
   service_date: string;
-  // Ausente hasta aplicar la migración 202611140001; equivale a 1.
+  // Columna de la migración 202611140001; la app requiere todas las migraciones aplicadas.
   nights?: number;
   quantity: number;
   status: ReservationStatus;
@@ -53,7 +52,6 @@ export type SharedQuote = {
 export type SharedReservationEvent = {
   id: number;
   reservation_id: string;
-  actor_user_id: string | null;
   event_type: string;
   details: Record<string, unknown>;
   created_at: string;
@@ -227,14 +225,23 @@ export async function signOutSharedAccount(): Promise<void> {
   if (error) throw new Error(`No se pudo cerrar sesión: ${error.message}`);
 }
 
+// Columnas que la migración 202611140005 permite leer al rol authenticated. `select('*')` fallaría:
+// los identificadores de Auth (turista, autor de cada evento) no salen de la base de datos.
+export const RESERVATION_COLUMNS =
+  'id, quote_id, offer_id, provider_id, service_date, nights, quantity, status, hold_expires_at, ' +
+  'amount_cents, service_fee_rate_bps, service_fee_cents, provider_commission_rate_bps, ' +
+  'provider_commission_cents, connectical_margin_cents, quote_version, payment_status, payment_method, ' +
+  'payment_reference, refund_cents, created_at, updated_at';
+export const RESERVATION_EVENT_COLUMNS = 'id, reservation_id, event_type, details, created_at';
+
 export async function listSharedReservations(): Promise<SharedReservation[]> {
   await callRpc<number>('connectical_expire_holds', {});
   const { data, error } = await getClient().database
     .from('connectical_reservations')
-    .select('*')
+    .select(RESERVATION_COLUMNS)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudieron leer reservas: ${error.message}`);
-  return (data ?? []) as SharedReservation[];
+  return (data ?? []) as unknown as SharedReservation[];
 }
 
 export async function listSharedProviders(): Promise<SharedProvider[]> {
@@ -248,10 +255,10 @@ export async function listSharedProviders(): Promise<SharedProvider[]> {
 export async function listSharedReservationEvents(): Promise<SharedReservationEvent[]> {
   const { data, error } = await getClient().database
     .from('connectical_reservation_events')
-    .select('*')
+    .select(RESERVATION_EVENT_COLUMNS)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudo leer el historial: ${error.message}`);
-  return (data ?? []) as SharedReservationEvent[];
+  return (data ?? []) as unknown as SharedReservationEvent[];
 }
 
 export async function listSharedOffers(): Promise<SharedOffer[]> {

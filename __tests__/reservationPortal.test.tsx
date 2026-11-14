@@ -31,7 +31,7 @@ const boat: SharedOffer = {
 
 function reservation(overrides: Partial<SharedReservation>): SharedReservation {
   return {
-    id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1', traveler_user_id: 'u1',
+    id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1',
     service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', hold_expires_at: null,
     payment_status: null, payment_method: null, amount_cents: 67840,
     service_fee_rate_bps: 600, service_fee_cents: 3840, provider_commission_rate_bps: 1000,
@@ -337,8 +337,8 @@ it('sends the chosen simulated outcome and hides payment actions from admins', a
   mocked.getSharedRole.mockResolvedValue('admin');
   mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', hold_expires_at: '2099-01-01T12:05:00Z' })]);
   mocked.listSharedReservationEvents.mockResolvedValue([
-    { id: 1, reservation_id: 'r1', actor_user_id: null, event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
-    { id: 2, reservation_id: 'r1', actor_user_id: null, event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
+    { id: 1, reservation_id: 'r1', event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
+    { id: 2, reservation_id: 'r1', event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
   ]);
   const root = await render('pt');
   expect(hasText(root, 'Pagamento recusado (simulado)')).toBe(true);
