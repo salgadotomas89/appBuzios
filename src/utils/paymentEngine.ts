@@ -42,6 +42,8 @@ export type PaymentIntent = {
   updatedAt: string;
   expiresAt?: string;
   refundedCents: number;
+  // Identificadores de reembolso ya aplicados; un reintento con el mismo id no vuelve a reembolsar.
+  refundIds: string[];
   notes: string[];
   history: PaymentEvent[];
 };
@@ -53,6 +55,8 @@ export type PaymentAction = {
 };
 
 export type InformativeFxQuote = {
+  // Siempre true: las tasas son fijas de demostración, no una cotización vigente.
+  isDemoRate: true;
   currency: CurrencyCode;
   amount: number;
   rate: number;
@@ -73,8 +77,10 @@ const FX_RATES: Record<Exclude<CurrencyCode, 'BRL'>, number> = {
   CLP: 170.5,
 };
 
+// Tasas fijas para ilustrar la conversión en la demo. No provienen de una pasarela
+// ni de un mercado; antes de mostrar conversiones reales hay que usar una fuente vigente.
 export const PAYMENT_FX_REFERENCE = {
-  source: 'Mercado Pago / FX reference snapshot (informative only)',
+  source: 'Tasa fija de demostración (no es una cotización vigente)',
   validAt: '2026-11-11T12:00:00Z',
   validUntil: '2026-11-12T12:00:00Z',
   rates: {
@@ -102,7 +108,8 @@ export function createPaymentIntent(args: {
   const createdAt = new Date().toISOString();
   const providerCommissionCents = args.providerCommissionCents ?? 0;
   const travelerFeeCents = args.travelerFeeCents ?? 0;
-  const netToProviderCents = Math.max(0, args.amountCents - providerCommissionCents);
+  // amountCents es el total del turista: el cargo de servicio no pertenece al proveedor.
+  const netToProviderCents = Math.max(0, args.amountCents - travelerFeeCents - providerCommissionCents);
   const settlementMode = args.settlementMode ?? 'b2b_conciliation';
 
   return {
@@ -126,6 +133,7 @@ export function createPaymentIntent(args: {
     createdAt,
     updatedAt: createdAt,
     refundedCents: 0,
+    refundIds: [],
     notes: [],
     history: [{
       id: `evt-${Date.now()}`,
@@ -197,6 +205,7 @@ export function getInformativeFxQuote(
   const convertedAmount = Number((baseAmount * rate).toFixed(2));
 
   return {
+    isDemoRate: true,
     currency: targetCurrency,
     amount: convertedAmount,
     rate,
@@ -208,63 +217,53 @@ export function getInformativeFxQuote(
   };
 }
 
+const REFUNDABLE_STATES: PaymentStatus[] = ['approved', 'partially_refunded'];
+
+function ignoreRefund(intent: PaymentIntent, note: string): PaymentIntent {
+  return {
+    ...intent,
+    notes: [...intent.notes, note],
+    history: [
+      ...intent.history,
+      { id: `evt-${Date.now()}`, at: new Date().toISOString(), status: intent.state, note },
+    ],
+  };
+}
+
+// Reembolso simulado. `refundId` es la clave de idempotencia: la misma notificación
+// repetida no reembolsa dos veces, pero dos reembolsos parciales distintos sí se suman.
 export function applyRefund(
   intent: PaymentIntent,
-  refund: { amountCents: number; reason: string },
+  refund: { refundId: string; amountCents: number; reason: string },
 ): PaymentIntent {
-  const safeAmount = Math.max(0, refund.amountCents);
-  const remaining = Math.max(0, intent.amountCents - intent.refundedCents);
-  const actualRefund = Math.min(safeAmount, remaining);
-
-  if (safeAmount > 0 && safeAmount <= intent.refundedCents) {
-    return {
-      ...intent,
-      notes: [...intent.notes, 'duplicate refund ignored'],
-      history: [
-        ...intent.history,
-        {
-          id: `evt-${Date.now()}`,
-          at: new Date().toISOString(),
-          status: intent.state,
-          note: 'duplicate refund ignored',
-        },
-      ],
-    };
+  // Pagos guardados antes de existir refundIds no traen el campo.
+  const refundIds = intent.refundIds ?? [];
+  if (refundIds.includes(refund.refundId)) {
+    return ignoreRefund(intent, `duplicate refund ignored: ${refund.refundId}`);
   }
-
+  if (!REFUNDABLE_STATES.includes(intent.state)) {
+    return ignoreRefund(intent, `refund ignored: payment is ${intent.state}`);
+  }
+  const requested = Number.isSafeInteger(refund.amountCents) ? Math.max(0, refund.amountCents) : 0;
+  const actualRefund = Math.min(requested, intent.amountCents - intent.refundedCents);
   if (actualRefund === 0) {
-    return {
-      ...intent,
-      notes: [...intent.notes, 'refund ignored: nothing left to refund'],
-      history: [
-        ...intent.history,
-        {
-          id: `evt-${Date.now()}`,
-          at: new Date().toISOString(),
-          status: intent.state,
-          note: `refund ignored: ${refund.reason}`,
-        },
-      ],
-    };
+    return ignoreRefund(intent, `refund ignored: ${refund.reason}`);
   }
 
   const nextRefundCents = intent.refundedCents + actualRefund;
   const nextState: PaymentStatus =
     nextRefundCents >= intent.amountCents ? 'refunded' : 'partially_refunded';
+  const note = `refund applied: ${refund.reason}`;
 
   return {
     ...intent,
     refundedCents: nextRefundCents,
+    refundIds: [...refundIds, refund.refundId],
     state: nextState,
-    notes: [...intent.notes, `refund applied: ${refund.reason}`],
+    notes: [...intent.notes, note],
     history: [
       ...intent.history,
-      {
-        id: `evt-${Date.now()}`,
-        at: new Date().toISOString(),
-        status: nextState,
-        note: `refund applied: ${refund.reason}`,
-      },
+      { id: `evt-${Date.now()}`, at: new Date().toISOString(), status: nextState, note },
     ],
   };
 }

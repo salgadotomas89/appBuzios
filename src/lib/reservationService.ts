@@ -1,3 +1,10 @@
+import {
+  portalCopy,
+  type PortalCategory,
+  type PortalPriceMode,
+  type ReservationErrorCode,
+  type ReservationStatus,
+} from '../i18n/portalCopy';
 import { insforge } from './insforge';
 
 export type SharedRole = 'traveler' | 'provider' | 'admin';
@@ -8,8 +15,13 @@ export type SharedReservation = {
   provider_id: string;
   traveler_user_id: string;
   service_date: string;
+  // Ausente hasta aplicar la migración 202611140001; equivale a 1.
+  nights?: number;
   quantity: number;
-  status: string;
+  status: ReservationStatus;
+  hold_expires_at: string | null;
+  payment_status: 'approved' | 'rejected' | 'pending' | 'requires_action' | null;
+  payment_method: 'card' | 'pix' | null;
   amount_cents: number;
   service_fee_rate_bps: 400 | 600 | 800;
   service_fee_cents: number;
@@ -46,6 +58,25 @@ export type SharedReservationEvent = {
   created_at: string;
 };
 
+export type SharedOffer = {
+  id: string;
+  provider_id: string;
+  category: PortalCategory;
+  title: string;
+  base_price_cents: number;
+  price_mode: PortalPriceMode;
+  currency: 'BRL';
+  published: boolean;
+};
+
+export type SharedProvider = {
+  id: string;
+  name: string;
+  country_code: string;
+  commission_rate_bps: number;
+  active: boolean;
+};
+
 export type SharedInventory = {
   offer_id: string;
   service_date: string;
@@ -63,9 +94,28 @@ function getClient() {
   return insforge;
 }
 
+// Códigos que las funciones SQL lanzan con `raise exception`; el texto por
+// defecto es español y la pantalla puede traducirlo con `code`.
+const RESERVATION_ERROR_MESSAGES = portalCopy.es.errors;
+
+export class ReservationError extends Error {
+  constructor(message: string, readonly code: ReservationErrorCode | null) {
+    super(message);
+    this.name = 'ReservationError';
+  }
+}
+
+export function toReservationError(operation: string, rawMessage: string): ReservationError {
+  const code = (Object.keys(RESERVATION_ERROR_MESSAGES) as ReservationErrorCode[]).find(key =>
+    new RegExp(`\\b${key}\\b`).test(rawMessage),
+  );
+  if (code) return new ReservationError(RESERVATION_ERROR_MESSAGES[code], code);
+  return new ReservationError(`InsForge ${operation}: ${rawMessage}`, null);
+}
+
 async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await getClient().database.rpc(name, args);
-  if (error) throw new Error(`InsForge ${name}: ${error.message}`);
+  if (error) throw toReservationError(name, error.message);
   if (data === null) throw new Error(`InsForge ${name}: respuesta vacía`);
   return data as T;
 }
@@ -170,12 +220,12 @@ export async function listSharedReservations(): Promise<SharedReservation[]> {
   return (data ?? []) as SharedReservation[];
 }
 
-export async function listSharedProviders(): Promise<Array<Record<string, unknown>>> {
+export async function listSharedProviders(): Promise<SharedProvider[]> {
   const { data, error } = await getClient().database
     .from('connectical_providers')
     .select('id, name, country_code, commission_rate_bps, active');
   if (error) throw new Error(`No se pudieron leer proveedores: ${error.message}`);
-  return (data ?? []) as Array<Record<string, unknown>>;
+  return (data ?? []) as SharedProvider[];
 }
 
 export async function listSharedReservationEvents(): Promise<SharedReservationEvent[]> {
@@ -187,22 +237,22 @@ export async function listSharedReservationEvents(): Promise<SharedReservationEv
   return (data ?? []) as SharedReservationEvent[];
 }
 
-export async function listSharedOffers(): Promise<Array<Record<string, unknown>>> {
+export async function listSharedOffers(): Promise<SharedOffer[]> {
   const { data, error } = await getClient().database
     .from('connectical_offers')
     .select('id, provider_id, category, title, base_price_cents, price_mode, currency, published')
     .eq('published', true);
   if (error) throw new Error(`No se pudieron leer ofertas: ${error.message}`);
-  return (data ?? []) as Array<Record<string, unknown>>;
+  return (data ?? []) as SharedOffer[];
 }
 
-export async function listProviderOffers(): Promise<Array<Record<string, unknown>>> {
+export async function listProviderOffers(): Promise<SharedOffer[]> {
   const { data, error } = await getClient().database
     .from('connectical_offers')
     .select('id, provider_id, category, title, base_price_cents, price_mode, currency, published')
     .order('created_at', { ascending: false });
   if (error) throw new Error(`No se pudieron leer ofertas del proveedor: ${error.message}`);
-  return (data ?? []) as Array<Record<string, unknown>>;
+  return (data ?? []) as SharedOffer[];
 }
 
 export async function listProviderInventory(): Promise<SharedInventory[]> {
@@ -216,12 +266,12 @@ export async function listProviderInventory(): Promise<SharedInventory[]> {
 
 export async function upsertProviderOffer(input: {
   offerId?: string;
-  category: 'pousadas' | 'barcos' | 'noche' | 'buggy';
+  category: PortalCategory;
   title: string;
   basePriceCents: number;
-  priceMode: 'night' | 'person' | 'ticket' | 'group';
+  priceMode: PortalPriceMode;
   published: boolean;
-}): Promise<Record<string, unknown>> {
+}): Promise<SharedOffer> {
   return callRpc('connectical_provider_upsert_offer', {
     p_offer_id: input.offerId ?? null,
     p_category: input.category,
@@ -236,10 +286,23 @@ export async function publishProviderInventory(input: {
   offerId: string;
   serviceDate: string;
   totalUnits: number;
-}): Promise<Record<string, unknown>> {
+}): Promise<SharedInventory> {
   return callRpc('connectical_provider_publish_inventory', {
     p_offer_id: input.offerId,
     p_service_date: input.serviceDate,
     p_total_units: input.totalUnits,
   });
+}
+
+// Próximas fechas publicadas de una oferta; la RLS solo expone inventario de ofertas publicadas.
+export async function listOfferAvailability(offerId: string, fromDate: string): Promise<SharedInventory[]> {
+  const { data, error } = await getClient().database
+    .from('connectical_inventory')
+    .select('offer_id, service_date, total_units, held_units, sold_units, version, updated_at')
+    .eq('offer_id', offerId)
+    .gte('service_date', fromDate)
+    .order('service_date', { ascending: true })
+    .limit(60);
+  if (error) throw new Error(`No se pudo leer disponibilidad: ${error.message}`);
+  return (data ?? []) as SharedInventory[];
 }

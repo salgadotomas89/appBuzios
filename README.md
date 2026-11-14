@@ -52,7 +52,9 @@ Catálogo y disponibilidad de aliados; administración para proveedores; persist
 
 El backend local anterior sigue separado: `src/lib/reservationBackend.ts` conserva usuarios, proveedores, ofertas, inventario, cotizaciones y reservas en `Map` de memoria; `src/lib/demoStorage.ts` guarda itinerarios y confirmaciones de demostración en AsyncStorage del dispositivo. Ninguno de esos dos medios comparte reservas entre dispositivos.
 
-La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/202611110001_shared_reservations.sql`; el bloqueo de cupos, la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
+La ruta compartida nueva usa InsForge Auth y PostgreSQL. `src/lib/reservationService.ts` invoca funciones SQL transaccionales y consulta las filas autorizadas por RLS. El esquema está en `supabase/migrations/` (`202611110001_shared_reservations.sql`, `202611140001_multi_night_inventory.sql` y `202611140002_system_hold_sweep.sql`, en ese orden); el bloqueo de cupos por cada noche de la estancia, el rechazo de fechas pasadas (hora de São Paulo), la idempotencia, expiración a 10 minutos, snapshot BRL, historial, cancelación y autorización viven en PostgreSQL, no en el cliente.
+
+El portal compartido está en español y portugués de Brasil. Valida en el dispositivo fechas (AAAA-MM-DD, desde hoy en Búzios), cantidades, noches (1–30, solo en ofertas por noche) y precios en formato BRL (`1.234,56`) antes de llamar al backend, que repite todas las validaciones. Los códigos de error de PostgreSQL se muestran como mensajes legibles. El turista ve las fechas con cupo publicado y puede elegir el resultado del pago simulado (aprobado, rechazado o pendiente) y reintentar el pago mientras dura la retención. El proveedor publica ofertas de las cuatro categorías y modalidades de precio. El admin filtra reservas por estado. El neto del proveedor es subtotal − comisión: el cargo del turista no forma parte de él.
 
 En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotización muestra subtotal, porcentaje, cargo y total BRL. La reserva conserva el porcentaje elegido (`service_fee_rate_bps`), los centavos del cargo, el total y la comisión del proveedor como valores separados para que el panel de administración los pueda revisar.
 
@@ -66,14 +68,18 @@ En el portal compartido, el turista puede seleccionar 4%, 6% u 8%. La cotizació
 
 ### Despliegue/provisionamiento manual
 
-1. Revisa y aplica la migración en el SQL Editor del proyecto InsForge; no ejecutes el seed de laboratorio contra producción.
+1. Revisa y aplica las migraciones en orden de nombre (`202611110001`, `202611140001`, `202611140002`) en el SQL Editor del proyecto InsForge; no ejecutes el seed de laboratorio contra producción.
 2. Registra cuentas mediante Auth. Para usuarios operativos, cambia su perfil solo desde el SQL Editor confiable, después de validar identidad y autorización.
 3. Usa el flujo exacto con placeholders y validaciones de [supabase/PROVISIONING.md](supabase/PROVISIONING.md) para asignar el perfil `provider`, crear su fila y asignar `admin` únicamente a una cuenta verificada. La tabla `connectical_providers` almacena comisión en puntos base.
 4. Inicia la app, abre “Reservas compartidas · acceso de operaciones” e inicia sesión. Turistas pueden registrarse; proveedores publican oferta/cupo, turistas cotizan y hacen el hold, y admin ve totales snapshots.
 
-La expiración no tiene cron instalado: los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
+La expiración no tiene cron instalado (la función `connectical_system_expire_holds` queda lista para un scheduler confiable, pero no hay ninguno configurado): los holds vencen tras 10 minutos y el estado/inventario se reconcilian de forma diferida al listar reservas (`connectical_expire_holds`) o reservar el mismo cupo. No se afirma limpieza automática en periodos sin solicitudes. El procedimiento, la llamada RPC y la opción futura de un scheduler validado están descritos en [supabase/PROVISIONING.md](supabase/PROVISIONING.md).
 
 No se incluye una clave `service_role` en la app ni en este repositorio. La migración no activa cobros reales; tarjeta y Pix pasan solo por el simulador. La liquidación continúa en conciliación B2B y requiere revisión comercial/legal/bancaria antes de habilitar una pasarela.
+
+### Integración continua
+
+`.github/workflows/ci.yml` ejecuta en cada push y PR: tsc, ESLint y Jest (con `.env.example`, sin claves reales) y la integración con `postgres:17` desechable. No usa secretos ni contacta InsForge.
 
 ### Ensayo local verificable
 
@@ -82,7 +88,7 @@ Requiere Docker activo. El comando usa un contenedor PostgreSQL `postgres:17` te
 ```sh
 docker run --name connectical-reservation-it \
 	-e POSTGRES_PASSWORD=connectical_local_test_only \
-	-v "$PWD/supabase/migrations/202611110001_shared_reservations.sql:/tmp/connectical-migration.sql:ro" \
+	-v "$PWD/supabase/migrations:/tmp/connectical-migrations:ro" \
 	postgres:17
 ```
 
@@ -94,7 +100,7 @@ CONNECTICAL_TEST_CONTAINER=connectical-reservation-it npm run test:shared-reserv
 
 Al terminar, detén solo ese contenedor de prueba con `docker rm -f connectical-reservation-it`. En una terminal local sin esa política del runner, `npm run test:shared-reservations` crea y limpia su propio contenedor.
 
-El ensayo cubre una posada, dos turistas concurrentes, un único cuarto, una aceptación y un rechazo por inventario, pago tarjeta simulado, lectura del proveedor/admin con aislamiento RLS, reinicio de PostgreSQL, ledger persistido, auditoría y liberación al cancelar. Esta prueba demuestra la lógica compartida real en PostgreSQL local; la visibilidad multi-dispositivo del proyecto InsForge seguirá pendiente hasta aplicar allí la migración y probar cuentas remotas.
+El ensayo cubre una posada, dos turistas concurrentes, un único cuarto, una aceptación y un rechazo por inventario, pago tarjeta simulado, lectura del proveedor/admin con aislamiento RLS, reinicio de PostgreSQL, ledger persistido, auditoría y liberación al cancelar. También cubre estancias de varias noches (bloqueo de cada noche, rechazo de estancias solapadas y de noches sin cupo publicado), rechazo de fechas pasadas, ofertas no nocturnas limitadas a una fecha y que los helpers internos de inventario no sean ejecutables por usuarios autenticados. Esta prueba demuestra la lógica compartida real en PostgreSQL local; la visibilidad multi-dispositivo del proyecto InsForge seguirá pendiente hasta aplicar allí la migración y probar cuentas remotas.
 
 El simulador iOS queda separado de la validación del backend. La última evidencia del proyecto documenta bloqueo del entorno Xcode/CoreSimulator al crear cache/DerivedData; no se modificaron permisos globales ni se usó `sudo`.
 

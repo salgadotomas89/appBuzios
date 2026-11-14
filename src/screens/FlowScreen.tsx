@@ -23,7 +23,7 @@ import {
   type TripItem,
 } from '../utils/journey';
 import type { DemoServiceFeeRate } from '../utils/journey';
-import { createPaymentIntent, getInformativeFxQuote } from '../utils/paymentEngine';
+import { createPaymentIntent, getInformativeFxQuote, type PaymentStatus } from '../utils/paymentEngine';
 import {
   calculateDemoQuote,
   DEFAULT_DEMO_PRICING_POLICY,
@@ -94,6 +94,11 @@ const copy = {
     confirmation: '¡Plan confirmado!',
     demoConfirmed: 'Reserva de demostración · sin pago ni disponibilidad real',
     bookingCode: 'Código demo',
+    simulatedPayment: 'Pago simulado',
+    brlOperation: 'Operación en BRL',
+    splitAuthorized: 'split autorizado',
+    b2bConciliation: 'conciliación B2B',
+    demoFx: 'Conversión USD con tasa fija de demostración, no es una cotización vigente',
     backTrip: 'Volver a Mi viaje',
     backHome: 'Seguir explorando',
     home: 'Inicio',
@@ -170,6 +175,11 @@ const copy = {
     confirmation: 'Roteiro confirmado!',
     demoConfirmed: 'Reserva de demonstração · sem pagamento ou disponibilidade real',
     bookingCode: 'Código demo',
+    simulatedPayment: 'Pagamento simulado',
+    brlOperation: 'Operação em BRL',
+    splitAuthorized: 'split autorizado',
+    b2bConciliation: 'conciliação B2B',
+    demoFx: 'Conversão em USD com taxa fixa de demonstração, não é uma cotação vigente',
     backTrip: 'Voltar à Minha viagem',
     backHome: 'Continuar explorando',
     home: 'Início',
@@ -200,6 +210,17 @@ function moveDate(value: string, offset: number) {
   date.setDate(date.getDate() + offset);
   return dateKey(date);
 }
+
+const PAYMENT_STATE_LABELS: Record<Language, Record<PaymentStatus, string>> = {
+  es: {
+    pending: 'pendiente', approved: 'aprobado', rejected: 'rechazado', requires_action: 'requiere acción',
+    expired: 'vencido', refunded: 'reembolsado', partially_refunded: 'reembolso parcial', cancelled: 'cancelado',
+  },
+  pt: {
+    pending: 'pendente', approved: 'aprovado', rejected: 'recusado', requires_action: 'requer ação',
+    expired: 'expirado', refunded: 'reembolsado', partially_refunded: 'reembolso parcial', cancelled: 'cancelado',
+  },
+};
 
 function formatDate(value: string, language: Language) {
   const date = new Date(`${value}T12:00:00`);
@@ -357,7 +378,7 @@ export function FlowScreen() {
       accounting: {
         settlementMode: quote.settlementMode,
         providerResponsible: 'proveedor local / conciliación B2B pendiente',
-        netToProviderCents: quote.travelerTotalCents - quote.providerCommissionCents,
+        netToProviderCents: quote.subtotalCents - quote.providerCommissionCents,
         grossIncomeCents: quote.grossIncomeCents,
         travelerFeeCents: quote.serviceFeeCents,
         providerCommissionCents: quote.providerCommissionCents,
@@ -405,7 +426,7 @@ export function FlowScreen() {
           />
         ) : null}
         {screen === 'operations' ? (
-          <ReservationPortal onClose={() => setScreen('home')} />
+          <ReservationPortal onClose={() => setScreen('home')} language={language} />
         ) : null}
         {screen === 'explore' ? (
           <ExploreView
@@ -903,13 +924,13 @@ function ConfirmationView({
       </View>
       {booking.payment ? (
         <View style={styles.paymentSummaryBox}>
-          <Text style={styles.paymentSummaryTitle}>Pago simulado · {booking.payment.state}</Text>
+          <Text style={styles.paymentSummaryTitle}>{words.simulatedPayment} · {PAYMENT_STATE_LABELS[language][booking.payment.state]}</Text>
           <Text style={styles.paymentSummaryText}>
-            Operación en BRL · {booking.accounting?.settlementMode === 'split_authorized' ? 'split autorizado' : 'conciliación B2B'}
+            {words.brlOperation} · {booking.accounting?.settlementMode === 'split_authorized' ? words.splitAuthorized : words.b2bConciliation}
           </Text>
           {booking.accounting ? (
             <Text style={styles.paymentSummaryText}>
-              FX informativa USD: ${booking.accounting.fxInformative.amount.toFixed(2)} · fuente {booking.accounting.fxInformative.source}
+              {words.demoFx}: US$ {booking.accounting.fxInformative.amount.toFixed(2)}
             </Text>
           ) : null}
         </View>
