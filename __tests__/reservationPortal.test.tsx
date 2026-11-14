@@ -34,7 +34,7 @@ function reservation(overrides: Partial<SharedReservation>): SharedReservation {
   return {
     id: 'r1', quote_id: 'q1', offer_id: pousada.id, provider_id: 'p1',
     service_date: '2099-01-10', nights: 2, quantity: 1, status: 'confirmed', hold_expires_at: null,
-    payment_status: null, payment_method: null, amount_cents: 67840,
+    payment_status: 'approved', payment_method: 'card', amount_cents: 67840,
     service_fee_rate_bps: 600, service_fee_cents: 3840, provider_commission_rate_bps: 1000,
     provider_commission_cents: 6400, connectical_margin_cents: 3840, refund_cents: 0, quote_version: 'connectical-brl-v1',
     created_at: '2099-01-01T00:00:00Z', updated_at: '2099-01-01T00:00:00Z',
@@ -119,7 +119,7 @@ it('quotes a multi-night stay and books it with the quote id as idempotency key'
     provider_commission_rate_bps: 1000, provider_commission_cents: 6400,
     quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z',
   });
-  mocked.createSharedReservationHold.mockResolvedValue(reservation({ status: 'held' }));
+  mocked.createSharedReservationHold.mockResolvedValue(reservation({ status: 'held', payment_status: null }));
   mocked.simulateSharedPayment.mockResolvedValue(reservation({ status: 'confirmed' }));
   const root = await render();
 
@@ -219,7 +219,7 @@ it('shows collected, refunded and pending-review totals to admins', async () => 
     reservation({ id: 'r-paid', payment_status: 'approved' }),
     reservation({ id: 'r-partial', status: 'cancelled', payment_status: 'approved', refund_cents: 10000 }),
     reservation({ id: 'r-refunded', status: 'refunded', payment_status: 'approved', refund_cents: 67840 }),
-    reservation({ id: 'r-expired', status: 'expired' }),
+    reservation({ id: 'r-expired', status: 'expired', payment_status: null }),
   ]);
   const root = await render();
   expect(hasText(root, 'Cobrado (simulado): R$ 2.035,20 · Reembolsado (simulado): R$ 778,40')).toBe(true);
@@ -232,7 +232,7 @@ it('records an admin refund with a stable idempotency key across retries', async
   mocked.getSharedRole.mockResolvedValue('admin');
   mocked.listSharedReservations.mockResolvedValue([
     reservation({ id: 'r-paid', payment_status: 'approved' }),
-    reservation({ id: 'r-unpaid', status: 'held' }),
+    reservation({ id: 'r-unpaid', status: 'held', payment_status: null }),
   ]);
   mocked.recordSharedRefund
     .mockRejectedValueOnce(new Error('Network request failed'))
@@ -324,7 +324,7 @@ it('discards a quote that resolves after the traveler changed the inputs', async
 it('lets a traveler retry a pending simulated payment and labels admin events', async () => {
   mocked.getSharedRole.mockResolvedValue('traveler');
   mocked.listSharedReservations.mockResolvedValue([
-    reservation({ status: 'pending_payment', hold_expires_at: '2099-01-01T12:05:00Z' }),
+    reservation({ status: 'pending_payment', payment_status: 'pending', hold_expires_at: '2099-01-01T12:05:00Z' }),
   ]);
   mocked.simulateSharedPayment.mockResolvedValue(reservation({ status: 'confirmed' }));
   const root = await render();
@@ -336,7 +336,7 @@ it('lets a traveler retry a pending simulated payment and labels admin events', 
 
 it('sends the chosen simulated outcome and hides payment actions from admins', async () => {
   mocked.getSharedRole.mockResolvedValue('admin');
-  mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', hold_expires_at: '2099-01-01T12:05:00Z' })]);
+  mocked.listSharedReservations.mockResolvedValue([reservation({ status: 'held', payment_status: null, hold_expires_at: '2099-01-01T12:05:00Z' })]);
   mocked.listSharedReservationEvents.mockResolvedValue([
     { id: 1, reservation_id: 'r1', event_type: 'payment_rejected', details: {}, created_at: '2099-01-01T12:00:00Z' },
     { id: 2, reservation_id: 'r1', event_type: 'custom_event', details: {}, created_at: '2099-01-01T12:01:00Z' },
@@ -438,4 +438,21 @@ it('lets admins pause and resume providers', async () => {
   expect(hasText(root, 'Fornecedor atualizado.')).toBe(true);
   expect(hasText(root, '10% · pausado')).toBe(true);
   expect(root.findAll(node => node.props.accessibilityLabel === 'Reativar Pousada Sol').length).toBeGreaterThan(0);
+});
+
+it('separates holds, confirmed gross and provider net and flags inconsistent states for admins', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-paid', payment_status: 'approved' }),
+    reservation({ id: 'r-held', status: 'held', payment_status: null, hold_expires_at: '2099-01-01T00:10:00Z' }),
+    reservation({ id: 'r-odd', status: 'confirmed', payment_status: 'pending' }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Retenidas 1 · confirmadas 2 · canceladas 0 · reembolsadas 0')).toBe(true);
+  expect(hasText(root, 'Retenido o pago pendiente (no es ingreso): R$ 678,40')).toBe(true);
+  expect(hasText(root, 'Bruto de reservas confirmadas: R$ 1.356,80')).toBe(true);
+  // 2 × (678,40 − 38,40 − 64,00)
+  expect(hasText(root, 'Neto proveedor de reservas confirmadas: R$ 1.152,00')).toBe(true);
+  expect(hasText(root, 'Estados inconsistentes para revisar: 1')).toBe(true);
+  expect(hasText(root, 'confirmada sin pago aprobado · r-odd')).toBe(true);
 });

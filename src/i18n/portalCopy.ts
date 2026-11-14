@@ -1,5 +1,6 @@
 import type { Language } from '../data/homeMock';
 import type { InputError } from '../utils/portalInput';
+import type { ReservationInconsistency } from '../utils/reservationTotals';
 
 // Textos del portal de reservas compartidas. Para sumar inglés basta con
 // ampliar `Language` y añadir aquí la entrada `en`; TypeScript exige todas las claves.
@@ -127,6 +128,19 @@ const es = {
   collectedTotal: 'Cobrado (simulado)',
   refundedTotal: 'Reembolsado (simulado)',
   netCollected: 'Cobrado neto de reembolsos',
+  heldTotal: 'Retenido o pago pendiente (no es ingreso)',
+  confirmedGross: 'Bruto de reservas confirmadas',
+  providerNetTotal: 'Neto proveedor de reservas confirmadas',
+  statusCounts: 'Retenidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
+  inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
+  inconsistencies: {
+    confirmed_without_payment: 'confirmada sin pago aprobado',
+    payment_approved_but_not_settled: 'pago aprobado pero sigue retenida',
+    refund_exceeds_amount: 'reembolso mayor que lo cobrado',
+    refund_without_payment: 'reembolso sin pago aprobado',
+    refunded_incomplete: 'marcada reembolsada sin reembolso completo',
+    fees_exceed_amount: 'cargo y comisión superan el total',
+  } satisfies Record<ReservationInconsistency, string>,
   pendingRefundReview: 'Canceladas con cobro sin reembolso completo: {count}. La política de reembolso aún no está aprobada; revisa cada caso.',
   refund: 'Reembolsar',
   refundTitle: 'Registrar reembolso simulado',
@@ -301,6 +315,19 @@ const pt: PortalCopy = {
   collectedTotal: 'Cobrado (simulado)',
   refundedTotal: 'Reembolsado (simulado)',
   netCollected: 'Cobrado líquido de reembolsos',
+  heldTotal: 'Retido ou pagamento pendente (não é receita)',
+  confirmedGross: 'Bruto de reservas confirmadas',
+  providerNetTotal: 'Líquido do fornecedor de reservas confirmadas',
+  statusCounts: 'Retidas {held} · confirmadas {confirmed} · canceladas {cancelled} · reembolsadas {refunded}',
+  inconsistencyTitle: 'Estados inconsistentes para revisar: {count}',
+  inconsistencies: {
+    confirmed_without_payment: 'confirmada sem pagamento aprovado',
+    payment_approved_but_not_settled: 'pagamento aprovado mas continua retida',
+    refund_exceeds_amount: 'reembolso maior que o cobrado',
+    refund_without_payment: 'reembolso sem pagamento aprovado',
+    refunded_incomplete: 'marcada reembolsada sem reembolso completo',
+    fees_exceed_amount: 'taxa e comissão superam o total',
+  } satisfies Record<ReservationInconsistency, string>,
   pendingRefundReview: 'Canceladas com cobrança sem reembolso completo: {count}. A política de reembolso ainda não foi aprovada; revise cada caso.',
   refund: 'Reembolsar',
   refundTitle: 'Registrar reembolso simulado',

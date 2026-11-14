@@ -58,7 +58,12 @@ import {
   parseIsoDate,
   type ParseResult,
 } from '../utils/portalInput';
-import { newIdempotencyKey, refundAllowance, summarizeReservations } from '../utils/reservationTotals';
+import {
+  findInconsistencies,
+  newIdempotencyKey,
+  refundAllowance,
+  summarizeReservations,
+} from '../utils/reservationTotals';
 import { colors, radius } from '../theme';
 
 const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy'];
@@ -386,6 +391,7 @@ export function ReservationPortal({
     ? reservations.filter(reservation => reservation.status === statusFilter)
     : reservations;
   const totals = summarizeReservations(visibleReservations);
+  const inconsistencies = role === 'admin' ? findInconsistencies(reservations) : [];
   const perNight = selectedOffer?.price_mode === 'night';
   const parsedNights = Number(nights);
   const checkOut =
@@ -614,10 +620,28 @@ export function ReservationPortal({
               </View>
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>
+                <Text style={styles.helper}>
+                  {words.statusCounts
+                    .replace('{held}', String(totals.heldCount))
+                    .replace('{confirmed}', String(totals.confirmedCount))
+                    .replace('{cancelled}', String(totals.cancelledCount))
+                    .replace('{refunded}', String(totals.refundedCount))}
+                </Text>
+                <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
+                <Text style={styles.helper}>{words.confirmedGross}: {brlFromCents(totals.confirmedGrossCents)}</Text>
+                <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
                 <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
                 <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(totals.connecticalFeeCents)}</Text>
                 <Text style={styles.helper}>{words.collectedTotal}: {brlFromCents(totals.collectedCents)} · {words.refundedTotal}: {brlFromCents(totals.refundedCents)}</Text>
                 <Text style={styles.helper}>{words.netCollected}: {brlFromCents(totals.netCollectedCents)}</Text>
+                {inconsistencies.length ? (
+                  <View style={styles.warning}>
+                    <Text style={styles.offerName}>{words.inconsistencyTitle.replace('{count}', String(inconsistencies.length))}</Text>
+                    {inconsistencies.map(item => (
+                      <Text key={`${item.id}:${item.code}`} selectable style={styles.helper}>{words.inconsistencies[item.code]} · {item.id}</Text>
+                    ))}
+                  </View>
+                ) : null}
                 {totals.pendingRefundReviewCount ? (
                   <Text style={styles.warning}>{words.pendingRefundReview.replace('{count}', String(totals.pendingRefundReviewCount))}</Text>
                 ) : null}

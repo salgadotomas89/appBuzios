@@ -3,7 +3,8 @@ import type { SharedReservation } from '../lib/reservationService';
 // Totales del panel de administración. Las comisiones y cargos solo cuentan para reservas
 // confirmadas: una retención, una reserva vencida o una cancelada no generan ingreso.
 // El cobro se mide por pago aprobado, aunque luego se cancele, porque ese dinero entró y
-// solo sale con un reembolso registrado.
+// solo sale con un reembolso registrado. Lo retenido o pendiente de pago se informa aparte y
+// nunca se suma a ingresos.
 
 type TotalsInput = Pick<
   SharedReservation,
@@ -17,7 +18,16 @@ type TotalsInput = Pick<
 >;
 
 export type ReservationTotals = {
+  heldCount: number;
+  // Retenidas o con pago pendiente: compromiso de cupo, no ingreso.
+  heldAmountCents: number;
   confirmedCount: number;
+  // Total pagado por el turista en reservas confirmadas (subtotal + cargo de servicio).
+  confirmedGrossCents: number;
+  // Lo que corresponde al proveedor en reservas confirmadas: bruto − cargo de servicio − comisión.
+  providerNetCents: number;
+  cancelledCount: number;
+  refundedCount: number;
   commissionCents: number;
   connecticalFeeCents: number;
   collectedCents: number;
@@ -29,7 +39,13 @@ export type ReservationTotals = {
 
 export function summarizeReservations(reservations: TotalsInput[]): ReservationTotals {
   const totals: ReservationTotals = {
+    heldCount: 0,
+    heldAmountCents: 0,
     confirmedCount: 0,
+    confirmedGrossCents: 0,
+    providerNetCents: 0,
+    cancelledCount: 0,
+    refundedCount: 0,
     commissionCents: 0,
     connecticalFeeCents: 0,
     collectedCents: 0,
@@ -39,10 +55,20 @@ export function summarizeReservations(reservations: TotalsInput[]): ReservationT
   };
   for (const reservation of reservations) {
     const refunded = reservation.refund_cents;
-    if (reservation.status === 'confirmed') {
+    if (reservation.status === 'held' || reservation.status === 'pending_payment') {
+      totals.heldCount += 1;
+      totals.heldAmountCents += reservation.amount_cents;
+    } else if (reservation.status === 'confirmed') {
       totals.confirmedCount += 1;
+      totals.confirmedGrossCents += reservation.amount_cents;
+      totals.providerNetCents +=
+        reservation.amount_cents - reservation.service_fee_cents - reservation.provider_commission_cents;
       totals.commissionCents += reservation.provider_commission_cents;
       totals.connecticalFeeCents += reservation.connectical_margin_cents;
+    } else if (reservation.status === 'cancelled') {
+      totals.cancelledCount += 1;
+    } else if (reservation.status === 'refunded') {
+      totals.refundedCount += 1;
     }
     if (reservation.payment_status === 'approved') {
       totals.collectedCents += reservation.amount_cents;
@@ -94,4 +120,37 @@ export function newIdempotencyKey(random: () => number = Math.random): string {
   bytes[8] = 0x80 + (bytes[8] % 64);
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export type ReservationInconsistency =
+  | 'confirmed_without_payment'
+  | 'payment_approved_but_not_settled'
+  | 'refund_exceeds_amount'
+  | 'refund_without_payment'
+  | 'refunded_incomplete'
+  | 'fees_exceed_amount';
+
+// Estados que las funciones SQL no deberían producir. Si aparecen, hay un error o una edición
+// manual de datos: la pantalla los muestra para que alguien los revise antes de conciliar.
+export function findInconsistencies(
+  reservations: Array<TotalsInput & Pick<SharedReservation, 'id'>>,
+): Array<{ id: string; code: ReservationInconsistency }> {
+  const found: Array<{ id: string; code: ReservationInconsistency }> = [];
+  for (const reservation of reservations) {
+    const add = (code: ReservationInconsistency) => found.push({ id: reservation.id, code });
+    const approved = reservation.payment_status === 'approved';
+    if (reservation.status === 'confirmed' && !approved) add('confirmed_without_payment');
+    if ((reservation.status === 'held' || reservation.status === 'pending_payment') && approved) {
+      add('payment_approved_but_not_settled');
+    }
+    if (reservation.refund_cents > reservation.amount_cents) add('refund_exceeds_amount');
+    if (reservation.refund_cents > 0 && !approved) add('refund_without_payment');
+    if (reservation.status === 'refunded' && reservation.refund_cents !== reservation.amount_cents) {
+      add('refunded_incomplete');
+    }
+    if (reservation.service_fee_cents + reservation.provider_commission_cents > reservation.amount_cents) {
+      add('fees_exceed_amount');
+    }
+  }
+  return found;
 }
