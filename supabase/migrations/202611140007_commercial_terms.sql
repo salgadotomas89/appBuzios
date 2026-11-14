@@ -4,7 +4,8 @@
 --   * Comisión por producto: connectical_offers.commission_rate_bps (nula = usa la del proveedor, que
 --     funciona como su contrato). Solo la administración la fija; create_quote congela la tasa
 --     efectiva en la cotización, así que cambiarla no altera reservas ya cotizadas.
---   * La comisión por producto es información B2B: anon, turistas y proveedores no pueden leerla.
+--   * La tasa por producto no se lee directamente desde connectical_offers. El turista nunca recibe la
+--     comisión; el proveedor ve la que se aplicó en sus propias reservas (202611140010).
 --   * connectical_commission_references guarda las referencias por categoría con estado
 --     'reference' (propuesta) o 'approved'. Se siembran como 'reference'; Buggy queda sin valor.
 
