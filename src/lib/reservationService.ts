@@ -108,7 +108,8 @@ function getClient() {
 }
 
 // En el flujo móvil el SDK no renueva el token solo: se renueva antes de cada petición autenticada.
-async function freshClient() {
+// Exportada para los demás servicios del portal.
+export async function freshClient() {
   const client = getClient();
   try {
     await sessionManager?.ensureFresh();
@@ -285,7 +286,14 @@ export async function signUpTravelerAccount(input: {
 // Borra la sesión del dispositivo aunque el servidor no responda.
 export async function signOutSharedAccount(): Promise<void> {
   getClient();
-  await sessionManager?.signOut();
+  try {
+    await sessionManager?.signOut();
+  } catch (error) {
+    if (error instanceof SessionError && error.code === 'sign_out_incomplete') {
+      throw new ReservationError(RESERVATION_ERROR_MESSAGES.sign_out_incomplete, 'sign_out_incomplete');
+    }
+    throw error;
+  }
 }
 
 // Columnas que la migración 202611140005 permite leer al rol authenticated. `select('*')` fallaría:

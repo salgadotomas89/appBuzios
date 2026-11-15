@@ -2,7 +2,7 @@ import type { IconName } from '../components/Icon';
 import type { OfferMedia } from '../lib/platformService';
 import type { SharedInventory, SharedOffer } from '../lib/reservationService';
 import { discountPercent } from '../utils/format';
-import type { CategoryStat, Offer, OfferCategory } from './homeMock';
+import type { CategoryStat, Localized, Offer, OfferCategory } from './homeMock';
 
 // Une el catálogo de ejemplo con las ofertas publicadas en InsForge. Una oferta compartida
 // solo trae lo que el proveedor cargó (título, categoría, precio, modalidad y, si los completó,
@@ -19,11 +19,11 @@ export const CATEGORY_ICONS: Record<OfferCategory, IconName> = {
   experiencias: 'star',
 };
 
-const PRICE_UNITS: Record<Offer['priceMode'], { es: string; pt: string }> = {
-  night: { es: 'por noche', pt: 'por noite' },
-  person: { es: 'por persona', pt: 'por pessoa' },
-  ticket: { es: 'por entrada', pt: 'por ingresso' },
-  group: { es: 'por grupo', pt: 'por grupo' },
+const PRICE_UNITS: Record<Offer['priceMode'], Localized> = {
+  night: { es: 'por noche', pt: 'por noite', en: 'per night' },
+  person: { es: 'por persona', pt: 'por pessoa', en: 'per person' },
+  ticket: { es: 'por entrada', pt: 'por ingresso', en: 'per ticket' },
+  group: { es: 'por grupo', pt: 'por grupo', en: 'per group' },
 };
 
 const CATEGORY_ORDER: OfferCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
@@ -38,14 +38,18 @@ export function sharedOfferToOffer(
     (sum, item) => sum + Math.max(0, item.total_units - item.held_units - item.sold_units),
     0,
   );
-  const same = (text: string) => ({ es: text, pt: text });
+  const same = (text: string): Localized => ({ es: text, pt: text, en: text });
   const description = shared.description?.trim() ?? '';
   const location = shared.location?.trim() ?? '';
   const meetingPoint = shared.meeting_point?.trim() ?? '';
   const schedule = shared.schedule?.trim() ?? '';
-  const missing = {
+  const freeUnitsByDate = ownInventory
+    ? Object.fromEntries(ownInventory.map(item => [item.service_date, Math.max(0, item.total_units - item.held_units - item.sold_units)]))
+    : undefined;
+  const missing: Localized<string[]> = {
     es: [...(description ? [] : ['Descripción del proveedor']), 'Qué incluye', 'Política de cancelación'],
     pt: [...(description ? [] : ['Descrição do fornecedor']), 'O que inclui', 'Política de cancelamento'],
+    en: [...(description ? [] : ['Provider description']), "What's included", 'Cancellation policy'],
   };
   return {
     id: `${SHARED_OFFER_PREFIX}${shared.id}`,
@@ -68,13 +72,17 @@ export function sharedOfferToOffer(
       : {
           es: 'Oferta publicada por un proveedor. La disponibilidad y el precio se confirman al cotizar.',
           pt: 'Oferta publicada por um fornecedor. A disponibilidade e o preço são confirmados na cotação.',
+          en: 'Offer published by a provider. Availability and price are confirmed when you get a quote.',
         },
-    includes: { es: [], pt: [] },
+    includes: { es: [], pt: [], en: [] },
     cancellation: {
       es: 'Política de cancelación pendiente de definir por Connectical.',
       pt: 'Política de cancelamento pendente de definição pela Connectical.',
+      en: 'Cancellation policy not yet defined by Connectical.',
     },
     missingFields: missing,
+    freeUnitsByDate,
+    quantityLimits: { min: shared.min_quantity ?? 1, max: shared.max_quantity ?? null },
     photos: media
       .filter(item => item.offer_id === shared.id)
       .sort((left, right) => left.position - right.position)
@@ -104,7 +112,7 @@ export function buildCatalog(
   const offers = [...sharedOffers, ...demoOffers.map(offer => ({ ...offer, source: 'demo' as const }))];
   const labels = new Map(categoryLabels.map(category => [category.id, category]));
   const categories = CATEGORY_ORDER.map(id => ({
-    ...(labels.get(id) ?? { id, label: { es: id, pt: id } }),
+    ...(labels.get(id) ?? { id, label: { es: id, pt: id, en: id } }),
     count: offers.filter(offer => offer.category === id).length,
   }));
   return {
@@ -117,4 +125,25 @@ export function buildCatalog(
       0,
     ),
   };
+}
+
+export type CatalogFilter = { date: string | null; people: number | null; favoritesOnly: boolean; favorites: ReadonlySet<string> };
+
+// Filtros del explorador. Fecha: una oferta compartida necesita cupo libre publicado ese día (si su
+// inventario no se pudo leer, no se descarta: el portal lo confirma). Las de ejemplo no tienen
+// calendario y no se filtran por fecha. Personas: se respetan los límites por reserva cuando existen;
+// en alojamientos la cantidad son habitaciones y en ofertas por grupo son grupos, así que el número de
+// personas no las descarta.
+export function filterOffers(offers: Offer[], filter: CatalogFilter): Offer[] {
+  return offers.filter(offer => {
+    if (filter.favoritesOnly && !filter.favorites.has(offer.id)) return false;
+    if (filter.date && offer.source === 'shared' && offer.freeUnitsByDate) {
+      if ((offer.freeUnitsByDate[filter.date] ?? 0) < 1) return false;
+    }
+    if (filter.people && (offer.priceMode === 'person' || offer.priceMode === 'ticket') && offer.quantityLimits) {
+      const { min, max } = offer.quantityLimits;
+      if (filter.people < min || (max !== null && filter.people > max)) return false;
+    }
+    return true;
+  });
 }

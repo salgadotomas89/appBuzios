@@ -246,3 +246,66 @@ test('does not let a stored past date be confirmed until it is moved to today or
   pressText(root, 'Confirmar reserva demo');
   expect(hasText(root, 'BF-DEMO-001')).toBe(true);
 });
+
+test('saves favorites on the device and filters the catalog by them', async () => {
+  const renderer = await renderApp();
+  const root = renderer.root;
+  pressText(root, 'Barcos');
+  pressText(root, 'Escuna por 12 playas');
+  pressAccessible(root, 'Guardar en favoritos');
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+  expect(JSON.parse(mockStorage.get('@buzios-flow/favorites-v1') ?? '[]')).toEqual(['barco-escuna']);
+  ReactTestRenderer.act(() => renderer.unmount());
+
+  const reopened = await renderApp(false);
+  pressText(reopened.root, 'Explorar ofertas');
+  pressText(reopened.root, 'Favoritos');
+  expect(hasText(reopened.root, '1 ofertas de ejemplo')).toBe(true);
+  expect(hasText(reopened.root, 'Escuna por 12 playas')).toBe(true);
+  pressText(reopened.root, 'Escuna por 12 playas');
+  expect(reopened.root.findAll(node => node.props.accessibilityLabel === 'Quitar de favoritos').length).toBeGreaterThan(0);
+});
+
+test('switches to English with a pending-review notice and keeps prices in BRL', async () => {
+  const renderer = await renderApp();
+  const root = renderer.root;
+  pressAccessible(root, 'English');
+  expect(hasText(root, 'Your trip to Búzios')).toBe(true);
+  expect(hasText(root, 'English translation pending professional review.')).toBe(true);
+  pressText(root, 'Boats');
+  expect(hasText(root, '1 sample offers')).toBe(true);
+  pressText(root, 'Schooner tour of 12 beaches');
+  expect(hasText(root, 'SAMPLE · NOT A REAL BOOKING')).toBe(true);
+  expect(hasText(root, 'Free cancellation up to 24 h before. Subject to sea conditions.')).toBe(true);
+  expect(hasText(root, 'R$ 89,00')).toBe(true);
+  pressText(root, 'Add to My trip');
+  expect(hasText(root, 'Confirm demo booking')).toBe(true);
+});
+
+test('shows bookings stored before English existed using the Spanish snapshot', async () => {
+  mockStorage.clear();
+  mockStorage.set('@buzios-flow/demo-state-v1', JSON.stringify({
+    schemaVersion: 1,
+    tripItems: [],
+    bookings: [{
+      id: 'BF-DEMO-007', channel: 'app-demo', confirmedAt: '2026-11-01T12:00:00Z',
+      lines: [{
+        item: { id: 'l1', offerId: 'barco-escuna', date: '2099-01-10', quantity: 1, nights: 1 },
+        offerId: 'barco-escuna', title: { es: 'Escuna antigua', pt: 'Escuna antiga' },
+        location: { es: 'Porto', pt: 'Porto' }, category: 'barcos', priceMode: 'person',
+        priceUnit: { es: 'por persona', pt: 'por pessoa' }, unitPriceCents: 8900, subtotalCents: 8900,
+      }],
+      quote: { pricingVersion: 'demo', serviceFeeRate: 600, settlementMode: 'b2b_conciliation', subtotalCents: 8900, serviceFeeCents: 534, travelerTotalCents: 9434, providerCommissionCents: 1602, grossIncomeCents: 2136, gatewayCostCents: 0, conversionCostCents: 0, operatingReserveCents: 0, contributionMarginCents: 2136, policy: {} },
+    }],
+    serviceFeeRate: 600,
+  }));
+  const renderer = await renderApp(false);
+  const root = renderer.root;
+  pressAccessible(root, 'English');
+  pressText(root, 'My trip');
+  pressText(root, 'BF-DEMO-007');
+  expect(hasText(root, 'Escuna antigua')).toBe(true);
+  expect(hasText(root, 'por persona')).toBe(true);
+});

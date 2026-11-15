@@ -1,6 +1,6 @@
 # Matriz de estado por módulo — Búzios Flow
 
-Actualizada el 14-11-2026 (tarde), sobre la rama `work/dev-2026-11-14c`. "Probado" significa con pruebas automatizadas
+Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
 InsForge remoto no tiene aplicada ninguna migración.
 
@@ -23,22 +23,24 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Tipos de cambio | SIMULADO | Tasas fijas etiquetadas como demostración; sin fuente cambiaria real | P2 |
 | Panel admin: finanzas | COMPLETO | Retenido no es ingreso, bruto/neto/cargo/comisión conciliados, estados inconsistentes | — |
 | Panel admin: proveedores, tasas, auditoría | COMPLETO | Pausa/reactivación, tasas por producto, auditoría con autoría solo por RPC | — |
-| Panel admin: usuarios, promociones, aprobación de publicaciones | NO IMPLEMENTADO | Los roles se asignan por SQL (PROVISIONING) | P2 |
+| Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |
 | Portal proveedor: descripción, ubicación, horario, límites por reserva, ingresos | COMPLETO | Migración 0009 y resumen de ingresos | — |
-| Portal proveedor: fotos y políticas propias | NO IMPLEMENTADO | Fotos esperan bucket confirmado e imágenes autorizadas; políticas esperan la política comercial | P2 |
-| Registro de proveedores | NO IMPLEMENTADO | Alta manual por la administración | P2 |
-| Autenticación correo/contraseña | PARCIAL | Implementada con el SDK; no probada contra el tenant. **La sesión no persiste al reabrir la app** (el SDK la guarda en memoria); ver [autenticacion-oauth.md](autenticacion-oauth.md) | P1, decisión de seguridad |
+| Fotos de ofertas | PARCIAL | Política de imágenes, adaptador de almacenamiento, metadatos en SQL (202611150003) y galería; **sin bucket confirmado** (adaptador desactivado) y sin selector de fotos en el teléfono (requiere otra dependencia nativa) | P1, bloqueado por tenant |
+| Políticas propias del proveedor | NO IMPLEMENTADO | Esperan la política comercial | Decisión comercial |
+| Registro de proveedores | COMPLETO | Solicitud del turista, revisión admin con comisión explícita, estado visible para el solicitante | — |
+| Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); probada con dobles y compilada en iOS; **no probada en dispositivo ni contra el tenant** ([autenticacion-oauth.md](autenticacion-oauth.md)) | P1 |
 | OAuth | BLOQUEADO | No configurado; contrato PKCE y URI de retorno propuestos en [autenticacion-oauth.md](autenticacion-oauth.md) | Decisión humana |
-| Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado); probado con mocks | Bloqueado por tenant |
+| Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado); legible sin sesión desde 202611150004 (antes fallaba para visitantes) | Bloqueado por tenant |
 | Categorías | COMPLETO | Pousadas, barcos, noche/discotecas, buggy y experiencias VIP (0007) | — |
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
-| Fotos, mapas, favoritos, promociones | NO IMPLEMENTADO | No hay fotografías autorizadas ni proveedor de mapas elegido | P2 |
+| Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |
+| Mapas | NO IMPLEMENTADO | Sin proveedor de mapas elegido | P2 |
 | Notificaciones y comprobantes | NO IMPLEMENTADO | Requiere proveedor de correo/push | P2 |
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
-| Inglés | NO IMPLEMENTADO | Arquitectura preparada (`Record<Language, …>`); traducción pendiente de revisión humana | P2 |
+| Inglés | PARCIAL | Interfaz y contenido de ejemplo traducidos, con aviso visible de traducción pendiente de revisión profesional; términos legales no aprobados en inglés | Revisión humana |
 | Privacidad de identificadores y comisiones | COMPLETO | 0005 y 0010: el proveedor no lee uuid de turistas (tampoco en cotizaciones) y el turista no recibe la comisión B2B en ninguna lectura ni respuesta; sondas de fuga y verificación automática | P0 hecho |
 | iOS | PARCIAL | Build Debug para simulador compila; **no ejecutado**: CoreSimulator desactualizado | Bloqueado (equipo) |
-| Android | BLOQUEADO | Sin JDK 17 ni Android SDK en el equipo; pasos en [entorno-movil.md](entorno-movil.md). El build release firma con la clave debug de la plantilla | Bloqueado (equipo) |
+| Android | BLOQUEADO | Sin JDK 17 ni Android SDK; `scripts/setup-android-env.sh` lo instala con aprobación. El release ya no firma con la clave debug (cambio de Gradle sin compilar aquí) | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |
 | Despliegue InsForge | BLOQUEADO | Tenant sin confirmar; runbook y preflight listos | Decisión humana |

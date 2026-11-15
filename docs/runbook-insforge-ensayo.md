@@ -56,6 +56,11 @@ Ensayo local de este paso: `npm run test:shared-reservations` (base vacía) y `n
 
 - [ ] [`supabase/checks/verify_migrations.sql`](../supabase/checks/verify_migrations.sql): **todas** las filas con `ok = true`.
 - [ ] [`supabase/checks/reconcile_inventory.sql`](../supabase/checks/reconcile_inventory.sql): **ninguna fila**.
+- [ ] [`supabase/checks/schema_inventory.sql`](../supabase/checks/schema_inventory.sql): copiar el resultado a un archivo y
+      compararlo con [`expected_schema_inventory.txt`](../supabase/checks/expected_schema_inventory.txt)
+      (`diff -u expected_schema_inventory.txt resultado.txt`). Debe ser idéntico: una diferencia indica una migración
+      pendiente, aplicada a medias o un cambio hecho a mano en el tenant.
+- **Antes de aplicar** (con el preflight) también se puede ejecutar el inventario: en un tenant nuevo no devuelve filas.
 
 ## 4. Cuentas de ensayo
 
@@ -78,6 +83,17 @@ resto se procesa y la ejecución queda como `partial`.
   en su documentación cómo se autentica, sin poner la clave en la app.
 - Comprobación: en el portal, como admin, la sección "Barrido de retenciones vencidas" debe mostrar una última
   ejecución correcta reciente y 0 retenciones vencidas en espera.
+
+## 5b. Fotos (cuando el bucket esté confirmado)
+
+Las fotos no se pueden registrar hasta configurar la URL pública del bucket (solo `https`). La base de datos construye
+cada URL como base + clave, así que ningún cliente puede apuntar una foto a otro servidor:
+
+```sql
+insert into public.connectical_settings (key, value)
+values ('media_public_base_url', '"https://<host-del-bucket>/<ruta>/"')
+on conflict (key) do update set value = excluded.value, updated_at = now();
+```
 
 ## 6. Activar el catálogo compartido en un build de ensayo
 

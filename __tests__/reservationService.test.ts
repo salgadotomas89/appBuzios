@@ -78,7 +78,7 @@ it('sends refunds to the admin RPC and maps its errors', async () => {
 declare const __dirname: string;
 const fs: { readdirSync(path: string): string[]; readFileSync(path: string, encoding: 'utf8'): string } = require('fs');
 
-it('has Spanish and Portuguese text for every error code raised by the migrations', () => {
+it('has Spanish, Portuguese and English text for every error code raised by the migrations', () => {
   const dir = `${__dirname}/../supabase/migrations`;
   const raised = new Set<string>();
   for (const file of fs.readdirSync(dir).filter(name => name.endsWith('.sql'))) {
@@ -87,7 +87,7 @@ it('has Spanish and Portuguese text for every error code raised by the migration
     }
   }
   expect(raised.size).toBeGreaterThan(20);
-  const missing = [...raised].filter(code => !(code in portalCopy.es.errors) || !(code in portalCopy.pt.errors));
+  const missing = [...raised].filter(code => (['es', 'pt', 'en'] as const).some(language => !(code in portalCopy[language].errors)));
   expect(missing).toEqual([]);
 });
 

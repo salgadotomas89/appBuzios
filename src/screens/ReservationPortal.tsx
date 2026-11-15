@@ -514,6 +514,7 @@ export function ReservationPortal({
         </Pressable>
       </View>
       <Text style={styles.notice}>{words.notice}</Text>
+      {words.translationNotice ? <Text style={styles.warning}>{words.translationNotice}</Text> : null}
       {!role ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{words.accountAccess}</Text>

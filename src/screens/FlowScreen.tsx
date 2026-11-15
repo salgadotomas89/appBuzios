@@ -16,7 +16,8 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
-import { CATEGORY_ICONS, type Catalog } from '../data/catalog';
+import { CATEGORY_ICONS, filterOffers, type Catalog } from '../data/catalog';
+import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
@@ -79,6 +80,14 @@ const copy = {
     rooms: 'Habitaciones',
     nights: 'Noches',
     addTrip: 'Agregar a Mi viaje',
+    favorites: 'Favoritos',
+    addFavorite: 'Guardar en favoritos',
+    removeFavorite: 'Quitar de favoritos',
+    anyDate: 'Cualquier fecha',
+    chooseDate: 'Elegir fecha',
+    anyPeople: 'Cualquier cantidad',
+    choosePeople: 'Personas',
+    filterHint: 'La fecha filtra solo ofertas con cupo publicado; los ejemplos no tienen calendario.',
     pastDate: 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.',
     operations: 'Reservas compartidas · acceso de operaciones',
     previousDay: 'Día anterior',
@@ -131,6 +140,7 @@ const copy = {
     unitRooms: 'habitaciones',
     stayDate: 'Fecha de entrada',
     commissionLabel: 'Comisión de proveedor ref.',
+    translationNotice: '',
     days: ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'],
     months: [
       'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -176,6 +186,14 @@ const copy = {
     rooms: 'Quartos',
     nights: 'Noites',
     addTrip: 'Adicionar à Minha viagem',
+    favorites: 'Favoritos',
+    addFavorite: 'Salvar nos favoritos',
+    removeFavorite: 'Remover dos favoritos',
+    anyDate: 'Qualquer data',
+    chooseDate: 'Escolher data',
+    anyPeople: 'Qualquer quantidade',
+    choosePeople: 'Pessoas',
+    filterHint: 'A data filtra só ofertas com vagas publicadas; os exemplos não têm calendário.',
     pastDate: 'Esta data já passou em Búzios. Escolha outra para confirmar.',
     operations: 'Reservas compartilhadas · acesso de operações',
     previousDay: 'Dia anterior',
@@ -228,13 +246,128 @@ const copy = {
     unitRooms: 'quartos',
     stayDate: 'Data de entrada',
     commissionLabel: 'Comissão do parceiro ref.',
+    translationNotice: '',
     days: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'],
     months: [
       'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
       'jul', 'ago', 'set', 'out', 'nov', 'dez',
     ],
   },
+  en: {
+    title: 'Your trip to Búzios',
+    location: 'Búzios, Brazil · plan before you arrive',
+    offerSummary: 'experiences to discover',
+    savings: 'Up to',
+    categories: 'Choose your plan',
+    featured: 'Ideas for your trip',
+    explore: 'Explore offers',
+    all: 'All',
+    search: 'Search by name or place',
+    results: 'sample offers',
+    sharedResults: 'offers',
+    noResults: 'No offers match that search.',
+    noCategory: 'No offers in this category yet.',
+    example: 'SAMPLE · NOT A REAL BOOKING',
+    sharedExample: 'PUBLISHED OFFER · BOOKED IN THE PORTAL WITH SIMULATED PAYMENT',
+    sharedAvailable: 'Availability published by the provider',
+    sharedUnavailable: 'No availability published',
+    sharedUnknown: 'Availability to be confirmed in the portal',
+    bookInPortal: 'Book in the portal',
+    catalogFallback: 'Published offers could not be loaded; showing the sample catalog only.',
+    catalogLoading: 'Loading published offers…',
+    available: 'Available in demo',
+    limited: 'Limited spots · demo',
+    unavailable: 'Not available',
+    incomplete: 'Incomplete details',
+    about: 'About this experience',
+    includes: "What's included",
+    conditions: 'Cancellation and terms',
+    meeting: 'Meeting point',
+    schedule: 'Schedule',
+    duration: 'Duration',
+    route: 'Route',
+    ticket: 'Ticket type',
+    date: 'Date',
+    quantity: 'Quantity',
+    rooms: 'Rooms',
+    nights: 'Nights',
+    addTrip: 'Add to My trip',
+    favorites: 'Favorites',
+    addFavorite: 'Save to favorites',
+    removeFavorite: 'Remove from favorites',
+    anyDate: 'Any date',
+    chooseDate: 'Choose date',
+    anyPeople: 'Any number',
+    choosePeople: 'People',
+    filterHint: 'The date filter only applies to offers with published availability; samples have no calendar.',
+    pastDate: 'This date has already passed in Búzios. Choose another one to confirm.',
+    operations: 'Shared reservations · operations access',
+    previousDay: 'Previous day',
+    nextDay: 'Next day',
+    decreaseQuantity: 'Decrease quantity',
+    increaseQuantity: 'Increase quantity',
+    decreaseNights: 'Remove one night',
+    increaseNights: 'Add one night',
+    missing: 'Information missing before booking',
+    trip: 'My trip',
+    emptyTrip: 'Your trip starts here',
+    emptyTripNote: 'Explore sample offers and add them to your itinerary.',
+    subtotal: 'Subtotal',
+    serviceFee: 'Service fee · demo',
+    pricingLab: 'Internal pricing rehearsal',
+    baseCase: 'Base',
+    internalOnly: 'Internal only · not charged to the traveler',
+    grossIncome: 'Gross income',
+    gatewayCost: 'Gateway cost · assumption',
+    conversionCost: 'Conversion cost · assumption',
+    operatingReserve: 'Operating reserve · assumption',
+    contributionMargin: 'Contribution margin',
+    commissionRates: 'Reference provider commissions',
+    commissionSummary: 'Guesthouses 10% · Boats 18% · Nightlife 15% · VIP 18–20%',
+    buggyCommission: 'Buggy: pending',
+    pending: 'Pending',
+    total: 'Estimated total',
+    providerFee: 'Partner commission (internal reference)',
+    notIncluded: "Not added to the traveler's total",
+    providerPending: 'Buggy commission not yet defined',
+    remove: 'Remove',
+    confirm: 'Confirm demo booking',
+    bookingHistory: 'Demo bookings',
+    noBookings: 'You have no confirmed bookings yet.',
+    confirmation: 'Plan confirmed!',
+    demoConfirmed: 'Demo booking · no real payment or availability',
+    bookingCode: 'Demo code',
+    simulatedPayment: 'Simulated payment',
+    brlOperation: 'Charged in BRL',
+    splitAuthorized: 'authorized split',
+    b2bConciliation: 'B2B reconciliation',
+    demoFx: 'USD conversion with a fixed demo rate, not a current quote',
+    backTrip: 'Back to My trip',
+    backHome: 'Keep exploring',
+    home: 'Home',
+    tripTab: 'My trip',
+    unitPeople: 'people',
+    unitTickets: 'tickets',
+    unitGroups: 'groups',
+    unitRooms: 'rooms',
+    stayDate: 'Check-in date',
+    commissionLabel: 'Provider commission ref.',
+    translationNotice: 'English translation pending professional review. Prices are charged in BRL; terms in Spanish or Portuguese prevail.',
+    days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    months: [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ],
+  },
 } satisfies Record<Language, Record<string, string | string[]>>;
+
+// Cada idioma se anuncia en su propio idioma para los lectores de pantalla.
+const LANGUAGE_NAMES: Record<Language, string> = { es: 'Español', pt: 'Português', en: 'English' };
+
+// Reservas demo guardadas antes de añadir inglés solo traen es y pt: se muestra el español.
+function snapshotText(text: Partial<Record<Language, string>>, language: Language): string {
+  return text[language] ?? text.es ?? '';
+}
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -257,6 +390,10 @@ const PAYMENT_STATE_LABELS: Record<Language, Record<PaymentStatus, string>> = {
   pt: {
     pending: 'pendente', approved: 'aprovado', rejected: 'recusado', requires_action: 'requer ação',
     expired: 'expirado', refunded: 'reembolsado', partially_refunded: 'reembolso parcial', cancelled: 'cancelado',
+  },
+  en: {
+    pending: 'pending', approved: 'approved', rejected: 'declined', requires_action: 'action required',
+    expired: 'expired', refunded: 'refunded', partially_refunded: 'partially refunded', cancelled: 'cancelled',
   },
 };
 
@@ -294,6 +431,10 @@ export function FlowScreen() {
   const [selectedCategory, setSelectedCategory] = useState<OfferCategory | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [filterDate, setFilterDate] = useState<string | null>(null);
+  const [filterPeople, setFilterPeople] = useState<number | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tripItems, setTripItems] = useState<TripItem[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [serviceFeeRate, setServiceFeeRate] = useState<DemoServiceFeeRate>(
@@ -343,7 +484,25 @@ export function FlowScreen() {
       serviceFeeRate,
     }).catch(error => console.warn('No se pudo guardar el viaje demo', error));
   }, [bookings, serviceFeeRate, storageReady, tripItems]);
-  const matchingOffers = catalog.offers.filter(offer => {
+  useEffect(() => {
+    let active = true;
+    loadFavorites().then(ids => {
+      if (active) setFavorites(ids);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function onToggleFavorite(offerId: string) {
+    setFavorites(current => {
+      const next = toggleFavorite(current, offerId);
+      saveFavorites(next).catch(error => console.warn('No se pudieron guardar los favoritos', error));
+      return next;
+    });
+  }
+
+  const searchedOffers = catalog.offers.filter(offer => {
     const categoryMatch = !selectedCategory || offer.category === selectedCategory;
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const searchMatch =
@@ -352,6 +511,12 @@ export function FlowScreen() {
         .toLocaleLowerCase()
         .includes(normalizedQuery);
     return categoryMatch && searchMatch;
+  });
+  const matchingOffers = filterOffers(searchedOffers, {
+    date: filterDate,
+    people: filterPeople,
+    favoritesOnly,
+    favorites: new Set(favorites),
   });
 
   function openExplore(category?: OfferCategory | null) {
@@ -496,6 +661,13 @@ export function FlowScreen() {
             onOffer={openOffer}
             onBack={() => changeScreen('home')}
             onLanguage={setLanguage}
+            today={today}
+            filterDate={filterDate}
+            onFilterDate={setFilterDate}
+            filterPeople={filterPeople}
+            onFilterPeople={setFilterPeople}
+            favoritesOnly={favoritesOnly}
+            onFavoritesOnly={setFavoritesOnly}
           />
         ) : null}
         {screen === 'detail' && selectedOffer ? (
@@ -510,6 +682,8 @@ export function FlowScreen() {
             onQuantity={setDraftQuantity}
             onNights={setDraftNights}
             today={today}
+            favorite={favorites.includes(selectedOffer.id)}
+            onToggleFavorite={() => onToggleFavorite(selectedOffer.id)}
             onAdd={() => addToTrip(selectedOffer)}
             addLabel={selectedOffer.source === 'shared' ? (words.bookInPortal as string) : (words.addTrip as string)}
             onBack={() => changeScreen('explore')}
@@ -586,11 +760,12 @@ function Header({
       </View>
       {onLanguage ? (
         <View style={styles.languageToggle}>
-          {(['es', 'pt'] as const).map(option => (
+          {(['es', 'pt', 'en'] as const).map(option => (
             <Pressable
               key={option}
               accessibilityRole="button"
               accessibilityState={{ selected: language === option }}
+              accessibilityLabel={LANGUAGE_NAMES[option]}
               onPress={() => onLanguage(option)}
               style={[styles.languageButton, language === option && styles.languageButtonActive]}
             >
@@ -633,6 +808,7 @@ function HomeView({
   return (
     <>
       <Header language={language} words={words} onLanguage={onLanguage} />
+      {words.translationNotice ? <Text style={styles.exampleCaption}>{words.translationNotice}</Text> : null}
       <View style={styles.hero}>
         <Text style={styles.heroKicker}>BÚZIOS · BRASIL</Text>
         <Text style={styles.heroTitle}>{words.title}</Text>
@@ -689,6 +865,13 @@ function ExploreView({
   onOffer,
   onBack,
   onLanguage,
+  today,
+  filterDate,
+  onFilterDate,
+  filterPeople,
+  onFilterPeople,
+  favoritesOnly,
+  onFavoritesOnly,
 }: {
   language: Language;
   words: Words;
@@ -702,6 +885,13 @@ function ExploreView({
   onOffer: (offer: Offer) => void;
   onBack: () => void;
   onLanguage: (language: Language) => void;
+  today: string;
+  filterDate: string | null;
+  onFilterDate: (date: string | null) => void;
+  filterPeople: number | null;
+  onFilterPeople: (people: number | null) => void;
+  favoritesOnly: boolean;
+  onFavoritesOnly: (value: boolean) => void;
 }) {
   return (
     <>
@@ -726,6 +916,30 @@ function ExploreView({
           />
         ))}
       </ScrollView>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        <FilterPill label={words.favorites as string} active={favoritesOnly} onPress={() => onFavoritesOnly(!favoritesOnly)} />
+        <FilterPill
+          label={(filterDate ? words.anyDate : words.chooseDate) as string}
+          active={false}
+          onPress={() => onFilterDate(filterDate ? null : today)}
+        />
+        <FilterPill
+          label={(filterPeople ? words.anyPeople : words.choosePeople) as string}
+          active={false}
+          onPress={() => onFilterPeople(filterPeople ? null : 2)}
+        />
+      </ScrollView>
+      {filterDate ? <DateStepper value={filterDate} min={today} language={language} onChange={onFilterDate} /> : null}
+      {filterPeople ? (
+        <NumberStepper
+          value={filterPeople}
+          min={1}
+          max={20}
+          onChange={onFilterPeople}
+          labels={[words.decreaseQuantity as string, words.increaseQuantity as string]}
+        />
+      ) : null}
+      {filterDate || filterPeople ? <Text style={styles.exampleCaption}>{words.filterHint}</Text> : null}
       <CatalogNotice source={catalogSource} words={words} />
       <Text style={styles.resultCount}>{offers.length} {catalogSource === 'shared' ? words.sharedResults : words.results}</Text>
       {offers.length ? (
@@ -769,6 +983,8 @@ function DetailView({
   addLabel,
   onBack,
   today,
+  favorite,
+  onToggleFavorite,
 }: {
   offer: Offer;
   language: Language;
@@ -783,6 +999,8 @@ function DetailView({
   addLabel: string;
   onBack: () => void;
   today: string;
+  favorite: boolean;
+  onToggleFavorite: () => void;
 }) {
   const canBook = offer.availability === 'available' || offer.availability === 'limited';
   const categorySpecific = [
@@ -820,6 +1038,15 @@ function DetailView({
       )}
       <Text style={styles.demoLabel}>{offer.source === 'shared' ? words.sharedExample : words.example}</Text>
       <Text style={styles.detailTitle}>{offer.title[language]}</Text>
+      <Pressable
+        onPress={onToggleFavorite}
+        accessibilityRole="button"
+        accessibilityState={{ selected: favorite }}
+        accessibilityLabel={(favorite ? words.removeFavorite : words.addFavorite) as string}
+        style={styles.favoriteButton}
+      >
+        <Text style={styles.favoriteText}>{favorite ? '♥' : '♡'} {favorite ? words.removeFavorite : words.addFavorite}</Text>
+      </Pressable>
       <Text style={styles.detailAvailability}>{availabilityLabel(offer, language)}</Text>
       {offer.price !== undefined ? (
         <View style={styles.detailPriceRow}>
@@ -1045,10 +1272,10 @@ function ConfirmationView({
         {booking.lines.map(line => (
           <View key={line.item.id} style={styles.confirmItem}>
             <Text style={styles.tripCategory}>{formatDate(line.item.date, language)} · {categoryName(line.category, language)}</Text>
-            <Text style={styles.tripTitle}>{line.title[language]}</Text>
+            <Text style={styles.tripTitle}>{snapshotText(line.title, language)}</Text>
             <Text style={styles.tripSubtitle}>
               {quantityDescription(line.item, line.priceMode, words)} · {brlFromCents(line.subtotalCents)}
-              {line.priceUnit ? ` · ${line.priceUnit[language]}` : ''}
+              {line.priceUnit ? ` · ${snapshotText(line.priceUnit, language)}` : ''}
             </Text>
           </View>
         ))}
@@ -1410,6 +1637,8 @@ const styles = StyleSheet.create({
   emptyTitle: { textAlign: 'center', fontSize: 18, fontWeight: '600', color: colors.text },
   emptyNote: { marginTop: 8, textAlign: 'center', fontSize: 13, lineHeight: 19, color: colors.muted },
   photoStrip: { gap: 10, marginTop: 16 },
+  favoriteButton: { alignSelf: 'flex-start', paddingVertical: 8 },
+  favoriteText: { color: colors.sea, fontSize: 14, fontWeight: '700' },
   photo: { height: 200, borderRadius: radius.card, backgroundColor: colors.track },
   detailArtwork: { minHeight: 150, marginTop: 16, alignItems: 'center', justifyContent: 'center', borderRadius: radius.card, backgroundColor: colors.sea },
   detailIcon: { width: 68, height: 68, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },

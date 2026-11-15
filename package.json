@@ -9,7 +9,8 @@
     "start": "react-native start",
     "test": "jest",
     "test:shared-reservations": "sh scripts/test-shared-reservations.sh",
-    "test:migration-upgrade": "sh scripts/test-migration-upgrade.sh"
+    "test:migration-upgrade": "sh scripts/test-migration-upgrade.sh",
+    "test:schema-inventory": "sh scripts/check-schema-inventory.sh"
   },
   "dependencies": {
     "@insforge/sdk": "^1.5.2",

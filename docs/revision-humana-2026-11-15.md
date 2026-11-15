@@ -58,6 +58,21 @@ contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authe
   migraciones en el tenant de ensayo y comprobar que las ofertas publicadas allí son de prueba. Las ofertas reales se
   reservan en el portal; el viaje demo no consume cupo.
 
+## 5c. Decisiones nuevas de la segunda jornada (14-11, noche)
+
+- **Sesión persistente en el móvil:** implementada con `react-native-keychain` sobre el flujo móvil del SDK
+  (`isServerMode`, marcado obsoleto por InsForge). Probarla en iPhone y Android reales con la lista de
+  [autenticacion-oauth.md](autenticacion-oauth.md#prueba-en-dispositivo-cuando-haya-simulador-o-teléfono) y confirmar
+  con InsForge que el flujo móvil emite y rota el refresh token.
+- **Moderación previa de ofertas:** `connectical_settings.offer_moderation_required` está en `false` (las ofertas de
+  proveedores aprobados se publican al momento; la administración puede suspenderlas). Decidir si cada oferta nueva
+  debe esperar aprobación.
+- **Comisión al aprobar proveedores:** la consola exige escribirla porque no hay tasas aprobadas.
+- **Fotos:** confirmar el bucket de almacenamiento del tenant, quién aporta las imágenes y su autorización, y
+  aprobar una dependencia nativa para elegir fotos desde el teléfono.
+- **Campañas:** solo contenido. Si se quieren descuentos reales, decidir cómo afectan a precio, cargo y comisión.
+- **Inglés:** revisión profesional de la traducción; los términos legales no se consideran aprobados en inglés.
+
 ## 6. GitHub
 
 - `gh` no tiene sesión en este equipo, así que no se pudo abrir el PR desde la terminal. La rama

@@ -40,3 +40,5 @@ jobs:
       - run: npm run test:shared-reservations
       # Actualización desde etapas intermedias con datos creados por los RPC de cada etapa.
       - run: npm run test:migration-upgrade
+      # El inventario que el operador compara con el tenant debe seguir a las migraciones.
+      - run: npm run test:schema-inventory

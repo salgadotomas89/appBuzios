@@ -99,6 +99,10 @@ with checks(name, ok) as (
           and not has_table_privilege('authenticated', 'public.connectical_admin_audit_log', 'SELECT')
           and not has_table_privilege('authenticated', 'public.connectical_incidents', 'SELECT')
           and not has_table_privilege('authenticated', 'public.connectical_campaigns', 'SELECT')
+          and not has_column_privilege('authenticated', 'public.connectical_offer_media', 'storage_key', 'SELECT')
+          and not has_column_privilege('anon', 'public.connectical_offer_media', 'storage_key', 'SELECT')
+          and not has_column_privilege('authenticated', 'public.connectical_offer_media', 'created_by', 'SELECT')
+          and not has_column_privilege('anon', 'public.connectical_offer_media', 'created_by', 'SELECT')
           and not has_table_privilege('authenticated', 'public.connectical_commission_references', 'SELECT')
           and not has_table_privilege('authenticated', 'public.connectical_payment_events', 'SELECT'))),
     -- Comprueba que existe una referencia por categoría; aprobarlas es una decisión comercial legítima.

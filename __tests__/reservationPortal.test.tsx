@@ -72,7 +72,7 @@ async function type(root: ReactTestInstance, label: string, value: string) {
   await ReactTestRenderer.act(async () => input.props.onChangeText(value));
 }
 
-async function render(language: 'es' | 'pt' = 'es') {
+async function render(language: 'es' | 'pt' | 'en' = 'es') {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   await ReactTestRenderer.act(async () => {
     renderer = ReactTestRenderer.create(<ReservationPortal onClose={jest.fn()} language={language} />);
@@ -641,4 +641,12 @@ it('warns after sign-in when the session could not be stored on the device', asy
   await press(root, 'Iniciar sesión');
   expect(hasText(root, 'no se pudo guardar en el dispositivo')).toBe(true);
   expect(hasText(root, 'Mis reservas')).toBe(true);
+});
+
+it('renders the portal in English with the translation notice', async () => {
+  mocked.getSharedRole.mockResolvedValue(null);
+  const root = await render('en');
+  expect(hasText(root, 'Account access')).toBe(true);
+  expect(hasText(root, 'English translation pending professional review.')).toBe(true);
+  expect(hasText(root, 'Contract currency BRL · lab payments · no real charges')).toBe(true);
 });

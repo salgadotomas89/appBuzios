@@ -59,6 +59,8 @@ it('registers the uploaded photo and deletes the file if registration fails', as
   callRpc.mockResolvedValueOnce('media-1');
   await expect(addOfferPhoto(storage, OFFER, { bytes: JPEG, width: 1200, height: 900, altText: 'Quarto' })).resolves.toBe('media-1');
   expect(callRpc).toHaveBeenCalledWith('connectical_add_offer_media', expect.objectContaining({ p_offer_id: OFFER, p_content_type: 'image/jpeg', p_alt_text: 'Quarto' }));
+  // La URL la construye la base de datos: el cliente no la envía.
+  expect(callRpc.mock.calls[0][1]).not.toHaveProperty('p_url');
   expect(storage.objects.size).toBe(1);
 
   callRpc.mockRejectedValueOnce(new Error('media_limit_reached'));

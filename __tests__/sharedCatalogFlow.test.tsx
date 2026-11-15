@@ -124,3 +124,22 @@ test('shows the provider photos with their alt text in the offer detail', async 
   expect(images.length).toBeGreaterThan(0);
   expect(images[0].props.source).toEqual({ uri: 'https://cdn.example/proa.jpg' });
 });
+
+test('filters shared offers by a date with free units', async () => {
+  mocked.listSharedOffers.mockResolvedValue([
+    { id: 'o-free', provider_id: 'p-1', category: 'barcos', title: 'Con cupo', base_price_cents: 9000, price_mode: 'person', currency: 'BRL', published: true },
+    { id: 'o-full', provider_id: 'p-1', category: 'barcos', title: 'Sin cupo ese día', base_price_cents: 9000, price_mode: 'person', currency: 'BRL', published: true },
+  ]);
+  const today = jest.requireActual('../src/utils/portalInput').buziosIsoDate();
+  mocked.listPublishedAvailability.mockResolvedValue([
+    { offer_id: 'o-free', service_date: today, total_units: 4, held_units: 0, sold_units: 0, version: 1, updated_at: '' },
+    { offer_id: 'o-full', service_date: today, total_units: 2, held_units: 1, sold_units: 1, version: 1, updated_at: '' },
+  ]);
+  const root = await renderApp();
+  await pressText(root, 'Explorar ofertas');
+  expect(hasText(root, 'Sin cupo ese día')).toBe(true);
+  await pressText(root, 'Elegir fecha');
+  expect(hasText(root, 'Con cupo')).toBe(true);
+  expect(hasText(root, 'Sin cupo ese día')).toBe(false);
+  expect(hasText(root, 'La fecha filtra solo ofertas con cupo publicado; los ejemplos no tienen calendario.')).toBe(true);
+});

@@ -2,7 +2,8 @@
 -- usuarios, indicadores y campañas.
 --
 --   * Moderación: la administración suspende o reactiva ofertas; una suspendida desaparece del
---     catálogo y no se puede cotizar. Exigir aprobación previa de cada oferta nueva es una decisión de
+--     catálogo, no se puede cotizar ni retener con una cotización anterior. Una reserva ya retenida o
+--     confirmada no cambia: qué hacer con ella lo decide la administración. Exigir aprobación previa de cada oferta nueva es una decisión de
 --     negocio: queda detrás de connectical_settings.offer_moderation_required (apagado por defecto).
 --   * Registro de actividad: triggers sobre roles, proveedores, ofertas, reembolsos y solicitudes,
 --     así ningún cambio administrativo escapa al registro aunque llegue por otra vía.
@@ -170,6 +171,95 @@ begin
     v_quote.provider_commission_cents := null;
   end if;
   return v_quote;
+end;
+$$;
+
+-- Igual que en 202611140010, salvo que se vuelve a comprobar la oferta y el proveedor: una
+-- cotización emitida antes de suspender la oferta o pausar al proveedor ya no permite reservar.
+create or replace function public.connectical_create_reservation_hold(
+  p_quote_id uuid,
+  p_idempotency_key uuid
+)
+returns public.connectical_reservations
+language plpgsql security definer
+set search_path = public, auth
+as $$
+declare
+  v_quote public.connectical_quotes;
+  v_existing public.connectical_reservations;
+  v_reservation public.connectical_reservations;
+  v_nights_found integer;
+  v_nights_available integer;
+begin
+  if auth.uid() is null then raise exception 'authentication_required' using errcode = '28000'; end if;
+  select * into v_quote from public.connectical_quotes
+    where id = p_quote_id and traveler_user_id = auth.uid();
+  if not found then raise exception 'quote_not_found' using errcode = 'P0002'; end if;
+  perform public.connectical_lock_offer(v_quote.offer_id);
+
+  select * into v_existing from public.connectical_reservations
+    where traveler_user_id = auth.uid() and idempotency_key = p_idempotency_key;
+  if found then
+    if v_existing.quote_id <> p_quote_id then
+      raise exception 'idempotency_key_reused' using errcode = '23505';
+    end if;
+    return public.connectical_redact_reservation(v_existing);
+  end if;
+  if v_quote.expires_at <= now() then raise exception 'quote_expired' using errcode = 'P0001'; end if;
+  -- La cotización puede ser anterior a una suspensión, una despublicación o una pausa del proveedor.
+  if not exists (select 1 from public.connectical_offers
+                 where id = v_quote.offer_id and published and moderation_status = 'approved') then
+    raise exception 'offer_not_found' using errcode = 'P0002';
+  end if;
+  if not exists (select 1 from public.connectical_offers o join public.connectical_providers p on p.id = o.provider_id
+                 where o.id = v_quote.offer_id and p.active) then
+    raise exception 'provider_inactive' using errcode = 'P0002';
+  end if;
+  if exists (select 1 from public.connectical_reservations where quote_id = p_quote_id) then
+    raise exception 'quote_already_reserved' using errcode = '23505';
+  end if;
+  -- Quotes created by the previous create_quote may still be open while this migration lands.
+  if v_quote.nights > 30 or (v_quote.nights <> 1 and not exists (
+    select 1 from public.connectical_offers where id = v_quote.offer_id and price_mode = 'night'
+  )) then
+    raise exception 'invalid_quote_input' using errcode = '22023';
+  end if;
+
+  perform public.connectical_expire_offer_holds(v_quote.offer_id);
+
+  select count(*),
+         count(*) filter (where total_units - held_units - sold_units >= v_quote.quantity)
+    into v_nights_found, v_nights_available
+    from public.connectical_inventory
+    where offer_id = v_quote.offer_id
+      and service_date >= v_quote.service_date
+      and service_date < v_quote.service_date + v_quote.nights;
+  if v_nights_found < v_quote.nights then
+    raise exception 'inventory_not_found' using errcode = 'P0002';
+  end if;
+  if v_nights_available < v_quote.nights then
+    raise exception 'inventory_unavailable' using errcode = 'P0001';
+  end if;
+
+  insert into public.connectical_reservations (
+    quote_id, idempotency_key, offer_id, provider_id, traveler_user_id,
+    service_date, nights, quantity, status, hold_expires_at, amount_cents,
+    service_fee_rate_bps, service_fee_cents, provider_commission_rate_bps, provider_commission_cents,
+    connectical_margin_cents, quote_version
+  ) values (
+    v_quote.id, p_idempotency_key, v_quote.offer_id,
+    (select provider_id from public.connectical_offers where id = v_quote.offer_id),
+    auth.uid(), v_quote.service_date, v_quote.nights, v_quote.quantity, 'held', now() + interval '10 minutes',
+    v_quote.traveler_total_cents, v_quote.service_fee_rate_bps, v_quote.service_fee_cents,
+    v_quote.provider_commission_rate_bps, v_quote.provider_commission_cents,
+    v_quote.service_fee_cents, v_quote.quote_version
+  ) returning * into v_reservation;
+
+  perform public.connectical_adjust_stay_inventory(
+    v_quote.offer_id, v_quote.service_date, v_quote.nights, v_quote.quantity, 0);
+  insert into public.connectical_reservation_events (reservation_id, actor_user_id, event_type)
+    values (v_reservation.id, auth.uid(), 'reservation_held');
+  return public.connectical_redact_reservation(v_reservation);
 end;
 $$;
 

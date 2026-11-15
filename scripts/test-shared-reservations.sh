@@ -1076,7 +1076,11 @@ fi
 if as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', '');" >/dev/null 2>&1; then
   echo "Suspension without a reason was accepted" >&2; exit 1
 fi
+pre_suspension_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$mod_offer', current_date + 190, 1, 1, 600)).id;")
 as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', 'Fotos não autorizadas');" >/dev/null
+if as_user "$traveler_a" "select public.connectical_create_reservation_hold('$pre_suspension_quote', gen_random_uuid());" >/dev/null 2>&1; then
+  echo "A quote issued before the suspension could still hold the offer" >&2; exit 1
+fi
 hidden=$(as_user "$traveler_a" "select count(*) from public.connectical_offers where id = '$mod_offer';")
 hidden_inventory=$(as_user "$traveler_a" "select count(*) from public.connectical_inventory where offer_id = '$mod_offer';")
 owner_sees=$(as_user "$applicant" "select moderation_status from public.connectical_offers where id = '$mod_offer';")
@@ -1120,8 +1124,19 @@ my_incident=$(as_user "$traveler_a" "select status || '|' || admin_note from pub
 [ "$my_incident" = 'resolved|Reembolso parcial em análise' ] || { echo "Incident follow-up mismatch: $my_incident" >&2; exit 1; }
 users=$(as_user "$admin_user" "select count(*) filter (where role = 'admin') || '|' || count(*) filter (where role = 'provider' and user_id = '$applicant') from public.connectical_admin_list_users(null);")
 [ "$users" = '1|1' ] || { echo "Admin user list mismatch: $users" >&2; exit 1; }
-kpis=$(as_user "$admin_user" "select (k.quotes > 0) || '|' || (k.confirmed > 0) || '|' || (k.confirmed_gross_cents > 0) || '|' || (k.quote_to_confirmed_bps between 1 and 10000) from public.connectical_admin_kpis(current_date - 1, current_date + 1) k;")
-[ "$kpis" = 'true|true|true|true' ] || { echo "KPI mismatch: $kpis" >&2; exit 1; }
+kpis=$(as_user "$admin_user" "select concat_ws('|', k.quotes, k.reservations, k.confirmed, k.cancelled, k.expired, k.refunded, k.confirmed_gross_cents, k.service_fee_cents, k.commission_cents, k.refunded_cents, k.quote_to_confirmed_bps) from public.connectical_admin_kpis(current_date - 1, current_date + 1) k;")
+# Recalculado aparte por estado, directamente sobre las tablas (todo lo de la prueba cae en el periodo).
+expected_kpis=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  with r as (select * from public.connectical_reservations), q as (select count(*) as n from public.connectical_quotes)
+  select concat_ws('|', (select n from q), (select count(*) from r),
+    (select count(*) from r where status = 'confirmed'), (select count(*) from r where status = 'cancelled'),
+    (select count(*) from r where status = 'expired'), (select count(*) from r where status = 'refunded'),
+    (select coalesce(sum(amount_cents), 0) from r where status = 'confirmed'),
+    (select coalesce(sum(service_fee_cents), 0) from r where status = 'confirmed'),
+    (select coalesce(sum(provider_commission_cents), 0) from r where status = 'confirmed'),
+    (select coalesce(sum(refund_cents), 0) from r),
+    (select (count(*) filter (where status = 'confirmed') * 10000 / (select n from q)) from r));" | tail -1)
+[ "$kpis" = "$expected_kpis" ] || { echo "KPI mismatch: got $kpis expected $expected_kpis" >&2; exit 1; }
 if as_user "$admin_user" "select public.connectical_admin_kpis(current_date, current_date - 1);" >/dev/null 2>&1; then
   echo "Inverted KPI period accepted" >&2; exit 1
 fi
@@ -1136,7 +1151,12 @@ echo "PASS moderation, audit log, incidents, users, KPIs and campaigns are admin
 
 # Offer photos: metadata only, owner-or-admin writes, key bound to the offer, public only when visible.
 media_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
-add_media() { as_user "$1" "select public.connectical_add_offer_media('$mod_offer', '$2', 'https://cdn.example/$2', '$3', $4, $5, $6, '$7');"; }
+add_media() { as_user "$1" "select public.connectical_add_offer_media('$mod_offer', '$2', '$3', $4, $5, $6, '$7');"; }
+# Sin bucket configurado no se registran fotos; la URL la construye el servidor con la base configurada.
+if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto' >/dev/null 2>&1; then
+  echo "Offer media accepted without a configured storage base URL" >&2; exit 1
+fi
+docker exec "$container" psql -q -U postgres -d postgres -c "insert into public.connectical_settings (key, value) values ('media_public_base_url', '\"https://cdn.example/media/\"');"
 for actor in "$traveler_a" "$provider_user"; do
   if add_media "$actor" "$media_key" image/jpeg 2000 1200 900 'Quarto' >/dev/null 2>&1; then
     echo "Non-owner could add offer media" >&2; exit 1
@@ -1156,8 +1176,8 @@ media_id=$(add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto 
 if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Duplicada' >/dev/null 2>&1; then
   echo "Duplicate storage key accepted" >&2; exit 1
 fi
-public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
-[ "$public_media" = 'Quarto com vista para o mar' ] || { echo "Visible offer photo not readable by anon: $public_media" >&2; exit 1; }
+public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text || '|' || url from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+[ "$public_media" = "Quarto com vista para o mar|https://cdn.example/media/$media_key" ] || { echo "Visible offer photo mismatch for anon: $public_media" >&2; exit 1; }
 if docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select storage_key from public.connectical_offer_media limit 1;" >/dev/null 2>&1; then
   echo "Storage keys readable by anon" >&2; exit 1
 fi
