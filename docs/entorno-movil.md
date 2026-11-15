@@ -40,22 +40,37 @@ xcodebuild -workspace ios/OfertasApp.xcworkspace -scheme OfertasApp -configurati
 | NDK | 27.1.12297006 | No instalado |
 | Gradle / AGP | Gradle 9.4.1 (wrapper incluido), AGP 9.2.1 | Se descargan solos al compilar |
 
-Instalación sugerida (requiere aprobación; elegir la distribución de JDK que la organización prefiera):
+Instalación reproducible (requiere aprobación de quien administra el equipo):
 
-1. JDK 17, por ejemplo `brew install --cask zulu@17`.
-2. Android Studio desde developer.android.com; en SDK Manager instalar Android SDK Platform 37, Build-Tools 37.0.0,
-   NDK 27.1.12297006, Platform-Tools y una imagen de emulador.
-3. En `~/.zshrc`:
-   ```sh
-   export JAVA_HOME=$(/usr/libexec/java_home -v 17)
-   export ANDROID_HOME=$HOME/Library/Android/sdk
-   export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools
-   ```
-4. Comprobar: `npx react-native doctor`, luego `cd android && ./gradlew assembleDebug` y `npm run android`.
+```sh
+sh scripts/setup-android-env.sh            # solo comprueba y lista lo que falta
+sh scripts/setup-android-env.sh --install  # instala JDK 17 (zulu@17), command-line tools, SDK 37,
+                                           # build-tools 37.0.0, NDK 27.1.12297006 y platform-tools
+```
 
-**Antes de publicar en Google Play:** `android/app/build.gradle` firma el build `release` con `debug.keystore`
-(valor por defecto de la plantilla). Hay que crear una clave de subida propia, guardarla fuera del repositorio y
-configurar la firma de release; nunca subir la clave ni sus contraseñas a git.
+El script no edita `~/.zshrc`: imprime las líneas `JAVA_HOME` y `ANDROID_HOME` a añadir. Después:
+`npx react-native doctor`, `cd android && ./gradlew assembleDebug` y `npm run android`.
+
+**Firma de release:** desde el 15-11-2026 `android/app/build.gradle` **ya no firma el release con la clave de
+depuración**. Sin clave de subida, cualquier tarea `assemble`/`bundle`/`package` de release falla con un mensaje
+claro. Para firmar:
+
+```sh
+keytool -genkeypair -v -storetype PKCS12 -keystore ~/claves/buzios-upload.keystore \
+  -alias buzios-upload -keyalg RSA -keysize 2048 -validity 10000
+```
+
+y en `~/.gradle/gradle.properties` (fuera del repositorio; nunca en git):
+
+```properties
+BUZIOS_UPLOAD_STORE_FILE=/Users/<usuario>/claves/buzios-upload.keystore
+BUZIOS_UPLOAD_STORE_PASSWORD=...
+BUZIOS_UPLOAD_KEY_ALIAS=buzios-upload
+BUZIOS_UPLOAD_KEY_PASSWORD=...
+```
+
+Este cambio de Gradle **no se pudo compilar en este equipo** (no hay JDK): verificarlo con `./gradlew assembleDebug`
+y `./gradlew assembleRelease` (este último debe fallar sin las propiedades y firmar con ellas).
 
 ## Lo que sí se valida sin dispositivos
 
