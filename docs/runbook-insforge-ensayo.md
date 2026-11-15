@@ -56,6 +56,11 @@ Ensayo local de este paso: `npm run test:shared-reservations` (base vacía) y `n
 
 - [ ] [`supabase/checks/verify_migrations.sql`](../supabase/checks/verify_migrations.sql): **todas** las filas con `ok = true`.
 - [ ] [`supabase/checks/reconcile_inventory.sql`](../supabase/checks/reconcile_inventory.sql): **ninguna fila**.
+- [ ] [`supabase/checks/schema_inventory.sql`](../supabase/checks/schema_inventory.sql): copiar el resultado a un archivo y
+      compararlo con [`expected_schema_inventory.txt`](../supabase/checks/expected_schema_inventory.txt)
+      (`diff -u expected_schema_inventory.txt resultado.txt`). Debe ser idéntico: una diferencia indica una migración
+      pendiente, aplicada a medias o un cambio hecho a mano en el tenant.
+- **Antes de aplicar** (con el preflight) también se puede ejecutar el inventario: en un tenant nuevo no devuelve filas.
 
 ## 4. Cuentas de ensayo
 
