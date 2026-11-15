@@ -88,7 +88,7 @@ contraseñas y secretos cifrados: no compartir.
 El procedimiento quedó en `npm run backup:verified` ([scripts/backup-verified.sh](../scripts/backup-verified.sh),
 huella en `supabase/checks/database_fingerprint.sql`): vuelca con snapshot, restaura aislado y compara; falla si
 algo difiere. Las secuencias no siguen el snapshot, así que se comprueba que no queden por detrás de su columna en
-lugar de comparar su valor. Tras las migraciones 16 y 17 se ejecutó otra vez: `PASS` (1530 líneas, 69 tablas),
+lugar de comparar su valor. Tras aplicar la retención y los índices se ejecutó otra vez: `PASS` (1530 líneas, 69 tablas),
 copia en `~/RespaldosBuziosFlow/20261115_180303_snapshot/`.
 
 Recuperación ante un problema grave: `npx -y @insforge/cli backups restore e134bb27-09f2-43f3-92fa-257a31fa6864`
