@@ -81,3 +81,35 @@ if su -c "set role anon; select public.connectical_ensure_profile();" >/dev/null
   echo "anon could call ensure_profile" >&2; exit 1
 fi
 echo "PASS profiles are created from auth.users.profile on demand, only as traveler, without touching the auth schema"
+
+# Alta de administradores con scripts/promote-admin.sh, ejecutando su SQL como project_admin.
+su >/dev/null <<'SQL'
+insert into auth.users (id, email, email_verified, profile) values
+  ('d0000000-0000-4000-8000-000000000003', 'sin-verificar@compat.test', false, '{"name":"Sin verificar"}'),
+  ('d0000000-0000-4000-8000-000000000004', 'nunca-entro@compat.test', true, '{"name":"Nunca entró"}'),
+  ('d0000000-0000-4000-8000-000000000005', 'segunda@compat.test', true, '{"name":"Segunda"}');
+SQL
+as_user d0000000-0000-4000-8000-000000000003 'select public.connectical_ensure_profile();' >/dev/null
+as_user d0000000-0000-4000-8000-000000000005 'select public.connectical_ensure_profile();' >/dev/null
+promote() {
+  sh scripts/promote-admin.sh "$@" --print-sql | docker exec -i -e PGPASSWORD=local "$container" \
+    psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U project_admin -d postgres
+}
+check_promote() {
+  want="$1"; shift
+  got=$(promote "$@" | tail -1)
+  [ "$got" = "$want" ] || { echo "promote-admin $*: expected $want, got $got" >&2; exit 1; }
+}
+check_promote user_not_found nadie@compat.test --apply
+check_promote email_not_verified sin-verificar@compat.test --apply
+check_promote profile_missing nunca-entro@compat.test --apply
+check_promote would_promote ANA@compat.test
+[ "$(su -c "select count(*) from public.connectical_profiles where role = 'admin';")" = 0 ] || { echo "Dry run promoted someone" >&2; exit 1; }
+check_promote promoted ana@compat.test --apply
+check_promote already_admin ana@compat.test --apply
+check_promote admin_exists segunda@compat.test --apply
+check_promote promoted segunda@compat.test --apply --additional
+audit=$(su -c "select string_agg(coalesce(actor_user_id::text, 'sql') || ':' || action || ':' || (details->>'to'), ',' order by id) from public.connectical_admin_audit_log;")
+[ "$audit" = 'sql:role_changed:admin,sql:role_changed:admin' ] || { echo "Admin promotion not audited: $audit" >&2; exit 1; }
+if sh scripts/promote-admin.sh "x'or'1'='1@a.com" --print-sql >/dev/null 2>&1; then echo "promote-admin accepted a quote" >&2; exit 1; fi
+echo "PASS promote-admin.sh only promotes verified travelers that signed in, refuses a second admin without --additional and is audited"
