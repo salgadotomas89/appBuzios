@@ -45,9 +45,9 @@ export function createMemoryMediaStorage(baseUrl = 'memory://offer-media'): Medi
   };
 }
 
-// Bucket de InsForge para las fotos de ofertas; sus reglas de escritura están en
-// supabase/migrations/202611160003_offer_media_storage.sql (preparada; InsForge 2.3.5 no la deja aplicar con
-// db migrations up porque storage.objects pertenece a postgres).
+// Bucket de InsForge para las fotos de ofertas. Con supabase/migrations/202611160004_offer_media_storage.sql ninguna
+// sesión de usuario puede escribir en él: la app sube por la función offer-media (src/media/offerMediaGateway.ts) y
+// la base solo registra archivos que escribió la función (202611160003). Este adaptador queda para pruebas.
 export const OFFER_MEDIA_BUCKET = 'offer-media';
 
 type StorageResult<T> = { data: T | null; error: { message: string } | null };

@@ -15,7 +15,10 @@
     "test:insforge-compat": "sh scripts/test-insforge-compat.sh",
     "check:insforge-migrations": "sh scripts/sync-insforge-migrations.sh --check",
     "check:remote-schema": "sh scripts/check-remote-schema.sh",
-    "backup:verified": "sh scripts/backup-verified.sh"
+    "backup:verified": "sh scripts/backup-verified.sh",
+    "lab:up": "sh scripts/lab/insforge-lab.sh up",
+    "lab:e2e": "node --no-warnings scripts/lab/lab-e2e.mjs",
+    "lab:down": "sh scripts/lab/insforge-lab.sh down"
   },
   "dependencies": {
     "@insforge/sdk": "1.5.2",

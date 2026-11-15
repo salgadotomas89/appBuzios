@@ -1,6 +1,7 @@
 /* eslint-disable no-bitwise -- leer cabeceras binarias de imágenes */
-// Función de InsForge `offer-media`: único camino para subir, servir y borrar fotos de ofertas mientras InsForge
-// 2.3.5 no permita aplicar las políticas de storage.objects (ver docs/runbook-insforge-ensayo.md).
+// Función de InsForge `offer-media`: único camino para subir, servir y borrar fotos de ofertas. 202611160004 cierra el
+// bucket a las sesiones de usuario y 202611160003 solo registra archivos escritos con la clave de API (ver
+// docs/runbook-insforge-ensayo.md, «Storage: corrección»).
 //
 // El bucket es PRIVADO y solo esta función lo toca con la clave de API. Quién puede hacer qué lo decide la base:
 //   POST   /offers/<oferta>        bytes de la imagen (cuerpo), cabecera X-Alt-Text (URI-encoded). Sube con la
@@ -12,6 +13,10 @@
 //   POST   /maintenance/cleanup    solo con la clave de API (schedule): borra archivos sin foto registrada con más
 //                                  de una hora, incluidos los que un usuario suba directamente al bucket.
 // El tipo y las medidas se leen de los bytes (firma y cabecera del formato), nunca del nombre ni de lo declarado.
+// Antes de escribir nada en el bucket se comprueba la sesión con InsForge y se limita la frecuencia por usuario (en
+// memoria de cada instancia: frena ráfagas; el límite que vale para todas es el de la base, 30 por hora). Al servir,
+// los bytes se vuelven a validar contra el tipo registrado. La base solo registra archivos escritos con la clave de
+// API (supabase/migrations/202611160003_offer_media_gateway_only.sql), así que subir directo al bucket no publica nada.
 // Es un único archivo porque `functions deploy` publica un archivo; las reglas de imagen repiten las de
 // src/media/imagePolicy.ts y una prueba comprueba que coinciden.
 
@@ -22,6 +27,9 @@ export const MAX_IMAGE_SIDE = 6000;
 export const MAX_ALT_TEXT = 160;
 export const ORPHAN_AGE_MS = 60 * 60 * 1000;
 export const OFFER_MEDIA_BUCKET = 'offer-media';
+export const UPLOADS_PER_WINDOW = 20;
+export const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+export const MAX_CONCURRENT_UPLOADS = 2;
 
 const EXTENSIONS: Record<ImageType, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -75,6 +83,8 @@ export function readImageSize(bytes: Uint8Array, type: ImageType): { width: numb
 
 export type CallerResult = { data: unknown; error: { message: string } | null };
 export interface Caller {
+  // Usuario de la sesión según InsForge (no se fía del contenido del token); null si no es válida.
+  userId(): Promise<string | null>;
   rpc(name: string, args: Record<string, unknown>): Promise<CallerResult>;
   // URL y tipo de las fotos de la oferta que este llamante puede ver por RLS.
   visibleMedia(offerId: string): Promise<{ url: string; content_type: string }[]>;
@@ -109,6 +119,7 @@ const RPC_STATUS: Record<string, number> = {
   offer_not_owned: 403,
   media_not_found: 404,
   media_limit_reached: 409,
+  media_rate_limited: 429,
   invalid_media: 422,
   media_storage_not_configured: 503,
 };
@@ -129,18 +140,83 @@ function sameSecret(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// Los tipos de React Native no declaran Request.body; en Deno y Node es un ReadableStream.
+type BodyReader = {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(): Promise<void>;
+};
+
+// Lee el cuerpo por partes y corta al pasar del máximo, aunque no declare Content-Length (envío por bloques).
 async function readBody(req: Request): Promise<Uint8Array | null> {
   const declared = Number(req.headers.get('Content-Length') ?? '0');
   if (declared > MAX_IMAGE_BYTES) return null;
-  const bytes = new Uint8Array(await req.arrayBuffer());
-  return bytes.length > MAX_IMAGE_BYTES ? null : bytes;
+  const body = (req as unknown as { body: { getReader(): BodyReader } | null }).body;
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done || !value) break;
+    total += value.length;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+function validImage(bytes: Uint8Array): { type: ImageType; width: number; height: number } | null {
+  const type = detectImageType(bytes);
+  const size = type && readImageSize(bytes, type);
+  if (!type || !size || ![size.width, size.height].every(side => side >= MIN_IMAGE_SIDE && side <= MAX_IMAGE_SIDE)) return null;
+  return { type, ...size };
 }
 
 export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) => Promise<Response> {
   const base = deps.publicBaseUrl.replace(/\/+$/, '');
+  const recent = new Map<string, number[]>();
+  const inFlight = new Map<string, number>();
+
+  // Reserva un hueco para el usuario o dice por qué no: demasiadas en la ventana o demasiadas a la vez.
+  function admit(user: string): 'ok' | 'rate' | 'busy' {
+    const since = deps.now() - UPLOAD_WINDOW_MS;
+    const times = (recent.get(user) ?? []).filter(time => time > since);
+    if (times.length >= UPLOADS_PER_WINDOW) return 'rate';
+    if ((inFlight.get(user) ?? 0) >= MAX_CONCURRENT_UPLOADS) return 'busy';
+    recent.set(user, [...times, deps.now()]);
+    inFlight.set(user, (inFlight.get(user) ?? 0) + 1);
+    return 'ok';
+  }
+  function release(user: string) {
+    const left = (inFlight.get(user) ?? 1) - 1;
+    if (left > 0) inFlight.set(user, left);
+    else inFlight.delete(user);
+  }
 
   async function upload(req: Request, offerId: string, token: string | null) {
     if (!token || sameSecret(token, deps.apiKey)) return json(401, { error: 'authentication_required' });
+    const caller = deps.callerFor(token);
+    const user = await caller.userId();
+    if (!user) return json(401, { error: 'authentication_required' });
+    const admitted = admit(user);
+    if (admitted !== 'ok') return json(429, { error: admitted === 'rate' ? 'media_rate_limited' : 'upload_in_progress' });
+    try {
+      return await store(req, offerId, caller);
+    } finally {
+      release(user);
+    }
+  }
+
+  async function store(req: Request, offerId: string, caller: Caller) {
     const bytes = await readBody(req);
     if (!bytes) return json(413, { error: 'image_too_large' });
     if (!bytes.length) return json(422, { error: 'image_empty' });
@@ -165,7 +241,7 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
     } catch {
       return json(502, { error: 'upload_failed' });
     }
-    const { data, error } = await deps.callerFor(token).rpc('connectical_add_offer_media', {
+    const { data, error } = await caller.rpc('connectical_add_offer_media', {
       p_offer_id: offerId, p_storage_key: key, p_content_type: type, p_byte_size: bytes.length,
       p_width: size.width, p_height: size.height, p_alt_text: altText,
     });
@@ -182,7 +258,10 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
     const row = (await caller.visibleMedia(offerId)).find(media => media.url === url);
     if (!row) return json(404, { error: 'media_not_found' });
     const bytes = await deps.admin.get(key);
-    if (!bytes) return json(404, { error: 'media_not_found' });
+    // Solo se sirve lo que sigue siendo una imagen válida del tipo registrado.
+    if (!bytes || bytes.length > MAX_IMAGE_BYTES || validImage(bytes)?.type !== row.content_type) {
+      return json(404, { error: 'media_not_found' });
+    }
     return new Response(bytes, {
       status: 200,
       headers: {
@@ -236,16 +315,18 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
   };
 }
 
-// --- Despliegue en InsForge (Deno). Las pruebas no llegan aquí. ---------------------------------------------------
+// --- Conexión con InsForge: Deno en el despliegue, Node en el laboratorio. Jest no llega aquí. ---------------------
 declare const Deno: { env: { get(name: string): string | undefined } };
 declare const crypto: { randomUUID(): string };
 type SdkClient = {
+  auth: { getCurrentUser(): Promise<{ data: { user: { id: string } | null } | null; error: unknown }> };
   storage: { from(bucket: string): {
     upload(key: string, file: Blob): Promise<{ data: { key?: string } | null; error: { message: string } | null }>;
     download(key: string): Promise<{ data: { arrayBuffer(): Promise<ArrayBuffer> } | null; error: { message: string; statusCode?: number } | null }>;
     remove(keys: string[]): Promise<{ error: { message: string } | null }>;
+    // Respuesta de GET /api/storage/buckets/<bucket>/objects: { data: [...], pagination } (comprobado en el laboratorio).
     list(options: { limit: number; offset: number }): Promise<{
-      data: { objects: { key: string; uploadedAt: string }[] } | null; error: { message: string } | null }>;
+      data: { data: { key: string; uploadedAt: string }[] } | null; error: { message: string } | null }>;
   } };
   database: {
     rpc(name: string, args: Record<string, unknown>): Promise<CallerResult>;
@@ -264,14 +345,12 @@ export function functionsBaseUrl(baseUrl: string): string {
   return match ? `https://${match[1]}.function2.insforge.app/offer-media` : '';
 }
 
-async function deployedDeps(): Promise<OfferMediaDeps> {
-  const { createClient } = (await import(SDK_MODULE)) as {
-    createClient(config: Record<string, unknown>): SdkClient;
-  };
-  const baseUrl = Deno.env.get('INSFORGE_BASE_URL') ?? '';
-  const apiKey = Deno.env.get('API_KEY') ?? '';
-  const anonKey = Deno.env.get('ANON_KEY') ?? '';
-  const publicBaseUrl = Deno.env.get('OFFER_MEDIA_PUBLIC_BASE_URL') ?? functionsBaseUrl(baseUrl);
+export type CreateClient = (config: Record<string, unknown>) => SdkClient;
+export type OfferMediaEnv = { baseUrl: string; apiKey: string; anonKey: string; publicBaseUrl: string };
+
+// Conexión real con InsForge a través del SDK. La usa el despliegue (Deno, npm:@insforge/sdk) y el laboratorio
+// (scripts/lab/lab-e2e.mjs, Node, @insforge/sdk del proyecto), para que ambos ejecuten el mismo código.
+export function sdkDeps(createClient: CreateClient, { baseUrl, apiKey, anonKey, publicBaseUrl }: OfferMediaEnv): OfferMediaDeps {
   if (!baseUrl || !apiKey || !anonKey || !publicBaseUrl) throw new Error('offer-media is not configured');
   const admin = createClient({ baseUrl, anonKey: apiKey, isServerMode: true });
   const bucket = admin.storage.from(OFFER_MEDIA_BUCKET);
@@ -283,6 +362,11 @@ async function deployedDeps(): Promise<OfferMediaDeps> {
     callerFor(token) {
       const client = createClient(token ? { baseUrl, anonKey, accessToken: token, isServerMode: true } : { baseUrl, anonKey, isServerMode: true });
       return {
+        async userId() {
+          if (!token) return null;
+          const { data, error } = await client.auth.getCurrentUser();
+          return error ? null : data?.user?.id ?? null;
+        },
         rpc: (name, args) => client.database.rpc(name, args),
         async visibleMedia(offerId) {
           const { data, error } = await client.database.from('connectical_offer_media').select('url, content_type').eq('offer_id', offerId);
@@ -315,8 +399,8 @@ async function deployedDeps(): Promise<OfferMediaDeps> {
         for (let offset = 0; ; offset += 1000) {
           const { data, error } = await bucket.list({ limit: 1000, offset });
           if (error || !data) throw new Error('list failed');
-          objects.push(...data.objects.map(({ key, uploadedAt }) => ({ key, uploadedAt })));
-          if (data.objects.length < 1000) return objects;
+          objects.push(...data.data.map(({ key, uploadedAt }) => ({ key, uploadedAt })));
+          if (data.data.length < 1000) return objects;
         }
       },
       async registeredKeys(keys) {
@@ -327,6 +411,17 @@ async function deployedDeps(): Promise<OfferMediaDeps> {
       },
     },
   };
+}
+
+async function deployedDeps(): Promise<OfferMediaDeps> {
+  const { createClient } = (await import(SDK_MODULE)) as { createClient: CreateClient };
+  const baseUrl = Deno.env.get('INSFORGE_BASE_URL') ?? '';
+  return sdkDeps(createClient, {
+    baseUrl,
+    apiKey: Deno.env.get('API_KEY') ?? '',
+    anonKey: Deno.env.get('ANON_KEY') ?? '',
+    publicBaseUrl: Deno.env.get('OFFER_MEDIA_PUBLIC_BASE_URL') ?? functionsBaseUrl(baseUrl),
+  });
 }
 
 export default async function offerMedia(req: Request): Promise<Response> {

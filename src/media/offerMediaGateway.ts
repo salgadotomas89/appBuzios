@@ -8,6 +8,7 @@ export type GatewayFailure =
   | 'not_signed_in'
   | 'not_allowed'
   | 'limit_reached'
+  | 'rate_limited'
   | 'storage_not_configured'
   | 'rejected'
   | 'network';
@@ -26,7 +27,15 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
   json(): Promise<unknown>;
 }>;
 
-const STATUS: Record<number, GatewayFailure> = { 401: 'not_signed_in', 403: 'not_allowed', 409: 'limit_reached', 503: 'storage_not_configured' };
+const STATUS: Record<number, GatewayFailure> = {
+  401: 'not_signed_in',
+  403: 'not_allowed',
+  409: 'limit_reached',
+  429: 'rate_limited',
+  503: 'storage_not_configured',
+};
+
+export type OfferMediaGateway = ReturnType<typeof createOfferMediaGateway>;
 
 export function createOfferMediaGateway(options: {
   functionUrl: string; // https://<app>.function2.insforge.app/offer-media

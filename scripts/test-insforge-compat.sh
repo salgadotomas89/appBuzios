@@ -22,8 +22,9 @@ create extension pgcrypto;
 create role anon nologin;
 create role authenticated nologin;
 -- Privilegios leídos de buziosflow: no es superusuario, no es miembro de anon ni authenticated, no es dueño
--- de auth.users pero tiene SELECT, INSERT, UPDATE, DELETE, REFERENCES y TRIGGER sobre ella.
-create role project_admin login password 'local' nosuperuser nocreaterole;
+-- de auth.users pero tiene SELECT, INSERT, UPDATE, DELETE, REFERENCES y TRIGGER sobre ella. Tiene BYPASSRLS y
+-- SELECT en storage.objects (leído el 15-11-2026).
+create role project_admin login password 'local' nosuperuser nocreaterole bypassrls;
 create role pilot_session login;
 grant authenticated to pilot_session;
 create schema auth;
@@ -38,6 +39,8 @@ grant usage on schema auth to project_admin, anon, authenticated;
 grant select, insert, update, delete, references, trigger on auth.users to project_admin;
 grant execute on function auth.uid() to project_admin, anon, authenticated;
 \i /sb/harness/insforge_storage.sql
+grant usage on schema storage to project_admin;
+grant select on storage.objects to project_admin;
 grant create, usage on schema public to project_admin;
 SQL
 version=$(su -c 'show server_version')
@@ -45,12 +48,13 @@ echo "PostgreSQL $version, migrations run as project_admin (not superuser, not o
 
 failures=0
 for file in $(docker exec "$container" sh -c 'ls /sb/migrations/*.sql' | sort); do
-  # storage.objects es de postgres también en buziosflow: sus políticas dependen del soporte de InsForge para
-  # RLS gestionado de storage en migraciones (documentado, sin comprobar en el tenant), así que aquí van como postgres.
+  # storage.objects es de postgres también en buziosflow. Allí project_admin crea sus políticas gracias a
+  # insforge_pg_utils (insforge.policy_grant_tables), que este postgres:15 no trae: aquí van como postgres. El paso
+  # real como project_admin lo ensaya scripts/lab/insforge-lab.sh con la imagen oficial de InsForge.
   migration_user=project_admin; migration_password=local
   grep -q 'on storage.objects' "$PWD/supabase/migrations/$(basename "$file")" && { migration_user=postgres; migration_password=connectical_local_test_only; }
   if docker exec -e PGPASSWORD="$migration_password" "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$migration_user" -d postgres -f "$file" >/dev/null 2>/tmp/connectical-compat-$$.err; then
-    echo "OK    $(basename "$file")$( [ "$migration_user" = postgres ] && echo ' (as postgres: managed storage RLS)')"
+    echo "OK    $(basename "$file")$( [ "$migration_user" = postgres ] && echo ' (as postgres: InsForge grants storage policies via insforge_pg_utils)')"
   else
     echo "FAIL  $(basename "$file"): $(grep -m1 ERROR /tmp/connectical-compat-$$.err)"
     failures=$((failures + 1))
@@ -119,7 +123,8 @@ audit=$(su -c "select string_agg(coalesce(actor_user_id::text, 'sql') || ':' || 
 if sh scripts/promote-admin.sh "x'or'1'='1@a.com" --print-sql >/dev/null 2>&1; then echo "promote-admin accepted a quote" >&2; exit 1; fi
 echo "PASS promote-admin.sh only promotes verified travelers that signed in, refuses a second admin without --additional and is audited"
 
-# Bucket de fotos: las políticas RESTRICTIVE de offer-media se suman a las de InsForge sin tocar otros buckets.
+# Bucket de fotos: las políticas RESTRICTIVE (202611160004) cierran 'offer-media' a toda sesión de usuario; solo escribe
+# la función con la clave de API. Los demás buckets siguen con las reglas de InsForge.
 owner_id='d0000000-0000-4000-8000-000000000010'
 own_offer='e0000000-0000-4000-8000-000000000001'
 other_offer='e0000000-0000-4000-8000-000000000002'
@@ -132,28 +137,38 @@ insert into public.connectical_providers (id, owner_user_id, name, country_code,
 insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published) values
   ('$own_offer', 'f0000000-0000-4000-8000-000000000001', 'pousadas', 'Quarto', 30000, 'night', true),
   ('$other_offer', 'f0000000-0000-4000-8000-000000000002', 'pousadas', 'Outro quarto', 30000, 'night', true);
-insert into storage.buckets (name, public) values ('offer-media', true), ('avatars', false);
+insert into storage.buckets (name, public) values ('offer-media', false), ('avatars', false);
+insert into public.connectical_settings (key, value) values ('media_public_base_url', '"https://media.compat.test/"');
 SQL
 # d…001 es admin desde el bloque anterior; d…002 sigue siendo turista.
+admin_id='d0000000-0000-4000-8000-000000000001'
 traveler_id='d0000000-0000-4000-8000-000000000002'
 photo() { printf "offers/%s/%s.%s" "$1" "$(su -c 'select gen_random_uuid();')" "${2:-jpg}"; }
 put() { as_user "$1" "insert into storage.objects (bucket, key, size, mime_type, uploaded_by) values ('$2', '$3', ${5:-350000}, '${4:-image/jpeg}', '$1') returning key;"; }
 denied() { if put "$@" >/dev/null 2>&1; then echo "Storage write should be denied: $*" >&2; exit 1; fi; }
-own_key=$(photo "$own_offer")
-[ "$(put "$owner_id" offer-media "$own_key")" = "$own_key" ] || { echo "Provider could not upload its own offer photo" >&2; exit 1; }
-denied "$traveler_id" offer-media "$(photo "$own_offer")"
-denied "$owner_id" offer-media "$(photo "$other_offer")"
-denied "$owner_id" offer-media "offers/$own_offer/foto.jpg"
-denied "$owner_id" offer-media "$(photo "$own_offer" gif)" image/gif
-denied "$owner_id" offer-media "$(photo "$own_offer")" image/jpeg 5242881
-denied "$owner_id" offer-media "$(photo "$own_offer")" text/html
-[ -n "$(put "$traveler_id" avatars "$traveler_id/avatar.png" image/png)" ] || { echo "Other buckets changed behavior" >&2; exit 1; }
-[ "$(as_user "$traveler_id" "with d as (delete from storage.objects where key = '$own_key' returning 1) select count(*) from d;")" = 0 ] || { echo "Traveler deleted a provider photo" >&2; exit 1; }
-su -c "update public.connectical_providers set active = false where owner_user_id = '$owner_id';"
 denied "$owner_id" offer-media "$(photo "$own_offer")"
-su -c "update public.connectical_providers set active = true where owner_user_id = '$owner_id';"
-[ "$(as_user "$owner_id" "with d as (delete from storage.objects where key = '$own_key' returning 1) select count(*) from d;")" = 1 ] || { echo "Provider could not delete its photo" >&2; exit 1; }
+denied "$admin_id" offer-media "$(photo "$own_offer")"
+denied "$traveler_id" offer-media "notes/readme.html" text/html
+[ -n "$(put "$traveler_id" avatars "$traveler_id/avatar.png" image/png)" ] || { echo "Other buckets changed behavior" >&2; exit 1; }
+gateway_key=$(photo "$own_offer")
+su -c "insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', '$gateway_key', 350000, 'image/jpeg');"
+# Un objeto de offer-media a nombre del usuario (anterior a la migración) tampoco se ve, cambia ni borra.
+legacy_key=$(photo "$own_offer")
+su -c "insert into storage.objects (bucket, key, size, mime_type, uploaded_by) values ('offer-media', '$legacy_key', 350000, 'image/jpeg', '$owner_id');"
+[ "$(as_user "$owner_id" "select count(*) from storage.objects where bucket = 'offer-media';")" = 0 ] || { echo "A session can read offer-media objects" >&2; exit 1; }
+[ "$(as_user "$owner_id" "with u as (update storage.objects set size = 1 where key = '$legacy_key' returning 1) select count(*) from u;")" = 0 ] || { echo "A session updated an offer-media object" >&2; exit 1; }
+[ "$(as_user "$owner_id" "with d as (delete from storage.objects where bucket = 'offer-media' returning 1) select count(*) from d;")" = 0 ] || { echo "A session deleted offer-media objects" >&2; exit 1; }
 if su -c "set role anon; insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', 'x', 1, 'image/jpeg');" >/dev/null 2>&1; then
   echo "anon could write to storage" >&2; exit 1
 fi
-echo "PASS offer-media accepts only image uploads by the active owner of the offer in the key; other buckets unchanged"
+echo "PASS offer-media is closed to every user session (read, write, delete); other buckets keep InsForge's owner rules"
+
+# Registro de fotos solo por la función (202611160003): connectical_add_offer_media es de project_admin, como en
+# buziosflow, y aun así ve el archivo que dejó la clave de API; el que quedó a nombre del proveedor no se registra.
+register() { as_user "$owner_id" "select public.connectical_add_offer_media('$own_offer', '$1', 'image/jpeg', 350000, 1600, 1066, 'Varanda');"; }
+if register "$legacy_key" >/dev/null 2>&1; then echo "A photo uploaded by the provider's session was registered" >&2; exit 1; fi
+if register "$(photo "$own_offer")" >/dev/null 2>&1; then echo "A photo without a stored file was registered" >&2; exit 1; fi
+[ -n "$(register "$gateway_key")" ] || { echo "A photo written by the gateway was not registered" >&2; exit 1; }
+[ "$(su -c "select pg_get_userbyid(proowner) from pg_proc where proname = 'connectical_add_offer_media';")" = project_admin ] || {
+  echo "connectical_add_offer_media is not owned by project_admin" >&2; exit 1; }
+echo "PASS only photos written by the offer-media function (API key) are registered, with the function owned by project_admin"

@@ -1179,6 +1179,9 @@ echo "PASS moderation, audit log, incidents, users, KPIs and campaigns are admin
 # Offer photos: metadata only, owner-or-admin writes, key bound to the offer, public only when visible.
 media_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
 add_media() { as_user "$1" "select public.connectical_add_offer_media('$mod_offer', '$2', '$3', $4, $5, $6, '$7');"; }
+# Archivo escrito en el bucket como lo deja la función offer-media con la clave de API: uploaded_by nulo.
+docker exec "$container" psql -q -U postgres -d postgres -c "insert into storage.buckets (name, public) values ('offer-media', false) on conflict do nothing;"
+gateway_put() { docker exec "$container" psql -q -U postgres -d postgres -c "insert into storage.objects (bucket, key, size, mime_type, uploaded_by) values ('offer-media', '$1', $3, '$2', ${4:-null});"; }
 # Sin bucket configurado no se registran fotos; la URL la construye el servidor con la base configurada.
 if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto' >/dev/null 2>&1; then
   echo "Offer media accepted without a configured storage base URL" >&2; exit 1
@@ -1199,6 +1202,21 @@ EOF
     echo "Invalid offer media accepted: $bad" >&2; exit 1
   fi
 done
+# Solo archivos que escribió la función: ni sin archivo, ni subido por el usuario, ni con tamaño o tipo distintos.
+if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Sin archivo' >/dev/null 2>&1; then
+  echo "Offer media accepted without a stored file" >&2; exit 1
+fi
+direct_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+gateway_put "$direct_key" image/jpeg 2000 "'$applicant'"
+if add_media "$applicant" "$direct_key" image/jpeg 2000 1200 900 'Subida directa' >/dev/null 2>&1; then
+  echo "Offer media accepted for a file the user uploaded directly to the bucket" >&2; exit 1
+fi
+gateway_put "$media_key" image/jpeg 2000
+for bad in "image/jpeg|1999" "image/png|2000"; do
+  if add_media "$applicant" "$media_key" "${bad%|*}" "${bad#*|}" 1200 900 'Declarada distinta' >/dev/null 2>&1; then
+    echo "Offer media accepted with a size or type different from the stored file: $bad" >&2; exit 1
+  fi
+done
 media_id=$(add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto com vista para o mar')
 if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Duplicada' >/dev/null 2>&1; then
   echo "Duplicate storage key accepted" >&2; exit 1
@@ -1214,9 +1232,11 @@ as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mo
 [ "$hidden_media" = '0' ] || { echo "Photos of a suspended offer stayed public" >&2; exit 1; }
 for i in 2 3 4 5 6 7 8 9 10; do
   k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+  gateway_put "$k" image/png 3000
   add_media "$applicant" "$k" image/png 3000 1000 1000 "Foto $i" >/dev/null
 done
 k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+gateway_put "$k" image/png 3000
 if add_media "$applicant" "$k" image/png 3000 1000 1000 'Foto 11' >/dev/null 2>&1; then
   echo "Eleventh photo accepted" >&2; exit 1
 fi
@@ -1225,7 +1245,13 @@ if as_user "$provider_user" "select public.connectical_remove_offer_media('$medi
 fi
 removed_key=$(as_user "$applicant" "select public.connectical_remove_offer_media('$media_id');")
 [ "$removed_key" = "$media_key" ] || { echo "Removal did not return the storage key: $removed_key" >&2; exit 1; }
-echo "PASS offer photos: owner-only metadata, key bound to the offer, limits, visibility and removal key"
+# 30 fotos por usuario y hora: tiene 9 en esta oferta; con 21 más en otra llega al límite y la siguiente se rechaza.
+docker exec "$container" psql -q -U postgres -d postgres -c "insert into public.connectical_offer_media (offer_id, storage_key, url, content_type, byte_size, width, height, alt_text, created_by) select '$range_offer', 'offers/$range_offer/' || gen_random_uuid() || '.png', 'https://cdn.example/x', 'image/png', 3000, 1000, 1000, 'Lote', '$applicant' from generate_series(1, 21);"
+k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+gateway_put "$k" image/png 3000
+limited=$(as_user "$applicant" "select public.connectical_add_offer_media('$mod_offer', '$k', 'image/png', 3000, 1000, 1000, 'Foto 31');" 2>&1 || true)
+case "$limited" in *media_rate_limited*) ;; *) echo "Thirty-first photo in an hour was not rate limited: $limited" >&2; exit 1 ;; esac
+echo "PASS offer photos: owner-only metadata, only files written by the gateway, key bound to the offer, limits, visibility and removal key"
 
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }

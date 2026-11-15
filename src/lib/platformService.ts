@@ -1,5 +1,5 @@
 import type { PortalCategory } from '../i18n/portalCopy';
-import { type MediaStorage, uploadOfferImage } from '../media/storageAdapter';
+import type { OfferMediaGateway } from '../media/offerMediaGateway';
 import type { ImageCandidate } from '../media/imagePolicy';
 import { callRpc, freshClient } from './reservationService';
 import { insforge } from './insforge';
@@ -229,30 +229,13 @@ export async function listOfferMedia(offerIds: string[]): Promise<OfferMedia[]> 
   return (data ?? []) as OfferMedia[];
 }
 
-// Sube al almacenamiento y registra los metadatos. La URL pública la construye la base de datos a partir
-// de la clave (no se acepta del cliente). Si el registro falla, borra el archivo subido para no dejar
-// huérfanos. Con el almacenamiento desactivado (sin bucket confirmado) falla antes de subir.
-export async function addOfferPhoto(storage: MediaStorage, offerId: string, candidate: ImageCandidate): Promise<string> {
-  const uploaded = await uploadOfferImage(storage, offerId, candidate);
-  try {
-    return await callRpc<string>('connectical_add_offer_media', {
-      p_offer_id: offerId,
-      p_storage_key: uploaded.key,
-      p_content_type: uploaded.type,
-      p_byte_size: uploaded.byteSize,
-      p_width: uploaded.width,
-      p_height: uploaded.height,
-      p_alt_text: uploaded.altText,
-    });
-  } catch (error) {
-    await storage.remove(uploaded.key).catch(() => undefined);
-    throw error;
-  }
+// Las fotos pasan siempre por la función offer-media: valida el archivo, lo sube con la clave de API y lo registra
+// como el usuario. La base solo registra archivos escritos así (202611160003), de modo que subir directamente al
+// bucket y llamar a connectical_add_offer_media no publica nada. Devuelve el id de la foto.
+export async function addOfferPhoto(gateway: OfferMediaGateway, offerId: string, candidate: ImageCandidate): Promise<string> {
+  return (await gateway.upload(offerId, candidate)).id;
 }
 
-export async function removeOfferPhoto(storage: MediaStorage, mediaId: string): Promise<void> {
-  const key = await callRpc<string>('connectical_remove_offer_media', { p_media_id: mediaId });
-  // El registro ya no existe: la foto quedó retirada aunque el archivo no se pueda borrar ahora; ese
-  // archivo huérfano queda para una limpieza posterior del bucket.
-  await storage.remove(key).catch(() => undefined);
+export async function removeOfferPhoto(gateway: OfferMediaGateway, mediaId: string): Promise<void> {
+  await gateway.remove(mediaId);
 }

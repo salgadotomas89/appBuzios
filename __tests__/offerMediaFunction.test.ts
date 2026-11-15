@@ -7,11 +7,14 @@ import {
   functionsBaseUrl,
   readImageSize,
   MAX_IMAGE_BYTES,
+  UPLOADS_PER_WINDOW,
+  UPLOAD_WINDOW_MS,
   type OfferMediaDeps,
 } from '../functions/offer-media';
 import { detectImageType as appDetectImageType } from '../src/media/imagePolicy';
 
 declare const TextEncoder: { new (): { encode(text: string): Uint8Array } };
+declare const ReadableStream: new (source: { pull(controller: { enqueue(chunk: Uint8Array): void; close(): void }): void }) => unknown;
 
 const BASE = 'https://ykfv5j3m.function2.insforge.app/offer-media';
 const API_KEY = 'ik_admin_key';
@@ -83,6 +86,7 @@ function world() {
     newId: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++ids).padStart(12, '0')}`,
     now: () => now,
     callerFor: token => ({
+      userId: async () => (token && token in manages ? `user-${token}` : null),
       rpc: (name, args) => rpc(token, name, args),
       visibleMedia: async offerId => media.filter(row => row.offer_id === offerId &&
         (approved.has(offerId) || (token !== null && manages[token]?.includes(offerId)))),
@@ -97,7 +101,7 @@ function world() {
       registeredKeys: async keys => new Set(media.map(row => row.storage_key).filter(key => keys.includes(key))),
     },
   };
-  return { files, media, approved, rpc, deps, handle: createOfferMediaHandler(deps), advance: (ms: number) => { now += ms; } };
+  return { files, media, approved, rpc, deps, manages, handle: createOfferMediaHandler(deps), advance: (ms: number) => { now += ms; } };
 }
 
 function post(path: string, body: Uint8Array, token: string | null, altText = 'Vista de la piscina') {
@@ -216,4 +220,76 @@ it('answers CORS preflight and unknown routes without touching storage', async (
   expect((await w.handle(request('GET', '../../etc/passwd', null))).status).toBe(404);
   expect((await w.handle(request('PUT', `offers/${OFFER}`, 'owner'))).status).toBe(404);
   expect(w.deps.admin.put).not.toHaveBeenCalled();
+});
+
+it('checks the session with InsForge before storing anything and limits uploads per user', async () => {
+  const w = world();
+  expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'forged-token'))).status).toBe(401);
+  expect(w.deps.admin.put).not.toHaveBeenCalled();
+
+  for (let i = 0; i < UPLOADS_PER_WINDOW; i += 1) {
+    expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).status).toBe(201);
+  }
+  const limited = await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+  expect([limited.status, (await limited.json()).error]).toEqual([429, 'media_rate_limited']);
+  // Otro usuario no comparte el cupo; pasada la ventana, el dueño vuelve a poder subir.
+  expect((await w.handle(post(`offers/${OTHER_OFFER}`, png(1200, 800), 'other'))).status).toBe(201);
+  w.advance(UPLOAD_WINDOW_MS + 1);
+  expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).status).toBe(201);
+  // El límite de la base (30 por hora en todas las instancias) llega como 429 y no deja el archivo.
+  w.rpc.mockResolvedValueOnce({ data: null, error: { message: 'media_rate_limited' } });
+  const before = w.files.size;
+  expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).status).toBe(429);
+  expect(w.files.size).toBe(before);
+});
+
+it('allows two uploads at a time per user and frees the slot when one finishes', async () => {
+  const w = world();
+  const pending: (() => void)[] = [];
+  (w.deps.admin.put as jest.Mock).mockImplementation(() => new Promise<void>(resolve => pending.push(() => resolve())));
+  const first = w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+  const second = w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 0));
+  const third = await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+  expect([third.status, (await third.json()).error]).toEqual([429, 'upload_in_progress']);
+  pending.forEach(resolve => resolve());
+  expect([(await first).status, (await second).status]).toEqual([201, 201]);
+  (w.deps.admin.put as jest.Mock).mockImplementation(async () => undefined);
+  expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).status).toBe(201);
+});
+
+it('stops reading a body sent in chunks as soon as it passes the limit', async () => {
+  const w = world();
+  let sent = 0;
+  const chunk = new Uint8Array(1024 * 1024);
+  const body = new ReadableStream({
+    pull(controller) {
+      sent += 1;
+      if (sent > 50) controller.close();
+      else controller.enqueue(sent === 1 ? png(1200, 800) : chunk);
+    },
+  });
+  const req = new Request(`https://ykfv5j3m.function2.insforge.app/offers/${OFFER}`, {
+    method: 'POST', body: body as string, headers: { Authorization: 'Bearer owner', 'X-Alt-Text': 'Foto' }, duplex: 'half',
+  } as RequestInit);
+  const response = await w.handle(req);
+  expect([response.status, (await response.json()).error]).toEqual([413, 'image_too_large']);
+  expect(sent).toBeLessThan(10);
+  expect(w.deps.admin.put).not.toHaveBeenCalled();
+});
+
+it('does not serve files uploaded straight to the bucket even if someone registers them by RPC', async () => {
+  // Defensa por si la migración 202611160003 aún no está aplicada: la base registraría cualquier clave.
+  const w = world();
+  w.approved.add(OFFER);
+  const html = `offers/${OFFER}/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.png`;
+  const small = `offers/${OFFER}/ffffffff-ffff-4fff-8fff-ffffffffffff.png`;
+  const mislabeled = `offers/${OFFER}/abababab-abab-4bab-8bab-abababababab.webp`;
+  w.files.set(html, { bytes: new TextEncoder().encode('<html><script>alert(1)</script></html>'), uploadedAt: '' });
+  w.files.set(small, { bytes: png(10, 10), uploadedAt: '' });
+  w.files.set(mislabeled, { bytes: png(1200, 800), uploadedAt: '' });
+  for (const [key, type] of [[html, 'image/png'], [small, 'image/png'], [mislabeled, 'image/webp']]) {
+    w.media.push({ id: key, offer_id: OFFER, storage_key: key, url: `${BASE}/${key}`, content_type: type });
+    expect((await w.handle(request('GET', key, null))).status).toBe(404);
+  }
 });

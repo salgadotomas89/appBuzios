@@ -1,6 +1,7 @@
 import { checkImage, detectImageType, offerImageKey } from '../src/media/imagePolicy';
 import { createMemoryMediaStorage, disabledMediaStorage, MediaUploadError, uploadOfferImage } from '../src/media/storageAdapter';
-import { addOfferPhoto } from '../src/lib/platformService';
+import { addOfferPhoto, removeOfferPhoto } from '../src/lib/platformService';
+import { createOfferMediaGateway } from '../src/media/offerMediaGateway';
 import * as reservationService from '../src/lib/reservationService';
 
 jest.mock('../src/lib/insforge', () => ({ insforge: null, sessionManager: null }));
@@ -54,16 +55,15 @@ it('uploads valid images and keeps both url and key', async () => {
     .rejects.toBeInstanceOf(MediaUploadError);
 });
 
-it('registers the uploaded photo and deletes the file if registration fails', async () => {
-  const storage = createMemoryMediaStorage();
-  callRpc.mockResolvedValueOnce('media-1');
-  await expect(addOfferPhoto(storage, OFFER, { bytes: JPEG, width: 1200, height: 900, altText: 'Quarto' })).resolves.toBe('media-1');
-  expect(callRpc).toHaveBeenCalledWith('connectical_add_offer_media', expect.objectContaining({ p_offer_id: OFFER, p_content_type: 'image/jpeg', p_alt_text: 'Quarto' }));
-  // La URL la construye la base de datos: el cliente no la envía.
-  expect(callRpc.mock.calls[0][1]).not.toHaveProperty('p_url');
-  expect(storage.objects.size).toBe(1);
-
-  callRpc.mockRejectedValueOnce(new Error('media_limit_reached'));
-  await expect(addOfferPhoto(storage, OFFER, { bytes: JPEG, width: 1200, height: 900, altText: 'Outro' })).rejects.toThrow('media_limit_reached');
-  expect(storage.objects.size).toBe(1);
+it('adds and removes photos only through the offer-media function, never registering by RPC from the app', async () => {
+  const fetch = jest.fn(async (_url: string, init: { method: string }) =>
+    ({ status: init.method === 'POST' ? 201 : 200, json: async () => ({ id: 'media-1' }) }));
+  const gateway = createOfferMediaGateway({ functionUrl: 'https://app.function2.insforge.app/offer-media', getAccessToken: async () => 'jwt', fetch });
+  await expect(addOfferPhoto(gateway, OFFER, { bytes: JPEG, width: 1200, height: 900, altText: 'Quarto' })).resolves.toBe('media-1');
+  await removeOfferPhoto(gateway, 'media-1');
+  expect(fetch.mock.calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+    `POST https://app.function2.insforge.app/offer-media/offers/${OFFER}`,
+    'DELETE https://app.function2.insforge.app/offer-media/media/media-1',
+  ]);
+  expect(callRpc).not.toHaveBeenCalled();
 });

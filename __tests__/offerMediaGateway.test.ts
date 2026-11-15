@@ -29,6 +29,7 @@ it('checks the image before sending and maps the function answers to app errors'
   await expect(gateway(201, {}, null).api.upload(OFFER, photo)).rejects.toMatchObject({ code: 'not_signed_in' });
   await expect(gateway(403).api.upload(OFFER, photo)).rejects.toMatchObject({ code: 'not_allowed' });
   await expect(gateway(409).api.upload(OFFER, photo)).rejects.toMatchObject({ code: 'limit_reached' });
+  await expect(gateway(429).api.upload(OFFER, photo)).rejects.toMatchObject({ code: 'rate_limited' });
   await expect(gateway(503).api.remove('m1')).rejects.toMatchObject({ code: 'storage_not_configured' });
   await expect(gateway(422).api.upload(OFFER, photo)).rejects.toMatchObject({ code: 'rejected' });
   const offline = createOfferMediaGateway({ functionUrl: 'https://x', getAccessToken: async () => 't', fetch: async () => { throw new Error('offline'); } });

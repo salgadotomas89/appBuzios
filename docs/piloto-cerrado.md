@@ -10,7 +10,7 @@ real en un iPhone o Android. Reservas comerciales y pagos reales siguen apagados
 | --- | --- |
 | Proyecto | buziosflow, `ykfv5j3m.us-east.insforge.app`, vinculado con el CLI; la app apunta a él |
 | Respaldo | plataforma: `post-migraciones-15` (`e134bb27-…`, sustituye a `pre-reservas`); local: volcado completo tras aplicar retención e índices, restaurado y comparado sin diferencias (`npm run backup:verified`) |
-| Migraciones | 17 de 18 aplicadas (retención del registro del barrido e índices el 15-11 por la tarde); verificación y conciliación correctas. La 18, reglas del bucket de fotos, no se puede aplicar con el CLI en InsForge 2.3.5 (ver runbook) |
+| Migraciones | 17 de 19 aplicadas (retención del registro del barrido e índices el 15-11 por la tarde); verificación y conciliación correctas. Las dos de fotos (`20261116000003` y `…0004`) están ensayadas en el laboratorio InsForge 2.3.5 y esperan autorización (ver runbook, «Storage: corrección») |
 | App con clave anónima | catálogo, inventario y fotos legibles; RPC privadas rechazadas |
 | Barrido de retenciones | schedule `connectical-hold-sweep` cada 2 minutos, primera ejecución 200 y `succeeded` |
 | Datos | ninguno: 0 usuarios, 0 ofertas |

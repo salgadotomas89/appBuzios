@@ -4,6 +4,16 @@ Para la persona del equipo que lo ejecute en su Mac, con el repositorio en `main
 No se crean datos ficticios: la cuenta es real y de alguien del equipo. Nada de este procedimiento imprime ni guarda
 contraseñas, códigos o tokens; no los copies en tickets ni en el chat.
 
+## 0. Ensayo en el laboratorio (opcional, sin tocar buziosflow)
+
+```sh
+npm run lab:up && npm run lab:e2e && npm run lab:down
+```
+
+Levanta InsForge 2.3.5 en este Mac con Mailpit como correo y recorre con cuentas `@lab.buziosflow.test` lo mismo que
+este procedimiento (alta, código, inicio de sesión, recuperación de contraseña y `promote-admin.sh`), además del
+recorrido turístico. Debe terminar en `Lab end-to-end passed`. Necesita Docker y unos 2 GB libres.
+
 ## 1. Antes de empezar
 
 - [ ] `npx -y @insforge/cli current` dice `buziosflow (bfab79dc-…)`.

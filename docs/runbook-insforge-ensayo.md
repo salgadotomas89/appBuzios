@@ -103,53 +103,83 @@ backend (`BEGIN`, `SET LOCAL search_path TO public`, `SET LOCAL ROLE project_adm
 | --- | --- | --- |
 | `20261116000001_sweep-runs-retention` | aplica; una pasada `succeeded` sin borrar nada | **Aplicada** (`db migrations up <archivo>`). Funciones `SECURITY DEFINER` sin `EXECUTE` para `anon` ni `authenticated`; verificación 15/15; la primera pasada programada (17:58 UTC) `succeeded` y no borró filas (242 → 243, la más antigua sigue siendo la de las 09:55) |
 | `20261116000002_foreign-key-indexes` | aplica | **Aplicada** con las cuatro tablas vacías y sin sesiones activas; los seis índices válidos |
-| `20261116000003_offer-media-storage` | **falla**: `must be owner of table objects`; la transacción no deja nada (ni la función auxiliar) | **Sin aplicar** |
+| `20261116000003_offer-media-storage` (hoy `…0004`) | **falla** en la copia: `must be owner of table objects` | **Sin aplicar**. Ese ensayo no era fiel: ver «Storage: corrección» |
 
 La migración de storage iba antes que los índices; se intercambió el orden (mismo contenido, CI verde en
 `8b70192`) para no bloquear los índices y poder aplicarla después. Tras aplicar:
 `npm run check:remote-schema` → 17 de 18, verificación y conciliación correctas y el inventario solo difiere en lo
 que crea la migración de storage.
 
-**Por qué no se aplica la de storage.** InsForge 2.3.5 (la versión del tenant, igual a la del código abierto
-consultado) ejecuta las migraciones con `SET LOCAL ROLE project_admin`; crear o borrar políticas en
-`storage.objects` exige ser su dueño (`postgres`) y `project_admin` no es miembro de ese rol. La documentación de
-InsForge dice que estas políticas se gestionan con una migración propia, pero en esta versión no es posible. Con la
-URL de `postgres` funcionaría, pero sería elevar privilegios para saltarse una restricción de la plataforma: no se
-hizo. Opciones: que InsForge la aplique o habilite el procedimiento (reporte preparado abajo), o una decisión
-expresa del responsable de aplicarla con la conexión de `postgres` que da el propio CLI.
+### Storage: corrección y estado real (15-11-2026, noche)
 
-Reporte para InsForge (no enviado: el envío desde esta sesión fue denegado; se puede mandar con
-`npx -y @insforge/cli feedback --type bug --component backend --area storage`): «Custom migrations cannot create
-policies on storage.objects although the storage RLS docs say to put them in a custom migration. On 2.3.5
-DatabaseMigrationService runs migrations under SET LOCAL ROLE project_admin, storage.objects is owned by postgres,
-so CREATE/DROP POLICY fails with "must be owner of table objects". Reproduced on an exact restore of the project.»
+**La conclusión anterior («InsForge 2.3.5 no deja crear políticas en `storage.objects`») era falsa.** Salió de un
+ensayo sobre una restauración en `postgres:15` sin la extensión de InsForge. Comprobado solo con lectura en
+buziosflow y con la imagen oficial en un laboratorio aislado:
 
-**Vía oficial para las políticas de storage (investigado el 15-11-2026).** No hay ninguna en 2.3.5 que un proyecto
-pueda usar por sí mismo: la documentación pública (`core-concepts/storage`) solo dice que storage usa RLS; la skill
-de InsForge indica una migración propia, que falla; el editor SQL del panel también ejecuta como `project_admin`
-(`/api/database/advance/rawsql`, auditado con `executionRole: 'project_admin'`); no hay issues ni PR que lo
-resuelvan (los de storage RLS tratan de `anon` y de buckets públicos). Queda pedírselo a InsForge (soporte o
-`feedback`, con el texto de arriba).
+1. **Migración 066 de InsForge (PR #2151, fusionado el 22-10-2026, incluido en 2.3.5): aplicada en el tenant**
+   (`system.migrations`, 14-11-2026 19:03 UTC). RLS activo en `storage.objects` (dueño `postgres`, sin `FORCE`), con
+   las cuatro políticas `storage_objects_owner_*` y la función `storage.public_buckets()`.
+2. **Qué puede hacer un usuario autenticado directamente** (`/api/storage`, con su sesión): subir, reemplazar y
+   borrar en **cualquier bucket** objetos que queden a su nombre (`uploaded_by`), de cualquier tipo (InsForge detecta
+   el tipo por los bytes y convierte HTML, SVG o JS en `application/octet-stream`) y de hasta 50 MB
+   (`storage.config.max_file_size_mb`, global, sin límites por bucket). En un bucket privado solo ve lo suyo; sin
+   sesión, 401. No puede crear buckets (`verifyAdmin`); `storage` no está expuesto por PostgREST
+   (`pgrst.db_schemas = public`).
+3. **¿Puede saltarse `offer-media.ts`?** Subir, sí (punto 2). Publicar, **no** desde `20261116000003`: hasta entonces
+   `connectical_add_offer_media` se podía llamar por RPC con cualquier clave, tipo, tamaño y medidas declarados, así que
+   un proveedor podía registrar como foto un archivo subido directamente. La nueva versión solo registra si el
+   archivo existe en `offer-media`, lo escribió la clave de API (`uploaded_by` nulo) y coinciden tamaño y tipo
+   guardados por InsForge; además, 30 fotos por usuario y hora. `project_admin` (dueño de la función) tiene
+   `BYPASSRLS` y `SELECT` en `storage.objects` en el tenant, así que la comprobación funciona sin tocar `storage`.
+4. **Vía oficial con los permisos de `project_admin`: existe.** El tenant carga `insforge_pg_utils` con
+   `insforge.policy_grant_role = project_admin` e `insforge.policy_grant_tables =
+   storage.objects,realtime.channels,realtime.messages,payments.*` (leído con `current_setting`). Con esa extensión,
+   `project_admin` crea políticas en esas tablas aunque no sea su dueño. En el laboratorio (imagen oficial
+   `ghcr.io/insforge/postgres:v15.13.4` + `insforge-oss:v2.3.5`), `db migrations up` aplica `…0004` como
+   `project_admin` sin errores. No se usó el superusuario ni se tocó el tenant.
+5. **`20261116000004` reescrita** (nunca aplicada en ningún sitio): en lugar de permitir que el dueño suba al bucket,
+   cuatro políticas RESTRICTIVE cierran `offer-media` a toda sesión de usuario (leer, subir, cambiar, borrar). Solo
+   escribe la función con la clave de API. Los demás buckets no cambian.
+6. **Cómo impedir cargas arbitrarias y abuso**: `…0004` (nadie sube directo), `…0003` (nada se publica sin pasar por
+   la función), la función (valida bytes y medidas, comprueba la sesión antes de escribir, 20 subidas por 10 minutos
+   y 2 simultáneas por usuario en cada instancia, cuerpo limitado a 5 MB leyendo por partes, revalida al servir),
+   limpieza horaria de huérfanos y, opcional, bajar `storage.max_file_size_mb` de 50 a 5 (afecta a todos los buckets;
+   hoy no hay otros).
 
-**Fotos: alternativa con backend autorizado (preparada, sin desplegar).** Mientras tanto, la función
-[`functions/offer-media.ts`](../functions/offer-media.ts) es el único camino a un bucket **privado** `offer-media`:
+**Laboratorio** (`npm run lab:up`, `npm run lab:e2e`, `npm run lab:down`; `scripts/lab/`): InsForge OSS v2.3.5 con
+su PostgreSQL, PostgREST y Mailpit como SMTP, solo en `127.0.0.1`, con claves generadas en cada arranque fuera del
+repositorio (`~/LaboratorioBuziosFlow/lab.env`) y cuentas `@lab.buziosflow.test`. Aplica las migraciones con el CLI
+como en el tenant y recorre 60 comprobaciones: alta, código de verificación por correo, inicio de sesión,
+recuperación de contraseña, primer administrador, proveedor y moderación, intentos de saltarse la función por
+`/api/storage` y por RPC, la función real (`sdkDeps`, el mismo código que el despliegue) con un PNG real, limpieza,
+aplicación de `…0004` como `project_admin` y repetición de los intentos, reservas con vencimiento, pago simulado,
+cancelación, reembolso, incidencias, traducciones de los errores vistos y `verify_migrations.sql`. Encontró un
+fallo real que las pruebas simuladas no veían: el SDK devuelve el listado del bucket en `data.data`, no en
+`data.objects`, y la limpieza fallaba; corregido. Diferencias con el tenant: InsForge Cloud ejecuta la función en
+Deno y el laboratorio la ejecuta en Node con el mismo código; el SMTP es Mailpit, no el proveedor gestionado.
+
+**Reporte para InsForge.** El bloqueo no existe, así que el reporte anterior queda retirado y no debe enviarse.
+Queda una sugerencia de documentación, opcional y sin enviar: «The storage RLS docs could mention that custom
+migrations can create policies on storage.objects because insforge_pg_utils grants it to project_admin
+(insforge.policy_grant_tables); a restore on stock Postgres fails with "must be owner of table objects", which
+misleads rehearsals. Per-bucket MIME/size limits would also help, as max_file_size_mb is global.»
+
+**Fotos: despliegue (preparado, sin ejecutar; cambia esquema, bucket, función y programación en producción:
+requiere autorización expresa).** La función [`functions/offer-media.ts`](../functions/offer-media.ts) es el único
+camino al bucket **privado** `offer-media`:
 
 | Ruta | Quién | Qué hace |
 | --- | --- | --- |
-| `POST /offer-media/offers/<oferta>` | usuario con sesión | Lee tipo y medidas de los bytes (firma y cabecera de JPEG, PNG o WebP; 600–6000 px; ≤ 5 MB; texto alternativo obligatorio), sube con la clave de API y registra con `connectical_add_offer_media` **como el usuario**: la base decide si gestiona la oferta. Si la base rechaza, borra el archivo |
-| `GET /offer-media/offers/<oferta>/<id>.<ext>` | cualquiera | Sirve la foto solo si el llamante la ve por RLS en `connectical_offer_media` (publicada y aprobada; dueño y admin también las suyas). Sin sesión, caché pública de 5 minutos; con sesión, `no-store` |
+| `POST /offer-media/offers/<oferta>` | usuario con sesión | Comprueba la sesión con InsForge, aplica el límite por usuario, lee tipo y medidas de los bytes (JPEG, PNG o WebP; 600–6000 px; ≤ 5 MB; texto alternativo obligatorio), sube con la clave de API y registra con `connectical_add_offer_media` **como el usuario**. Si la base rechaza, borra el archivo |
+| `GET /offer-media/offers/<oferta>/<id>.<ext>` | cualquiera | Sirve la foto solo si el llamante la ve por RLS y los bytes siguen siendo una imagen válida del tipo registrado. Sin sesión, caché pública de 5 minutos; con sesión, `no-store` |
 | `DELETE /offer-media/media/<id>` | usuario con sesión | `connectical_remove_offer_media` como el usuario y después borra el archivo |
 | `POST /offer-media/maintenance/cleanup` | solo la clave de API | Borra archivos sin foto registrada con más de una hora |
 
-Riesgo que queda: con las políticas por defecto, un usuario con sesión puede subir archivos propios al bucket
-privado por la API de storage; nadie más los ve (el bucket no es público y la función solo sirve fotos registradas)
-y la limpieza horaria los borra. Si InsForge permite después aplicar `20261116000003`, ambas capas se suman.
-Probado en Jest con almacén y base simulados (`__tests__/offerMediaFunction.test.ts`, con mutaciones que
-confirman que las pruebas detectan un fallo de visibilidad o de limpieza); la app tiene su cliente en
-`src/media/offerMediaGateway.ts`. **No probado contra InsForge**: el despliegue es un cambio en producción y requiere
-autorización. Pasos, en orden, cada uno verificable:
+Pasos, en orden, cada uno verificable (antes, `npm run backup:verified`):
 
 ```sh
+npx -y @insforge/cli db migrations up --all     # 20261116000003 y 20261116000004, como project_admin
+npm run check:remote-schema                     # 19 de 19, verificación y conciliación correctas
 npx -y @insforge/cli storage create-bucket offer-media --private        # nunca --public
 npx -y @insforge/cli functions deploy offer-media --file functions/offer-media.ts --name "Fotos de ofertas"
 npx -y @insforge/cli db query "insert into public.connectical_settings (key, value) values ('media_public_base_url', '\"https://ykfv5j3m.function2.insforge.app/offer-media\"') on conflict (key) do update set value = excluded.value, updated_at = now()"
@@ -158,11 +188,14 @@ npx -y @insforge/cli schedules create --name offer-media-cleanup --cron "17 * * 
   --method POST --headers '{"Authorization":"Bearer ${{secrets.API_KEY}}"}' --body '{}'
 ```
 
-Comprobación con cuentas reales del equipo (sin datos ficticios de clientes): un turista recibe 403 al subir; un
-proveedor no puede subir ni borrar en ofertas de otro; el dueño sube y ve su foto; sin sesión, 404 hasta que la
-oferta esté publicada y aprobada y 200 después; un archivo `.jpg` que no es imagen da 422; subir directamente al
-bucket con la API de storage no hace visible nada y la limpieza lo borra. Retirada: `functions delete offer-media`
-y borrar el bucket.
+Opcional: `[storage] max_file_size_mb = 5` en `insforge.toml` y `config apply`.
+
+Comprobación con cuentas reales del equipo (sin datos ficticios de clientes): un turista recibe 403 al subir por la
+función; un proveedor no puede subir ni borrar en ofertas de otro; el dueño sube y ve su foto; sin sesión, 404 hasta
+que la oferta esté publicada y aprobada y 200 después; un `.jpg` que no es imagen da 422; subir directamente al
+bucket con la API de storage da error (políticas de `…0004`). Retirada: `functions delete offer-media`, borrar el
+bucket y, si hiciera falta, `drop policy connectical_offer_media_{select,insert,update,delete} on storage.objects`
+en una migración nueva.
 
 **Primer administrador** (`scripts/promote-admin.sh`): solo promueve una cuenta existente, con el correo verificado,
 no anónima, que ya inició sesión en la app y es `traveler`; sin `--additional` se niega si ya hay un admin. Por
@@ -196,7 +229,9 @@ Con SMTP activo, cargar las plantillas en portugués y repetir `verify-email-del
 
 **Recuperación de contraseña** (`resetPasswordMethod = code` en el tenant): la app pide el código con
 `sendResetPasswordEmail` (el servidor no revela si el correo tiene cuenta), lo canjea por un token de un solo uso y
-fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simulada; sin probar contra el tenant.
+fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simulada, y de punta a punta en el
+laboratorio InsForge 2.3.5 con el correo capturado por Mailpit (código erróneo rechazado, contraseña anterior
+inválida, correo desconocido sin envío). Sin probar contra el tenant.
 
 ### Comprobación del tenant, advisor y contrato con la app
 

@@ -83,6 +83,8 @@ offer=$(as_user "$owner" "select (public.connectical_provider_upsert_offer(null,
 as_user "$owner" "select public.connectical_provider_set_offer_details('$offer', 'Quarto duplo com varanda', 'Geribá', 'Recepção da pousada', 'Check-in 14h', 1, 2);" >/dev/null
 as_user "$owner" "select public.connectical_provider_publish_inventory_range('$offer', current_date + 20, 3, 1);" >/dev/null
 photo_key="offers/$offer/$(sql -c 'select gen_random_uuid();').jpg"
+# Como la deja la función offer-media: escrita con la clave de API (uploaded_by nulo) en el bucket privado.
+sql -c "insert into storage.buckets (name, public) values ('offer-media', false); insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', '$photo_key', 350000, 'image/jpeg');" >/dev/null
 as_user "$owner" "select public.connectical_add_offer_media('$offer', '$photo_key', 'image/jpeg', 350000, 1600, 1066, 'Varanda com vista para o mar');" >/dev/null
 expect "$(as_user "$ana" "select count(*) from public.connectical_offers where id = '$offer';")" '0' 'Pending offer visible to travelers'
 fails "$ana" "select public.connectical_create_quote('$offer', current_date + 20, 1, 2, 600);"

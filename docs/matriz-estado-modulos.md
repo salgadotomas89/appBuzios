@@ -2,8 +2,9 @@
 
 Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
-Actualización 15-11-2026: 17 de 18 migraciones aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos); la de
-reglas del bucket de fotos no se puede aplicar con el CLI en InsForge 2.3.5.
+Actualización 15-11-2026: 17 de 19 migraciones aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos). Las
+dos de fotos (registro solo por la función y bucket cerrado a las sesiones) están preparadas y ensayadas en el laboratorio
+InsForge 2.3.5 (`npm run lab:e2e`), pendientes de autorización; sí se pueden aplicar con el CLI (`insforge_pg_utils`).
 
 Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SIMULADO** (funciona sin efectos reales) ·
 **BLOQUEADO** (depende de algo externo) · **NO IMPLEMENTADO**.
@@ -27,7 +28,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |
 | Portal proveedor: descripción, ubicación, horario, límites por reserva, ingresos | COMPLETO | Migración 0009 y resumen de ingresos | — |
-| Fotos de ofertas | PARCIAL | Política de imágenes, metadatos en SQL (202611150003), galería y adaptador real de InsForge Storage probado con el SDK; reglas del bucket `offer-media` preparadas (20261116000003) porque las políticas por defecto dejan subir a cualquier usuario autenticado, pero **InsForge 2.3.5 no deja aplicarlas** (`storage.objects` es de `postgres`); **sin bucket** y sin selector de fotos en el teléfono | Bloqueado (InsForge) |
+| Fotos de ofertas | PARCIAL | Función `offer-media` (valida bytes, sesión, límites; sirve solo fotos registradas y válidas) y migraciones 202611160003 (solo registra lo que subió la función) y 202611160004 (bucket cerrado a las sesiones), probadas en Jest, PostgreSQL y el laboratorio InsForge 2.3.5; **sin desplegar, sin bucket** y sin selector de fotos en el teléfono | Autorización de despliegue |
 | Políticas propias del proveedor | NO IMPLEMENTADO | Esperan la política comercial | Decisión comercial |
 | Registro de proveedores | COMPLETO | Solicitud del turista, revisión admin con comisión explícita, estado visible para el solicitante | — |
 | Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN); recuperación de contraseña por código. **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`); el correo llega en inglés sin SMTP propio | P1 |
@@ -44,4 +45,4 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | iOS | PARCIAL | Compila y **arranca en un iPhone 17 Pro simulado** sin errores en los logs; bundle de producción en CI. Falta el recorrido manual y un iPhone real | P1 |
 | Android | BLOQUEADO | Sin JDK 17 ni Android SDK; `scripts/setup-android-env.sh` lo instala con aprobación. El release ya no firma con la clave debug (cambio de Gradle sin compilar aquí) | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |
-| Despliegue InsForge | PARCIAL | buziosflow: 17 de 18 migraciones con verificación y conciliación; respaldo de plataforma `post-migraciones-15` y volcado local con recuperación comprobada (`npm run backup:verified`). Falta la migración de storage (InsForge) y comprobar los códigos de correo | P0 |
+| Despliegue InsForge | PARCIAL | buziosflow: 17 de 19 migraciones con verificación y conciliación; respaldo de plataforma `post-migraciones-15` y volcado local con recuperación comprobada (`npm run backup:verified`). Faltan las dos de fotos (autorización) y comprobar los códigos de correo con una cuenta real | P0 |
