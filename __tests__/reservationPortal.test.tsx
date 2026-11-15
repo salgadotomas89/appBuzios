@@ -16,7 +16,7 @@ jest.mock('../src/lib/reservationService', () => {
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
     'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
-    'restoreSharedSession', 'isSharedSessionPersisted',
+    'restoreSharedSession', 'isSharedSessionPersisted', 'verifyTravelerEmail', 'resendVerificationCode',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -649,4 +649,30 @@ it('renders the portal in English with the translation notice', async () => {
   expect(hasText(root, 'Account access')).toBe(true);
   expect(hasText(root, 'English translation pending professional review.')).toBe(true);
   expect(hasText(root, 'Contract currency BRL · lab payments · no real charges')).toBe(true);
+});
+
+it('asks for the emailed code after sign-up, validates it and signs the traveler in', async () => {
+  mocked.getSharedRole.mockResolvedValueOnce(null).mockResolvedValue('traveler');
+  mocked.signUpTravelerAccount.mockResolvedValue(undefined);
+  mocked.verifyTravelerEmail.mockResolvedValue(undefined);
+  mocked.resendVerificationCode.mockResolvedValue(undefined);
+  const root = await render();
+  await type(root, 'Nombre', 'Ana');
+  await type(root, 'Correo', ' ana@example.com ');
+  await type(root, 'Contraseña', 'secret123');
+  await press(root, 'Crear cuenta de turista');
+  expect(hasText(root, 'Te enviamos un código de 6 dígitos por correo para verificarla.')).toBe(true);
+
+  await type(root, 'Código de verificación (6 dígitos)', '12a4');
+  await press(root, 'Verificar correo');
+  expect(hasText(root, 'El código tiene 6 dígitos.')).toBe(true);
+  expect(mocked.verifyTravelerEmail).not.toHaveBeenCalled();
+
+  await press(root, 'Reenviar código');
+  expect(mocked.resendVerificationCode).toHaveBeenCalledWith('ana@example.com');
+
+  await type(root, 'Código de verificación (6 dígitos)', '123456');
+  await press(root, 'Verificar correo');
+  expect(mocked.verifyTravelerEmail).toHaveBeenCalledWith('ana@example.com', '123456');
+  expect(hasText(root, 'Mis reservas')).toBe(true);
 });

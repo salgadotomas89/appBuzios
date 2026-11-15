@@ -8,11 +8,16 @@ la aprobación de quien administra el equipo: no se ejecutaron de forma autónom
 | Elemento | Estado |
 | --- | --- |
 | Xcode | 27.2 (build 27B52) instalado |
+| Bundle JS de producción | `react-native bundle` para iOS y Android correcto (también en CI) |
 | CocoaPods | 1.17.0; `pod install` correcto |
 | Build Debug para simulador genérico | **Compila** (`BUILD SUCCEEDED`) tras subir el mínimo de los pods a iOS 15 en el `Podfile` |
-| Ejecución en simulador | **No probada**: `CoreSimulator is out of date. Current version (1174.9.2) is older than build version (1174.21.0)`; `xcrun simctl` se cuelga |
+| Ejecución en simulador | **Funciona** desde el 14-11-2026 a las 22:00: CoreSimulator ya está en 1174.21 (antes 1174.9.2) y `xcrun simctl` responde. La app se instaló y arrancó en un iPhone 17 Pro (iOS 26.5) con Metro: pantalla de inicio correcta ([captura](img/simulador-ios-inicio-2026-11-14.png)), sin errores de JavaScript ni del módulo nativo de Keychain en los logs |
 
-Para habilitar el simulador (requiere contraseña de administrador):
+El paso siguiente ya no necesita administrador. Queda pendiente **recorrer** la app en el simulador o en un teléfono
+(este equipo no tiene herramientas de automatización de la interfaz ni permisos de accesibilidad para pulsar en el
+simulador) y probar la sesión contra el tenant cuando esté confirmado.
+
+Si en otro equipo vuelve a aparecer `CoreSimulator is out of date`, habilitarlo requiere contraseña de administrador:
 
 ```sh
 sudo xcodebuild -runFirstLaunch      # instala los componentes del sistema que espera Xcode 27.2

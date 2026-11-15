@@ -40,7 +40,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
 | Inglés | PARCIAL | Interfaz y contenido de ejemplo traducidos, con aviso visible de traducción pendiente de revisión profesional; términos legales no aprobados en inglés | Revisión humana |
 | Privacidad de identificadores y comisiones | COMPLETO | 0005 y 0010: el proveedor no lee uuid de turistas (tampoco en cotizaciones) y el turista no recibe la comisión B2B en ninguna lectura ni respuesta; sondas de fuga y verificación automática | P0 hecho |
-| iOS | PARCIAL | Build Debug para simulador compila; **no ejecutado**: CoreSimulator desactualizado | Bloqueado (equipo) |
+| iOS | PARCIAL | Compila y **arranca en un iPhone 17 Pro simulado** sin errores en los logs; bundle de producción en CI. Falta el recorrido manual y un iPhone real | P1 |
 | Android | BLOQUEADO | Sin JDK 17 ni Android SDK; `scripts/setup-android-env.sh` lo instala con aprobación. El release ya no firma con la clave debug (cambio de Gradle sin compilar aquí) | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |
 | Despliegue InsForge | BLOQUEADO | Tenant sin confirmar; runbook y preflight listos | Decisión humana |

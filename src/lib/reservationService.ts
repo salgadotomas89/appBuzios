@@ -283,6 +283,23 @@ export async function signUpTravelerAccount(input: {
   if ((data as { accessToken?: string | null }).accessToken) await getClient().auth.signOut();
 }
 
+// El tenant de ensayo exige verificar el correo con un código de 6 dígitos (verifyEmailMethod = code).
+// Verificar inicia la sesión y la guarda en el almacenamiento seguro, igual que una contraseña.
+export async function verifyTravelerEmail(email: string, code: string): Promise<void> {
+  getClient();
+  if (!sessionManager) throw new Error('InsForge no está configurado.');
+  try {
+    await sessionManager.verifyEmail(email, code);
+  } catch (error) {
+    throw new Error(`No se pudo verificar el correo: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export async function resendVerificationCode(email: string): Promise<void> {
+  const { error } = await getClient().auth.resendVerificationEmail({ email });
+  if (error) throw new Error(`No se pudo reenviar el código: ${error.message}`);
+}
+
 // Borra la sesión del dispositivo aunque el servidor no responda.
 export async function signOutSharedAccount(): Promise<void> {
   getClient();

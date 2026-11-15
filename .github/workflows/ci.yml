@@ -29,6 +29,12 @@ jobs:
       - run: npm test -- --ci
         env:
           TZ: Asia/Tokyo
+      # Bundle de producción con Metro: detecta dependencias que Jest resuelve distinto (shared-schemas es ESM).
+      # react-native-dotenv (allowUndefined: false) rechaza la clave vacía de .env.example: valores de relleno,
+      # que no son ninguna clave ni apuntan a ningún tenant.
+      - run: printf 'INSFORGE_URL=https://ci.invalid\nINSFORGE_ANON_KEY=ci-placeholder-not-a-key\n' > .env
+      - run: npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/ios.jsbundle" --assets-dest "$RUNNER_TEMP/ios-assets"
+      - run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/android.jsbundle" --assets-dest "$RUNNER_TEMP/android-assets"
 
   shared-reservations:
     name: Integración PostgreSQL local
@@ -42,3 +48,5 @@ jobs:
       - run: npm run test:migration-upgrade
       # El inventario que el operador compara con el tenant debe seguir a las migraciones.
       - run: npm run test:schema-inventory
+      # Recorrido completo del piloto con datos sintéticos y la moderación previa activada.
+      - run: npm run test:pilot-e2e
