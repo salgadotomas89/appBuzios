@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Language } from '../data/homeMock';
 import { portalCopy } from '../i18n/portalCopy';
-import type { OfferMedia } from '../lib/platformService';
+import type { OwnOfferMedia } from '../lib/platformService';
 import { checkImage, MAX_ALT_TEXT, MAX_IMAGES_PER_OFFER } from '../media/imagePolicy';
 import { OfferMediaGatewayError, type CancelSignal, type GatewayFailure, type OfferMediaGateway } from '../media/offerMediaGateway';
 import { pickPhotos, type PickedPhoto, type PickFailure, type PickResult, type PickSource } from '../media/photoPicker';
@@ -11,9 +11,9 @@ import { ActionButton, portalStyles } from './PortalControls';
 
 // Fotos de una oferta para su proveedor: elegir de la galería o con la cámara, vista previa, descripción
 // obligatoria, subida con progreso y cancelación, y borrado con confirmación. Todo pasa por la función
-// offer-media (gateway); nunca se escribe en el bucket. Las fotos existentes se leen por RLS (el dueño ve también
-// las de ofertas sin aprobar) y se muestran con su sesión, porque la función solo sirve sin sesión las fotos de
-// ofertas publicadas y aprobadas. Se sube una foto cada vez: la función admite dos a la vez por usuario.
+// offer-media (gateway); nunca se escribe en el bucket. Las fotos existentes se leen por RLS con su estado de
+// moderación (el dueño ve también las pendientes y rechazadas, con el motivo) y se muestran con su sesión, porque la
+// función solo sirve sin sesión las fotos aprobadas de ofertas publicadas y aprobadas. Se sube una foto cada vez: la función admite dos a la vez por usuario.
 
 declare const AbortController: new () => { signal: CancelSignal; abort(): void };
 
@@ -30,7 +30,7 @@ export type OfferPhotoManagerProps = {
   offerId: string | null;
   language: Language;
   gateway: Pick<OfferMediaGateway, 'upload' | 'remove'>;
-  loadMedia: (offerId: string) => Promise<OfferMedia[]>;
+  loadMedia: (offerId: string) => Promise<OwnOfferMedia[]>;
   getAccessToken: () => Promise<string | null>;
   pick?: (source: PickSource, limit: number) => Promise<PickResult>;
 };
@@ -40,7 +40,7 @@ const failureOf = (error: unknown): Failure => (error instanceof OfferMediaGatew
 export function OfferPhotoManager({ offerId, language, gateway, loadMedia, getAccessToken, pick = pickPhotos }: OfferPhotoManagerProps) {
   const words = portalCopy[language].photos;
   const errors = portalCopy[language].photoErrors;
-  const [media, setMedia] = useState<OfferMedia[] | null>(null);
+  const [media, setMedia] = useState<OwnOfferMedia[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [token, setToken] = useState<string | null>(null);
@@ -183,6 +183,12 @@ export function OfferPhotoManager({ offerId, language, gateway, loadMedia, getAc
                     style={styles.thumb}
                   />
                   <Text style={portalStyles.helper} numberOfLines={2}>{item.alt_text}</Text>
+                  <Text style={item.moderation_status === 'approved' ? styles.approved : item.moderation_status === 'rejected' ? styles.rejected : styles.pending}>
+                    {words.status[item.moderation_status]}
+                  </Text>
+                  {item.moderation_status === 'rejected' && item.moderation_note ? (
+                    <Text style={portalStyles.helper}>{words.rejectedReason.replace('{note}', item.moderation_note)}</Text>
+                  ) : null}
                   {removing === item.id ? (
                     <ActivityIndicator color={colors.sea} accessibilityLabel={words.remove} />
                   ) : confirming === item.id ? (
@@ -301,5 +307,8 @@ const styles = StyleSheet.create({
   small: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10, borderRadius: radius.card, borderWidth: 1, borderColor: colors.track, backgroundColor: colors.card },
   danger: { borderColor: '#B4472C' },
   dangerLabel: { color: '#B4472C' },
+  pending: { alignSelf: 'flex-start', color: colors.dark, backgroundColor: '#FFF3D7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, fontSize: 11, fontWeight: '800' },
+  approved: { alignSelf: 'flex-start', color: colors.dark, backgroundColor: '#E8F1EB', paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, fontSize: 11, fontWeight: '800' },
+  rejected: { alignSelf: 'flex-start', color: '#8A2F1B', backgroundColor: '#FCE6DF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, fontSize: 11, fontWeight: '800' },
   error: { color: '#8A2F1B', backgroundColor: '#FCE6DF', padding: 11, borderRadius: radius.card, fontSize: 12, lineHeight: 18 },
 });

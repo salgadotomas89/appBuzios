@@ -2,7 +2,7 @@ import React from 'react';
 import { Image, Text, TextInput } from 'react-native';
 import ReactTestRenderer, { act, type ReactTestInstance } from 'react-test-renderer';
 import { OfferPhotoManager } from '../src/components/OfferPhotoManager';
-import type { OfferMedia } from '../src/lib/platformService';
+import type { MediaModerationStatus, OwnOfferMedia } from '../src/lib/platformService';
 import { OfferMediaGatewayError, type CancelSignal, type TransportOptions } from '../src/media/offerMediaGateway';
 import type { PickResult } from '../src/media/photoPicker';
 import type { ImageCandidate } from '../src/media/imagePolicy';
@@ -12,8 +12,8 @@ jest.mock('../src/lib/insforge', () => ({ insforge: null, sessionManager: null }
 const OFFER = '11111111-1111-4111-8111-111111111111';
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
 
-function media(id: string, alt: string, position = 0): OfferMedia {
-  return { id, offer_id: OFFER, url: `https://f/offer-media/offers/${OFFER}/${id}.jpg`, content_type: 'image/jpeg', width: 1200, height: 800, alt_text: alt, position };
+function media(id: string, alt: string, position = 0, moderation_status: MediaModerationStatus = 'approved', moderation_note = ''): OwnOfferMedia {
+  return { id, offer_id: OFFER, url: `https://f/offer-media/offers/${OFFER}/${id}.jpg`, content_type: 'image/jpeg', width: 1200, height: 800, alt_text: alt, position, moderation_status, moderation_note };
 }
 function picked(...sizes: [number, number][]): PickResult {
   return { status: 'picked', photos: sizes.map(([width, height], index) => ({ localId: `l${index}`, uri: `file:///p${index}.jpg`, bytes: jpeg, width, height })) };
@@ -31,7 +31,7 @@ const button = (root: ReactTestInstance, label: string) =>
 const flush = () => act(async () => { await new Promise<void>(resolve => setTimeout(() => resolve(), 0)); });
 
 async function render(options: {
-  list?: OfferMedia[];
+  list?: OwnOfferMedia[];
   pick?: PickResult;
   upload?: (offerId: string, candidate: ImageCandidate, transport: TransportOptions) => Promise<unknown>;
   remove?: (id: string) => Promise<void>;
@@ -59,7 +59,7 @@ async function render(options: {
     );
   });
   await flush();
-  return { root: renderer.root, gateway, loadMedia, pick, setList: (next: OfferMedia[]) => { list = next; } };
+  return { root: renderer.root, gateway, loadMedia, pick, setList: (next: OwnOfferMedia[]) => { list = next; } };
 }
 
 it('asks to save the offer first and does not load anything without an offer', async () => {
@@ -99,10 +99,10 @@ it('previews a picked photo, requires a description and uploads it with progress
   expect(texts(root)).toContain('Subiendo… 42 %');
   expect(button(root, 'Elegir de la galería').props.disabled).toBe(true);
 
-  setList([media('m1', 'Quarto com varanda')]);
+  setList([media('m1', 'Quarto com varanda', 0, 'pending')]);
   await act(async () => { finish?.(); });
   await flush();
-  expect(texts(root)).toContain('Foto subida.');
+  expect(texts(root)).toContain('Foto enviada. La administración la revisará antes de publicarla.');
   expect(root.findAllByType(TextInput)).toHaveLength(0);
   expect(root.findAllByType(Image).map(image => image.props.accessibilityLabel)).toEqual(['Quarto com varanda']);
   expect(loadMedia).toHaveBeenCalledTimes(2);
@@ -176,4 +176,45 @@ it('stops offering new photos at ten and only asks the picker for the free slots
   expect(pick).toHaveBeenCalledWith('library', 1);
   expect(button(root, 'Elegir de la galería').props.disabled).toBe(true);
   expect(button(root, 'Tomar foto').props.disabled).toBe(true);
+});
+
+it('shows the provider the review status of each photo and why one was rejected', async () => {
+  const { root } = await render({ language: 'pt', list: [
+    media('a', 'Varanda', 0, 'approved'),
+    media('b', 'Piscina', 1, 'pending'),
+    media('c', 'Hóspedes', 2, 'rejected', 'Mostra rostos sem autorização'),
+  ] });
+  const all = texts(root);
+  expect(all).toEqual(expect.arrayContaining(['Publicada', 'Aguardando revisão', 'Recusada', 'Motivo: Mostra rostos sem autorização']));
+});
+
+it('keeps the photo after losing the connection and uploads it on retry', async () => {
+  let attempts = 0;
+  const { root, gateway } = await render({
+    pick: picked([1600, 1200]),
+    upload: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new OfferMediaGatewayError('network');
+      return { id: 'm1' };
+    },
+  });
+  await act(async () => { button(root, 'Elegir de la galería').props.onPress(); });
+  await act(async () => { root.findByType(TextInput).props.onChangeText('Vista do mar'); });
+  await act(async () => { button(root, 'Subir').props.onPress(); });
+  await flush();
+  expect(texts(root)).toContain('Sin conexión con el servidor. Inténtalo de nuevo.');
+  expect(root.findByType(TextInput).props.value).toBe('Vista do mar');
+  await act(async () => { button(root, 'Reintentar').props.onPress(); });
+  await flush();
+  expect(gateway.upload).toHaveBeenCalledTimes(2);
+  expect(texts(root)).toContain('Foto enviada. La administración la revisará antes de publicarla.');
+});
+
+it('explains that a HEIC photo that was not converted cannot be uploaded', async () => {
+  const heic = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63, 0, 0, 0, 0]);
+  const { root, gateway } = await render({ pick: { status: 'picked', photos: [{ localId: 'h', uri: 'file:///IMG_0001.HEIC', bytes: heic, width: 4032, height: 3024 }] } });
+  await act(async () => { button(root, 'Elegir de la galería').props.onPress(); });
+  expect(texts(root)).toContain('Solo se aceptan fotos JPEG, PNG o WebP.');
+  expect(button(root, 'Subir')).toBeUndefined();
+  expect(gateway.upload).not.toHaveBeenCalled();
 });

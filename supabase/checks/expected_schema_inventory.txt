@@ -44,6 +44,10 @@ column connectical_offer_media.created_at timestamp with time zone null=NO
 column connectical_offer_media.created_by uuid null=YES
 column connectical_offer_media.height integer null=NO
 column connectical_offer_media.id uuid null=NO
+column connectical_offer_media.moderated_at timestamp with time zone null=YES
+column connectical_offer_media.moderated_by uuid null=YES
+column connectical_offer_media.moderation_note text null=NO
+column connectical_offer_media.moderation_status text null=NO
 column connectical_offer_media.offer_id uuid null=NO
 column connectical_offer_media.position integer null=NO
 column connectical_offer_media.storage_key text null=NO
@@ -178,6 +182,7 @@ function connectical_admin_list_audit_log(p_limit integer) definer=true md5=b9dd
 function connectical_admin_list_campaigns() definer=true md5=1ac72c3402d6634077616e32015397f4
 function connectical_admin_list_commission_terms() definer=true md5=061d242abf09bf379390fbf3506a5afe
 function connectical_admin_list_incidents(p_status text) definer=true md5=dd95862d3ec1369535eca78660389d62
+function connectical_admin_list_media_reviews(p_status text) definer=true md5=ad3ff2125f85a506b6487f1ef28249db
 function connectical_admin_list_offers_for_moderation() definer=true md5=5865fd70ee5bab3440d33251b11c75a4
 function connectical_admin_list_payment_reviews(p_limit integer) definer=true md5=35c5b132cfd3911822fb800e62c019cb
 function connectical_admin_list_provider_applications(p_status text) definer=true md5=1a33c9acb674a4c076017642c7a850e5
@@ -186,6 +191,7 @@ function connectical_admin_list_users(p_role text) definer=true md5=669fa50cceac
 function connectical_admin_record_refund(p_reservation_id uuid, p_amount_cents integer, p_reason text, p_idempotency_key uuid) definer=true md5=0628cdf8b4814772192137addd95e2a7
 function connectical_admin_review_provider_application(p_application_id uuid, p_decision text, p_note text, p_commission_rate_bps integer) definer=true md5=da1b6be863deeb1a2c10df61c2baa5ca
 function connectical_admin_save_campaign(p_campaign_id uuid, p_title text, p_body text, p_category text, p_starts_on date, p_ends_on date, p_status text) definer=true md5=96e7491a31aaede9bd09029d812eb129
+function connectical_admin_set_media_moderation(p_media_id uuid, p_status text, p_note text) definer=true md5=67a839fb205ae39bf26c410e77450117
 function connectical_admin_set_offer_commission(p_offer_id uuid, p_rate_bps integer) definer=true md5=70640d2647cc6e547c829dfb1fb5e7c8
 function connectical_admin_set_offer_moderation(p_offer_id uuid, p_status text, p_note text) definer=true md5=f94f58175119dc5fcd6b9a0965ce5a3c
 function connectical_admin_set_provider_active(p_provider_id uuid, p_active boolean) definer=true md5=7ded6265b1c1a847ad942abe4aef7895
@@ -207,6 +213,8 @@ function connectical_list_reservations() definer=true md5=0863ee2c32962de8695c7f
 function connectical_lock_offer(p_offer_id uuid) definer=false md5=a69a57dfde1a25a403f3739f026c19f6
 function connectical_my_incidents() definer=true md5=5e28095c5066d0fd14bf196e27b1e362
 function connectical_my_provider_application() definer=true md5=0c87776cbf5d2d8c38b9959d40cd0e11
+function connectical_offer_media_moderation_guard() definer=false md5=aa017723992b74204304a985cda4ba3f
+function connectical_offer_media_new_pending() definer=false md5=ba91b426225edc5164e7b71eda020c37
 function connectical_offer_moderation_guard() definer=true md5=fd5f09ed8bbf7a992ff482d9f6dca2db
 function connectical_owns_offer(p_offer_id uuid) definer=true md5=72f2e5f8bdfd05dc5432098cbd1520af
 function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date date, p_total_units integer) definer=true md5=d9fdb95dad61964675ff588b9f5f69f0
@@ -234,6 +242,7 @@ index connectical_incidents.connectical_incidents_status_idx USING btree (status
 index connectical_inventory.connectical_inventory_pkey USING btree (offer_id, service_date)
 index connectical_offer_media.connectical_offer_media_offer_idx USING btree (offer_id, "position")
 index connectical_offer_media.connectical_offer_media_pkey USING btree (id)
+index connectical_offer_media.connectical_offer_media_review_idx USING btree (created_at) WHERE (moderation_status = 'pending'::text)
 index connectical_offer_media.connectical_offer_media_storage_key_key USING btree (storage_key)
 index connectical_offers.connectical_offers_pkey USING btree (id)
 index connectical_offers.connectical_offers_provider_idx USING btree (provider_id)
@@ -295,6 +304,8 @@ table connectical_reservation_events rls=true
 table connectical_reservations rls=true
 table connectical_settings rls=true
 table connectical_sweep_runs rls=true
+trigger connectical_offer_media.connectical_offer_media_moderation_guard
+trigger connectical_offer_media.connectical_offer_media_new_pending
 trigger connectical_offers.connectical_audit_offers
 trigger connectical_offers.connectical_offer_moderation_guard
 trigger connectical_profiles.connectical_audit_profiles

@@ -56,6 +56,23 @@ with checks(name, ok) as (
           'connectical_report_incident', 'connectical_admin_update_incident', 'connectical_admin_list_users',
           'connectical_admin_kpis', 'connectical_admin_save_campaign', 'connectical_admin_list_audit_log',
           'connectical_add_offer_media', 'connectical_remove_offer_media'))),
+    -- Moderación de fotos (202611160005), si está aplicada: decisiones solo por RPC de administración, guardas
+    -- activas, el revisor no se expone y la lectura pública exige foto aprobada.
+    ('offer media moderation absent or complete',
+      (select case when not exists (select 1 from information_schema.columns where table_schema = 'public'
+                            and table_name = 'connectical_offer_media' and column_name = 'moderation_status') then true
+         else (not has_function_privilege('anon', 'public.connectical_admin_set_media_moderation(uuid, text, text)', 'execute')
+             and not has_function_privilege('anon', 'public.connectical_admin_list_media_reviews(text)', 'execute')
+             and not has_column_privilege('anon', 'public.connectical_offer_media', 'moderated_by', 'SELECT')
+             and not has_column_privilege('authenticated', 'public.connectical_offer_media', 'moderated_by', 'SELECT')
+             and not has_table_privilege('authenticated', 'public.connectical_offer_media', 'UPDATE')
+             and not has_table_privilege('authenticated', 'public.connectical_offer_media', 'INSERT')
+             and (select count(*) = 2 from pg_trigger where tgrelid = 'public.connectical_offer_media'::regclass
+                    and tgname in ('connectical_offer_media_moderation_guard', 'connectical_offer_media_new_pending')
+                    and tgenabled = 'O')
+             and (select pg_get_expr(polqual, polrelid) like '%moderation_status = ''approved''::text%'
+                    from pg_policy where polrelid = 'public.connectical_offer_media'::regclass
+                      and polname = 'connectical_offer_media_read')) end)),
     -- Sin aplicar (0 políticas) o completas: las cuatro RESTRICTIVE que cierran 'offer-media' a las sesiones.
     ('offer-media storage rules absent or all four restrictive',
       (select count(*) = 0 or (count(*) = 4 and bool_and(permissive = 'RESTRICTIVE'))

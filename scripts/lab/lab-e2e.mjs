@@ -229,9 +229,21 @@ async function main() {
   check('the owner uploads a real 800×800 PNG through the function', uploaded.status === 201, JSON.stringify(uploadedBody));
   const stored = sql(`select coalesce(uploaded_by, 'api-key') || '|' || size || '|' || mime_type from storage.objects where bucket = 'offer-media' and key = '${uploadedBody.key}'`);
   check('InsForge stored it with the API key (uploaded_by empty), real size and detected type', stored === `api-key|${photo.length}|image/png`, stored);
+  // Moderación (202611160005): la foto nueva no es pública hasta que la administración la aprueba.
+  check('a new photo is not public while it awaits review', (await call('GET', uploadedBody.key, null)).status === 404);
+  const ownView = await provider.db.from('connectical_offer_media').select('moderation_status').eq('offer_id', offer);
+  check('the provider sees its photo as pending', (ownView.data ?? []).some(row => row.moderation_status === 'pending'), ownView.error?.message);
+  const selfApprove = await provider.db.rpc('connectical_admin_set_media_moderation', { p_media_id: uploadedBody.id, p_status: 'approved', p_note: '' });
+  check('the provider cannot approve its own photo', Boolean(selfApprove.error)); errorCode(selfApprove.error);
+  const queue = await admin.db.rpc('connectical_admin_list_media_reviews', { p_status: 'pending' });
+  check('the photo is in the admin review queue', (queue.data ?? []).some(row => row.media_id === uploadedBody.id), queue.error?.message);
+  const adminView = await call('GET', uploadedBody.key, admin.token);
+  check('the admin sees the pending photo with the session', adminView.status === 200, String(adminView.status));
+  const approved = await admin.db.rpc('connectical_admin_set_media_moderation', { p_media_id: uploadedBody.id, p_status: 'approved', p_note: '' });
+  check('the admin approves the photo', approved.data === 'approved', approved.error?.message);
   const served = await call('GET', uploadedBody.key, null);
   const servedBytes = new Uint8Array(await served.arrayBuffer());
-  check('visitors get the photo of the approved offer, byte for byte', served.status === 200 && servedBytes.length === photo.length && served.headers.get('Content-Type') === 'image/png', String(served.status));
+  check('visitors get the approved photo, without metadata, as a PNG', served.status === 200 && servedBytes.length > 0 && served.headers.get('Content-Type') === 'image/png', String(served.status));
   const listed = await anonClient().database.from('connectical_offer_media').select('url, alt_text').eq('offer_id', offer);
   check('the catalog lists the photo with the server-built URL', (listed.data ?? []).some(row => row.url === `${publicBase}/${uploadedBody.key}`), listed.error?.message);
   const travelerDelete = await call('DELETE', `media/${uploadedBody.id}`, traveler.token);

@@ -6,6 +6,7 @@ import {
   detectImageType,
   functionsBaseUrl,
   readImageSize,
+  stripImageMetadata,
   MAX_IMAGE_BYTES,
   UPLOADS_PER_WINDOW,
   UPLOAD_WINDOW_MS,
@@ -29,8 +30,8 @@ function png(width: number, height: number, extra = 0): Uint8Array {
   return bytes;
 }
 function jpeg(width: number, height: number): Uint8Array {
-  // SOI, APP0 de 16 bytes, SOF0 con alto y ancho.
-  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, ...new Array(14).fill(0), 0xff, 0xc0, 0, 17, 8, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0]);
+  // SOI, APP0 de 16 bytes, SOF0 completo (17 bytes con alto, ancho y tres componentes) y EOI.
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, ...new Array(14).fill(0), 0xff, 0xc0, 0, 17, 8, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xd9]);
   const view = new DataView(bytes.buffer);
   view.setUint16(25, height);
   view.setUint16(27, width);
@@ -178,7 +179,7 @@ it('serves a photo to visitors only once the offer is published and approved; th
   const visitor = await w.handle(request('GET', key, null));
   expect(visitor.status).toBe(200);
   expect(visitor.headers.get('Content-Type')).toBe('image/jpeg');
-  expect(visitor.headers.get('Cache-Control')).toBe('public, max-age=300');
+  expect(visitor.headers.get('Cache-Control')).toBe('public, max-age=60');
   expect(visitor.headers.get('X-Content-Type-Options')).toBe('nosniff');
   expect(new Uint8Array(await visitor.arrayBuffer())).toEqual(jpeg(1600, 900));
   // Un archivo que nadie registró no se sirve aunque exista en el bucket.
@@ -368,4 +369,61 @@ it('does not let a traveler or another provider touch photos of an offer they do
   expect((await w.handle(request('DELETE', `media/${mediaId}`, API_KEY))).status).toBe(401);
   expect(w.files.has(key)).toBe(true);
   expect(w.media).toHaveLength(1);
+});
+
+// EXIF mínimo (TIFF little-endian): IFD0 con orientación 6 y puntero a un IFD GPS con latitud (3 racionales).
+function exifSegment(): number[] {
+  const tiff: number[] = [0x49, 0x49, 0x2a, 0, 8, 0, 0, 0];
+  const le16 = (v: number) => [v & 0xff, v >> 8];
+  const le32 = (v: number) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, v >>> 24];
+  // IFD0 en 8: 2 entradas (orientación, GPS) + siguiente IFD = 2 + 24 + 4 = 30 → GPS en 38.
+  tiff.push(...le16(2), ...le16(0x0112), ...le16(3), ...le32(1), ...le16(6), 0, 0, ...le16(0x8825), ...le16(4), ...le32(1), ...le32(38), ...le32(0));
+  // IFD GPS en 38: 1 entrada (GPSLatitude, RATIONAL x3 en 56) + siguiente = 2 + 12 + 4 = 18 → datos en 56.
+  tiff.push(...le16(1), ...le16(0x0002), ...le16(5), ...le32(3), ...le32(56), ...le32(0));
+  tiff.push(...le32(22), ...le32(1), ...le32(54), ...le32(1), ...le32(1234), ...le32(100)); // 22° 54' 12,34"
+  const payload = [...'Exif'].map(c => c.charCodeAt(0)).concat([0, 0], tiff);
+  return [0xff, 0xe1, ...le16(payload.length + 2).reverse(), ...payload];
+}
+const xmp = (text: string) => { const body = [...`http://ns.adobe.com/xap/1.0/\0${text}`].map(c => c.charCodeAt(0)); return [0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body]; };
+const comment = (text: string) => { const body = [...text].map(c => c.charCodeAt(0)); return [0xff, 0xfe, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body]; };
+const has = (bytes: Uint8Array, text: string) => Buffer.from(bytes).includes(text);
+declare const Buffer: { from(bytes: Uint8Array): { includes(value: string | Uint8Array): boolean } };
+
+it('removes location and text metadata from JPEG, PNG and WebP but keeps the picture and its orientation', () => {
+  const base = jpeg(1600, 900);
+  const dirty = new Uint8Array([...base.subarray(0, 20), ...exifSegment(), ...xmp('<exif:GPSLatitude>22,54</exif:GPSLatitude>'), ...comment('Casa da Ana'), ...base.subarray(20)]);
+  const clean = stripImageMetadata(dirty, 'image/jpeg')!;
+  expect(readImageSize(clean, 'image/jpeg')).toEqual({ width: 1600, height: 900 });
+  expect([has(clean, 'GPSLatitude'), has(clean, 'Casa da Ana'), has(clean, 'Exif')]).toEqual([false, false, true]);
+  // La latitud (22/1, 54/1, 1234/100) ya no está en ningún sitio; la orientación (0x0112 = 6) sí.
+  expect(Buffer.from(clean).includes(new Uint8Array([22, 0, 0, 0, 1, 0, 0, 0, 54, 0, 0, 0]))).toBe(false);
+  expect(Buffer.from(clean).includes(new Uint8Array([0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0]))).toBe(true);
+
+  const crcless = (type: string, data: number[]) => [0, 0, 0, data.length, ...[...type].map(c => c.charCodeAt(0)), ...data, 0, 0, 0, 0];
+  const pngDirty = new Uint8Array([...png(1200, 800).subarray(0, 33), ...crcless('tEXt', [...'GPS\0-22.9'].map(c => c.charCodeAt(0))), ...crcless('eXIf', [1, 2, 3]), ...crcless('IEND', [])]);
+  const pngClean = stripImageMetadata(pngDirty, 'image/png')!;
+  expect([readImageSize(pngClean, 'image/png'), has(pngClean, 'tEXt'), has(pngClean, 'eXIf'), has(pngClean, 'IEND')]).toEqual([{ width: 1200, height: 800 }, false, false, true]);
+
+  const chunk = (fourcc: string, data: number[]) => [...[...fourcc].map(c => c.charCodeAt(0)), data.length, 0, 0, 0, ...data, ...(data.length % 2 ? [0] : [])];
+  const vp8x = [0x0c, 0, 0, 0, ...[(1024 - 1) & 0xff, (1024 - 1) >> 8, 0], ...[(768 - 1) & 0xff, (768 - 1) >> 8, 0]];
+  const body = [...chunk('VP8X', vp8x), ...chunk('VP8 ', new Array(10).fill(0)), ...chunk('EXIF', [9, 9, 9]), ...chunk('XMP ', [7, 7])];
+  const webpDirty = new Uint8Array([...'RIFF'].map(c => c.charCodeAt(0)).concat([0, 0, 0, 0], [...'WEBP'].map(c => c.charCodeAt(0)), body));
+  new DataView(webpDirty.buffer).setUint32(4, webpDirty.length - 8, true);
+  const webpClean = stripImageMetadata(webpDirty, 'image/webp')!;
+  expect([has(webpClean, 'EXIF'), has(webpClean, 'XMP '), webpClean[20] & 0x0c, new DataView(webpClean.buffer).getUint32(4, true)]).toEqual([false, false, 0, webpClean.length - 8]);
+  expect(readImageSize(webpClean, 'image/webp')).toEqual({ width: 1024, height: 768 });
+
+  // Estructuras incoherentes (longitud que sale del archivo) no se guardan.
+  expect(stripImageMetadata(new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0x40, 0, 1, 2]), 'image/jpeg')).toBeNull();
+});
+
+it('stores the cleaned bytes and registers their real size', async () => {
+  const w = world();
+  const base = jpeg(1600, 900);
+  const dirty = new Uint8Array([...base.subarray(0, 20), ...comment('Rua das Pedras 12'), ...base.subarray(20)]);
+  const { key } = await (await w.handle(post(`offers/${OFFER}`, dirty, 'owner'))).json();
+  const stored = w.files.get(key)!.bytes;
+  expect(has(stored, 'Rua das Pedras')).toBe(false);
+  expect(w.rpc).toHaveBeenCalledWith('owner', 'connectical_add_offer_media', expect.objectContaining({ p_byte_size: stored.length }));
+  expect(stored.length).toBe(base.length);
 });

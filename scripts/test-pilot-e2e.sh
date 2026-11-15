@@ -8,7 +8,7 @@ set -eu
 
 container="connectical-pilot-e2e-$$"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/connectical-pilot.XXXXXX")"
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -rf "$workdir"; }
+cleanup() { docker rm -f -v "$container" >/dev/null 2>&1 || true; rm -rf "$workdir"; }
 trap cleanup EXIT INT TERM
 
 docker run -d --rm --name "$container" -e POSTGRES_PASSWORD=connectical_local_test_only \
@@ -85,12 +85,16 @@ as_user "$owner" "select public.connectical_provider_publish_inventory_range('$o
 photo_key="offers/$offer/$(sql -c 'select gen_random_uuid();').jpg"
 # Como la deja la función offer-media: escrita con la clave de API (uploaded_by nulo) en el bucket privado.
 sql -c "insert into storage.buckets (name, public) values ('offer-media', false); insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', '$photo_key', 350000, 'image/jpeg');" >/dev/null
-as_user "$owner" "select public.connectical_add_offer_media('$offer', '$photo_key', 'image/jpeg', 350000, 1600, 1066, 'Varanda com vista para o mar');" >/dev/null
+photo=$(as_user "$owner" "select public.connectical_add_offer_media('$offer', '$photo_key', 'image/jpeg', 350000, 1600, 1066, 'Varanda com vista para o mar');")
 expect "$(as_user "$ana" "select count(*) from public.connectical_offers where id = '$offer';")" '0' 'Pending offer visible to travelers'
 fails "$ana" "select public.connectical_create_quote('$offer', current_date + 20, 1, 2, 600);"
 as_user "$admin" "select public.connectical_admin_set_offer_moderation('$offer', 'approved', '');" >/dev/null
+# La oferta aprobada ya se ve; su foto, solo cuando la administración la revisa (202611160005).
+expect "$(sql -c "set role anon; select count(*) from public.connectical_offers where id = '$offer';")" '1' 'Offer visible after approval'
+expect "$(sql -c "set role anon; select count(*) from public.connectical_offer_media where offer_id = '$offer';")" '0' 'Photo hidden until reviewed'
+as_user "$admin" "select public.connectical_admin_set_media_moderation('$photo', 'approved', '');" >/dev/null
 expect "$(sql -c "set role anon; select count(*) from public.connectical_offer_media where offer_id = '$offer';")" '1' 'Photo visible after approval'
-echo "PASS 2. offer with details, 3 nights of inventory and a photo stays hidden until moderation approves it"
+echo "PASS 2. offer with details, 3 nights of inventory and a photo stay hidden until the admin approves the offer and then the photo"
 
 # 3. Reservas concurrentes por la última habitación de dos noches.
 qa=$(as_user "$ana" "select (public.connectical_create_quote('$offer', current_date + 20, 1, 2, 600)).id;")
@@ -139,7 +143,7 @@ failed=$(sql -f /sb/checks/verify_migrations.sql | grep -v '|t$' || true)
 expect "$failed" '' 'verify_migrations.sql'
 audit=$(as_user "$admin" "select string_agg(distinct action, ',' order by action) from public.connectical_admin_list_audit_log(200);")
 case "$audit" in
-  *application_approved*incident_resolved*offer_terms_changed*provider_created*refund_recorded*role_changed*) ;;
+  *application_approved*incident_resolved*media_approved*offer_terms_changed*provider_created*refund_recorded*role_changed*) ;;
   *) echo "Audit log incomplete: $audit" >&2; exit 1 ;;
 esac
 echo "PASS 7. inventory reconciles, KPIs match, every invariant verifies and the audit log has each admin step"

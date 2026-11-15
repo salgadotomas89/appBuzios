@@ -66,3 +66,14 @@ it('builds the same function URL as the deployed function', () => {
   }
   expect(offerMediaFunctionUrl('https://ykfv5j3m.us-east.insforge.app')).toBe('https://ykfv5j3m.function2.insforge.app/offer-media');
 });
+
+it('decodes a 5 MB photo exactly and fast enough to keep the screen responsive', () => {
+  const bytes = Uint8Array.from({ length: 5 * 1024 * 1024 }, (_, index) => (index * 31 + 7) % 256);
+  const encoded = Buffer.from(bytes).toString('base64');
+  const started = Date.now();
+  const decoded = base64ToBytes(encoded);
+  const elapsed = Date.now() - started;
+  expect(decoded?.length).toBe(bytes.length);
+  expect(decoded?.[4_000_000]).toBe(bytes[4_000_000]);
+  expect(elapsed).toBeLessThan(2000);
+});

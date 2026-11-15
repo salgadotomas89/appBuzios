@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Text, TextInput } from 'react-native';
+import { Image, Text, TextInput } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
 import { AdminConsole } from '../src/screens/AdminConsole';
 import { TravelerServices } from '../src/screens/TravelerServices';
@@ -12,6 +12,7 @@ jest.mock('../src/lib/platformService', () => {
     'getPlatformKpis', 'listAuditLog', 'listCampaigns', 'listIncidents', 'listOffersForModeration', 'listPlatformUsers',
     'listProviderApplications', 'reviewProviderApplication', 'saveCampaign', 'setOfferModeration', 'updateIncident',
     'getMyProviderApplication', 'listMyIncidents', 'reportIncident', 'submitProviderApplication',
+    'listMediaReviews', 'setMediaModeration',
   ];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -196,4 +197,31 @@ it('hides the provider application from providers and reports incidents on a cho
   await press(root, 'Enviar incidencia');
   expect(mocked.reportIncident).toHaveBeenCalledWith({ reservationId: 'r-12345678-aaaa', category: 'safety', description: 'Colete salva-vidas rasgado' });
   expect(hasText(root, 'Seguridad · abierta')).toBe(true);
+});
+
+it('reviews new photos from the queue: approve, or reject only with a reason', async () => {
+  const photo: platform.MediaReview = {
+    media_id: 'm1', offer_id: 'o1', offer_title: 'Escuna', provider_name: 'Lab', url: 'https://f/offer-media/offers/o1/m1.jpg',
+    content_type: 'image/jpeg', width: 1600, height: 1200, alt_text: 'Convés ao pôr do sol', moderation_status: 'pending',
+    moderation_note: '', moderated_by: null, moderated_at: null, created_at: '2099-01-01T10:00:00Z',
+  };
+  mocked.listMediaReviews.mockResolvedValue([photo]);
+  mocked.setMediaModeration.mockResolvedValue('approved');
+  const root = await renderAdmin();
+  await press(root, 'Fotos');
+  expect(mocked.listMediaReviews).toHaveBeenCalledWith('pending');
+  expect(root.findAllByType(Image).map(image => image.props.accessibilityLabel)).toEqual(['Convés ao pôr do sol']);
+  expect(hasText(root, 'Oferta: Escuna · Lab')).toBe(true);
+
+  await press(root, 'Aprobar foto');
+  expect(mocked.setMediaModeration).toHaveBeenCalledWith('m1', 'approved', '');
+  expect(hasText(root, 'message:Foto revisada.')).toBe(true);
+
+  await press(root, 'Rechazar foto');
+  const reject = () => root.findAll(node => typeof node.props.onPress === 'function' && node.props.accessibilityRole === 'button' &&
+    node.findAllByType(Text).some(text => flatten(text.props.children) === 'Rechazar foto'))[0];
+  expect(reject().props.disabled).toBe(true);
+  await type(root, 'Motivo del rechazo (obligatorio)', ' Mostra rostos ');
+  await press(root, 'Rechazar foto');
+  expect(mocked.setMediaModeration).toHaveBeenLastCalledWith('m1', 'rejected', 'Mostra rostos');
 });

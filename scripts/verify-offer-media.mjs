@@ -4,10 +4,12 @@
 //
 //   node scripts/verify-offer-media.mjs --traveler turista@equipo.com
 //   node scripts/verify-offer-media.mjs --traveler turista@equipo.com --provider pousada@equipo.com --offer <uuid>
+//   node scripts/verify-offer-media.mjs --traveler … --provider … --offer <uuid> --admin admin@equipo.com
 //
 // Sin sesión y como turista solo intenta cosas que deben fallar (no deja nada). Con --provider y --offer (una oferta
-// de prueba de esa cuenta) sube una foto de 800×800 generada aquí por la función, la ve, comprueba quién más la ve y
-// la borra al final, también si algo falla.
+// de prueba de esa cuenta) sube una foto de 800×800 generada aquí por la función, la ve, comprueba que nadie más la ve
+// mientras espera revisión y la borra al final, también si algo falla. Con --admin, además la ve en la bandeja, la
+// aprueba y comprueba que solo entonces es pública (si la oferta está publicada y aprobada).
 import readline from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { crc32, deflateSync } from 'node:zlib';
@@ -113,9 +115,21 @@ if (args.provider?.[0] && args.offer?.[0]) {
     check('the owner uploads a real PNG through the function', Boolean(uploaded), `${response.status} ${uploaded ? '' : await response.text()}`);
     if (uploaded) {
       check('the owner sees the photo with the session', (await call('GET', uploaded.key, providerToken)).status === 200);
-      check(`without a session it is served only if the offer is published and approved (${isPublic ? 'approved' : 'not approved'})`,
-        (await call('GET', uploaded.key, null)).status === (isPublic ? 200 : 404));
+      check('while it awaits review it is not served without a session', (await call('GET', uploaded.key, null)).status === 404);
+      check('a traveler does not see it either', (await call('GET', uploaded.key, travelerToken)).status === 404);
+      const selfApprove = await withToken(providerToken).database.rpc('connectical_admin_set_media_moderation', { p_media_id: uploaded.id, p_status: 'approved', p_note: '' });
+      check('the provider cannot approve its own photo', Boolean(selfApprove.error));
       check('a traveler cannot delete it', (await call('DELETE', `media/${uploaded.id}`, travelerToken)).status === 403);
+      if (args.admin?.[0]) {
+        const adminToken = await signIn('admin', args.admin[0]);
+        const admin = withToken(adminToken);
+        const queue = await admin.database.rpc('connectical_admin_list_media_reviews', { p_status: 'pending' });
+        check('the photo is in the admin review queue', (queue.data ?? []).some(row => row.media_id === uploaded.id), queue.error?.message);
+        const approved = await admin.database.rpc('connectical_admin_set_media_moderation', { p_media_id: uploaded.id, p_status: 'approved', p_note: '' });
+        check('the admin approves it', approved.data === 'approved', approved.error?.message);
+        check(`once approved it is served without a session only if the offer is published and approved (${isPublic ? 'yes' : 'no'})`,
+          (await call('GET', uploaded.key, null)).status === (isPublic ? 200 : 404));
+      }
     }
   } finally {
     if (uploaded) {

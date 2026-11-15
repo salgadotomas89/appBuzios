@@ -92,7 +92,7 @@ import {
 import { colors } from '../theme';
 import { OfferPhotoManager } from '../components/OfferPhotoManager';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
-import { listOfferMedia } from '../lib/platformService';
+import { listOwnOfferMedia } from '../lib/platformService';
 import { offerPhotoGateway } from '../media/offerPhotos';
 import { sessionManager } from '../lib/insforge';
 import { AdminConsole } from './AdminConsole';
@@ -121,7 +121,7 @@ type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
 // Se lanza para mostrar un mensaje ya traducido sin pasar por el mapa de errores.
 class InputValidationError extends Error {}
 
-const loadOfferMedia = (offerId: string) => listOfferMedia([offerId]);
+const loadOfferMedia = (offerId: string) => listOwnOfferMedia(offerId);
 const currentAccessToken = async () => (await sessionManager?.currentAccessToken()) ?? null;
 
 export function ReservationPortal({

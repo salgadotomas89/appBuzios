@@ -50,7 +50,7 @@ echo "Dumped $(cut -d: -f3- "$out/snapshot.txt") UTC"
 
 name="bf-verify-$$"
 docker network create --internal "$name" >/dev/null
-trap 'docker rm -f "$name" >/dev/null 2>&1; docker network rm "$name" >/dev/null 2>&1' EXIT INT TERM
+trap 'docker rm -f -v "$name" >/dev/null 2>&1; docker network rm "$name" >/dev/null 2>&1' EXIT INT TERM
 docker run -d --name "$name" --network "$name" -e POSTGRES_PASSWORD=restore-local -e POSTGRES_DB=insforge "$image" \
   -c shared_preload_libraries=pg_cron,pg_stat_statements -c cron.database_name=insforge \
   -c cron.launch_active_jobs=off >/dev/null

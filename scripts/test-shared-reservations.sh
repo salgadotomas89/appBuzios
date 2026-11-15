@@ -8,7 +8,7 @@ migrations="$PWD/supabase/migrations"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/connectical-reservation-it.XXXXXX")"
 container_pid=''
 cleanup() {
-  if [ "$owns_container" -eq 1 ]; then docker rm -f "$container" >/dev/null 2>&1 || true; fi
+  if [ "$owns_container" -eq 1 ]; then docker rm -f -v "$container" >/dev/null 2>&1 || true; fi
   if [ -n "$container_pid" ]; then wait "$container_pid" >/dev/null 2>&1 || true; fi
   rm -rf "$workdir"
 }
@@ -1221,8 +1221,60 @@ media_id=$(add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto 
 if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Duplicada' >/dev/null 2>&1; then
   echo "Duplicate storage key accepted" >&2; exit 1
 fi
-public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text || '|' || url from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
-[ "$public_media" = "Quarto com vista para o mar|https://cdn.example/media/$media_key" ] || { echo "Visible offer photo mismatch for anon: $public_media" >&2; exit 1; }
+# Moderación (202611160005): la foto nueva espera revisión; la oferta sigue publicada y reservable mientras tanto.
+anon_media() { docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1; }
+[ "$(anon_media)" = 0 ] || { echo "A pending photo is public" >&2; exit 1; }
+[ "$(as_user "$applicant" "select moderation_status from public.connectical_offer_media where id = '$media_id';")" = pending ] || {
+  echo "The provider cannot see the pending status of its photo" >&2; exit 1; }
+[ "$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select published::text || moderation_status from public.connectical_offers where id = '$mod_offer';" | tail -1)" = trueapproved ] || {
+  echo "A pending photo changed the offer's publication" >&2; exit 1; }
+for actor in "$applicant" "$traveler_a"; do
+  if as_user "$actor" "select public.connectical_admin_set_media_moderation('$media_id', 'approved', '');" >/dev/null 2>&1; then
+    echo "A non-admin approved a photo" >&2; exit 1
+  fi
+  if as_user "$actor" "select * from public.connectical_admin_list_media_reviews('pending');" >/dev/null 2>&1; then
+    echo "A non-admin read the photo review queue" >&2; exit 1
+  fi
+done
+if as_user "$applicant" "update public.connectical_offer_media set moderation_status = 'approved' where id = '$media_id';" >/dev/null 2>&1; then
+  echo "The provider updated the moderation status directly" >&2; exit 1
+fi
+# Defensa en profundidad: aunque una sesión de proveedor pudiera escribir la tabla, el trigger no le deja aprobar.
+if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select set_config('request.jwt.claim.sub','$applicant',false); update public.connectical_offer_media set moderation_status = 'approved' where id = '$media_id';" >/dev/null 2>&1; then
+  echo "The moderation guard let a provider session approve its photo" >&2; exit 1
+fi
+if docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select set_config('request.jwt.claim.sub','$applicant',false); insert into public.connectical_offer_media (offer_id, storage_key, url, content_type, byte_size, width, height, alt_text, moderation_status) values ('$mod_offer', 'offers/$mod_offer/' || gen_random_uuid() || '.jpg', 'https://cdn.example/x', 'image/jpeg', 10, 800, 800, 'Auto', 'approved') returning moderation_status;" | grep -q approved; then
+  echo "A session inserted a photo already approved" >&2; exit 1
+fi
+docker exec "$container" psql -q -U postgres -d postgres -c "delete from public.connectical_offer_media where alt_text = 'Auto';"
+queue=$(as_user "$admin_user" "select string_agg(alt_text || ':' || provider_name, ',') from public.connectical_admin_list_media_reviews('pending');")
+case "$queue" in *"Quarto com vista para o mar:"*) ;; *) echo "The pending photo is not in the review queue: $queue" >&2; exit 1 ;; esac
+if as_user "$admin_user" "select public.connectical_admin_set_media_moderation('$media_id', 'rejected', ' ');" >/dev/null 2>&1; then
+  echo "A rejection without a reason was accepted" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_set_media_moderation('$media_id', 'approved', '');" >/dev/null
+public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text || '|' || url || '|' || moderation_status from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+[ "$public_media" = "Quarto com vista para o mar|https://cdn.example/media/$media_key|approved" ] || { echo "Visible offer photo mismatch for anon: $public_media" >&2; exit 1; }
+if docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select moderated_by from public.connectical_offer_media limit 1;" >/dev/null 2>&1; then
+  echo "The reviewer is readable by anon" >&2; exit 1
+fi
+# Cambiar el contenido de una foto aprobada la devuelve a revisión.
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_offer_media set alt_text = 'Quarto renovado' where id = '$media_id';"
+[ "$(anon_media)" = 0 ] || { echo "A changed photo stayed public without review" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_media_moderation('$media_id', 'approved', 'Conferida');" >/dev/null
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_offer_media set alt_text = 'Quarto com vista para o mar' where id = '$media_id';"
+as_user "$admin_user" "select public.connectical_admin_set_media_moderation('$media_id', 'approved', '');" >/dev/null
+reject_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+gateway_put "$reject_key" image/jpeg 2000
+rejected_id=$(add_media "$applicant" "$reject_key" image/jpeg 2000 1200 900 'Foto com pessoas')
+as_user "$admin_user" "select public.connectical_admin_set_media_moderation('$rejected_id', 'rejected', 'Mostra rostos sem autorização');" >/dev/null
+[ "$(anon_media)" = 1 ] || { echo "A rejected photo is public" >&2; exit 1; }
+[ "$(as_user "$applicant" "select moderation_status || '|' || moderation_note from public.connectical_offer_media where id = '$rejected_id';")" = 'rejected|Mostra rostos sem autorização' ] || {
+  echo "The provider does not see why its photo was rejected" >&2; exit 1; }
+audit=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select string_agg(action || ':' || (actor_user_id = '$admin_user')::text || ':' || (details->>'from') || '>' || (details->>'to'), ',' order by id) from public.connectical_admin_audit_log where target_table = 'connectical_offer_media';" | tail -1)
+[ "$audit" = 'media_approved:true:pending>approved,media_approved:true:pending>approved,media_approved:true:pending>approved,media_rejected:true:pending>rejected' ] || {
+  echo "Photo moderation not audited as expected: $audit" >&2; exit 1; }
+as_user "$applicant" "select public.connectical_remove_offer_media('$rejected_id');" >/dev/null
 if docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select storage_key from public.connectical_offer_media limit 1;" >/dev/null 2>&1; then
   echo "Storage keys readable by anon" >&2; exit 1
 fi

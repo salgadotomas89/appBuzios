@@ -229,6 +229,48 @@ export async function listOfferMedia(offerIds: string[]): Promise<OfferMedia[]> 
   return (data ?? []) as OfferMedia[];
 }
 
+// Moderación de fotos (202611160005): toda foto nueva espera revisión de la administración antes de ser pública.
+export type MediaModerationStatus = 'pending' | 'approved' | 'rejected';
+export type OwnOfferMedia = OfferMedia & { moderation_status: MediaModerationStatus; moderation_note: string };
+
+// Fotos de una oferta propia con su estado y el motivo del rechazo. La RLS solo devuelve las de pendientes y
+// rechazadas a su dueño y a la administración.
+export async function listOwnOfferMedia(offerId: string): Promise<OwnOfferMedia[]> {
+  if (!insforge) return [];
+  const { data, error } = await (await freshClient()).database
+    .from('connectical_offer_media')
+    .select('id, offer_id, url, content_type, width, height, alt_text, position, moderation_status, moderation_note')
+    .eq('offer_id', offerId)
+    .order('position', { ascending: true });
+  if (error) throw new Error(`No se pudieron leer las fotos: ${error.message}`);
+  return (data ?? []) as OwnOfferMedia[];
+}
+
+export type MediaReview = {
+  media_id: string;
+  offer_id: string;
+  offer_title: string;
+  provider_name: string;
+  url: string;
+  content_type: string;
+  width: number;
+  height: number;
+  alt_text: string;
+  moderation_status: MediaModerationStatus;
+  moderation_note: string;
+  moderated_by: string | null;
+  moderated_at: string | null;
+  created_at: string;
+};
+
+export async function listMediaReviews(status: MediaModerationStatus | null = 'pending'): Promise<MediaReview[]> {
+  return callRpc('connectical_admin_list_media_reviews', { p_status: status });
+}
+
+export async function setMediaModeration(mediaId: string, status: 'approved' | 'rejected', note: string): Promise<MediaModerationStatus> {
+  return callRpc('connectical_admin_set_media_moderation', { p_media_id: mediaId, p_status: status, p_note: note });
+}
+
 // Las fotos pasan siempre por la función offer-media: valida el archivo, lo sube con la clave de API y lo registra
 // como el usuario. La base solo registra archivos escritos así (202611160003), de modo que subir directamente al
 // bucket y llamar a connectical_add_offer_media no publica nada. Devuelve el id de la foto.

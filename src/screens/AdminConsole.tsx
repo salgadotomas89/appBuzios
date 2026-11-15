@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ActionButton, Chip, Field, formatBps, portalStyles as styles } from '../components/PortalControls';
 import type { Language } from '../data/homeMock';
 import { inputErrorText, portalCopy, type PortalCategory } from '../i18n/portalCopy';
@@ -9,27 +9,31 @@ import {
   listAuditLog,
   listCampaigns,
   listIncidents,
+  listMediaReviews,
   listOffersForModeration,
   listPlatformUsers,
   listProviderApplications,
   reviewProviderApplication,
   saveCampaign,
+  setMediaModeration,
   setOfferModeration,
   updateIncident,
   type AdminIncident,
   type AuditEntry,
   type Campaign,
   type IncidentStatus,
+  type MediaReview,
   type ModerationOffer,
   type PlatformKpis,
   type PlatformUser,
   type ProviderApplication,
 } from '../lib/platformService';
+import { sessionManager } from '../lib/insforge';
 import { brlFromCents } from '../utils/format';
 import { addDays, buziosIsoDate, parseIsoDate, parsePercentToBps } from '../utils/portalInput';
 
 type Section = keyof (typeof platformCopy)['es']['sections'];
-const SECTIONS: Section[] = ['applications', 'moderation', 'incidents', 'users', 'kpis', 'audit', 'campaigns'];
+const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns'];
 
 // Error de validación ya traducido; el portal lo muestra tal cual.
 class ConsoleInputError extends Error {}
@@ -48,6 +52,9 @@ export function AdminConsole({
   const [section, setSection] = useState<Section | null>(null);
   const [applications, setApplications] = useState<ProviderApplication[]>([]);
   const [offers, setOffers] = useState<ModerationOffer[]>([]);
+  const [photos, setPhotos] = useState<MediaReview[]>([]);
+  // Las fotos pendientes solo se sirven con sesión de administración (función offer-media).
+  const [photoToken, setPhotoToken] = useState<string | null>(null);
   const [incidents, setIncidents] = useState<AdminIncident[]>([]);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [kpis, setKpis] = useState<PlatformKpis | null>(null);
@@ -69,6 +76,10 @@ export function AdminConsole({
   async function loadSection(next: Section) {
     if (next === 'applications') setApplications(await listProviderApplications('pending'));
     if (next === 'moderation') setOffers(await listOffersForModeration());
+    if (next === 'photos') {
+      setPhotos(await listMediaReviews('pending'));
+      setPhotoToken((await sessionManager?.currentAccessToken()) ?? null);
+    }
     if (next === 'incidents') setIncidents(await listIncidents(null));
     if (next === 'users') setUsers(await listPlatformUsers());
     if (next === 'kpis') {
@@ -101,6 +112,16 @@ export function AdminConsole({
       setSelectedId(null);
       await loadSection('moderation');
       return words.moderationSaved;
+    });
+  }
+
+  function reviewPhoto(photo: MediaReview, status: 'approved' | 'rejected') {
+    run(async () => {
+      await setMediaModeration(photo.media_id, status, status === 'rejected' ? note.trim() : '');
+      setSelectedId(null);
+      setNote('');
+      await loadSection('photos');
+      return words.photoSaved;
     });
   }
 
@@ -202,6 +223,36 @@ export function AdminConsole({
         )) : empty
       ) : null}
 
+      {section === 'photos' ? (
+        <>
+          <Text style={styles.helper}>{words.photoQueueHint}</Text>
+          {photos.length ? photos.map(photo => (
+            <View key={photo.media_id} style={styles.eventRow}>
+              <Image
+                source={{ uri: photo.url, headers: photoToken ? { Authorization: `Bearer ${photoToken}` } : undefined }}
+                accessible
+                accessibilityLabel={photo.alt_text}
+                resizeMode="contain"
+                style={[photoStyles.review, { aspectRatio: photo.width / photo.height }]}
+              />
+              <Text style={styles.offerName}>{words.photoOffer}: {photo.offer_title} · {photo.provider_name}</Text>
+              <Text style={styles.helper}>{photo.alt_text} · {photo.width}×{photo.height} · {photo.created_at.slice(0, 16).replace('T', ' ')}</Text>
+              {selectedId === photo.media_id ? (
+                <View style={styles.quote}>
+                  <Field label={words.photoRejectReason} value={note} onChange={setNote} maxLength={300} />
+                  <ActionButton title={words.photoReject} onPress={() => reviewPhoto(photo, 'rejected')} disabled={busy || note.trim().length < 3} />
+                </View>
+              ) : (
+                <View style={styles.chips}>
+                  <ActionButton title={words.photoApprove} onPress={() => reviewPhoto(photo, 'approved')} disabled={busy} />
+                  <ActionButton title={words.photoReject} onPress={() => { setSelectedId(photo.media_id); setNote(''); }} disabled={busy} secondary />
+                </View>
+              )}
+            </View>
+          )) : empty}
+        </>
+      ) : null}
+
       {section === 'incidents' ? (
         incidents.length ? incidents.map(incident => (
           <View key={incident.id} style={styles.eventRow}>
@@ -289,5 +340,7 @@ export function AdminConsole({
     </View>
   );
 }
+
+const photoStyles = StyleSheet.create({ review: { width: '100%', maxHeight: 260 } });
 
 export { ConsoleInputError };

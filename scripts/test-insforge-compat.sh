@@ -6,7 +6,7 @@
 set -eu
 
 container="connectical-insforge-compat-$$"
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f -v "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 docker run -d --rm --name "$container" -e POSTGRES_PASSWORD=connectical_local_test_only \
   -v "$PWD/supabase:/sb:ro" postgres:15 >/dev/null
@@ -173,8 +173,22 @@ if register "$(photo "$own_offer")" >/dev/null 2>&1; then echo "A photo without 
   echo "connectical_add_offer_media is not owned by project_admin" >&2; exit 1; }
 echo "PASS only photos written by the offer-media function (API key) are registered, with the function owned by project_admin"
 
-# Vuelta atrás preparada (docs/rollback/offer-media-photos.sql): se aplica sobre lo anterior, quita las cuatro
-# políticas y devuelve el registro de fotos a 202611150003 (ya no exige el archivo de la función).
+# Vueltas atrás preparadas, en el orden del procedimiento: primero la moderación (docs/rollback/offer-media-moderation.sql),
+# que deja una foto pendiente visible otra vez si su oferta es pública, y después offer-media-photos.sql.
+pending_key=$(photo "$own_offer")
+su -c "insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', '$pending_key', 350000, 'image/jpeg');"
+pending_id=$(register "$pending_key")
+[ -n "$pending_id" ] || { echo "Could not register a pending photo before the rollback" >&2; exit 1; }
+[ "$(su -c "set role anon; select count(*) from public.connectical_offer_media where id = '$pending_id';")" = 0 ] || {
+  echo "A pending photo was public before the rollback" >&2; exit 1; }
+docker exec -i -e PGPASSWORD=local "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U project_admin -d postgres \
+  < "$PWD/docs/rollback/offer-media-moderation.sql" >/dev/null
+[ "$(su -c "select count(*) from pg_proc where proname in ('connectical_admin_set_media_moderation', 'connectical_admin_list_media_reviews');")" = 0 ] || {
+  echo "Moderation rollback left its functions" >&2; exit 1; }
+[ "$(su -c "set role anon; select count(*) from public.connectical_offer_media where id = '$pending_id';")" = 1 ] || {
+  echo "Moderation rollback did not restore the previous read policy" >&2; exit 1; }
+echo "PASS the prepared moderation rollback applies as project_admin and restores the previous photo visibility"
+
 docker exec -i -e PGPASSWORD=connectical_local_test_only "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres \
   < "$PWD/docs/rollback/offer-media-photos.sql" >/dev/null
 [ "$(su -c "select count(*) from pg_policies where schemaname = 'storage' and policyname like 'connectical\_offer\_media\_%';")" = 0 ] || {

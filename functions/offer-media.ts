@@ -174,6 +174,125 @@ async function readBody(req: Request): Promise<Uint8Array | null> {
   return bytes;
 }
 
+// Metadatos que pueden revelar dónde y cuándo se hizo la foto (GPS de EXIF, XMP, IPTC, textos). En Android un JPEG
+// que no hace falta reducir sube tal cual desde la galería, y WebP nunca se recodifica. Se quitan antes de guardar:
+//   JPEG: el directorio GPS de EXIF queda vacío y sus datos a cero (la orientación se conserva: sin ella las fotos de
+//         la cámara saldrían giradas); fuera los segmentos XMP y demás APP1 que no son EXIF, IPTC (APP13) y comentarios.
+//   PNG:  fuera eXIf, tEXt, iTXt y zTXt.
+//   WebP: fuera los bloques EXIF y XMP, con las marcas de VP8X y el tamaño de RIFF corregidos.
+// Devuelve null si la estructura no es coherente (longitudes que salen del archivo): no se guarda.
+export function stripImageMetadata(bytes: Uint8Array, type: ImageType): Uint8Array | null {
+  const ascii = (at: number, length: number) => String.fromCharCode(...bytes.subarray(at, at + length));
+  if (type === 'image/png') {
+    const parts: Uint8Array[] = [bytes.subarray(0, 8)];
+    for (let at = 8; at < bytes.length;) {
+      if (at + 12 > bytes.length) return null;
+      const length = ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+      const end = at + 12 + length;
+      if (end > bytes.length) return null;
+      if (!['eXIf', 'tEXt', 'iTXt', 'zTXt'].includes(ascii(at + 4, 4))) parts.push(bytes.subarray(at, end));
+      at = end;
+    }
+    return concat(parts);
+  }
+  if (type === 'image/webp') {
+    const parts: Uint8Array[] = [];
+    let vp8x = -1;
+    let length = 12;
+    for (let at = 12; at < bytes.length;) {
+      if (at + 8 > bytes.length) return null;
+      const size = (bytes[at + 4] | (bytes[at + 5] << 8) | (bytes[at + 6] << 16) | (bytes[at + 7] << 24)) >>> 0;
+      const end = at + 8 + size + (size % 2);
+      if (end > bytes.length) return null;
+      const fourcc = ascii(at, 4);
+      if (fourcc !== 'EXIF' && fourcc !== 'XMP ') {
+        if (fourcc === 'VP8X') vp8x = length;
+        parts.push(bytes.subarray(at, end));
+        length += end - at;
+      }
+      at = end;
+    }
+    const out = concat([bytes.subarray(0, 12), ...parts]);
+    new DataView(out.buffer).setUint32(4, out.length - 8, true);
+    if (vp8x >= 0) out[vp8x + 8] &= ~0x0c; // sin marcas de EXIF (0x08) ni XMP (0x04)
+    return out;
+  }
+  const parts: Uint8Array[] = [bytes.subarray(0, 2)];
+  let at = 2;
+  while (at < bytes.length) {
+    if (bytes[at] !== 0xff) return null;
+    const marker = bytes[at + 1];
+    if (marker === 0xda || marker === 0xd9) {
+      parts.push(bytes.subarray(at)); // a partir del escaneo, datos de imagen
+      return concat(parts);
+    }
+    if (marker === 0xff) { // relleno: el marcador real empieza en el siguiente 0xFF
+      parts.push(bytes.subarray(at, at + 1));
+      at += 1;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      parts.push(bytes.subarray(at, at + 2));
+      at += 2;
+      continue;
+    }
+    if (at + 4 > bytes.length) return null;
+    const end = at + 2 + ((bytes[at + 2] << 8) | bytes[at + 3]);
+    if (end > bytes.length || end < at + 4) return null;
+    const isExif = marker === 0xe1 && ascii(at + 4, 6) === 'Exif\0\0';
+    if (isExif) {
+      const segment = bytes.slice(at, end);
+      if (!clearExifGps(segment, 10)) return null;
+      parts.push(segment);
+    } else if (marker !== 0xe1 && marker !== 0xed && marker !== 0xfe) {
+      parts.push(bytes.subarray(at, end));
+    }
+    at = end;
+  }
+  return concat(parts);
+}
+
+// Vacía el directorio GPS de un bloque EXIF (TIFF desde `tiff`) y pone a cero los datos a los que apuntaba.
+function clearExifGps(segment: Uint8Array, tiff: number): boolean {
+  const view = new DataView(segment.buffer, segment.byteOffset, segment.byteLength);
+  if (tiff + 8 > segment.length) return false;
+  const little = segment[tiff] === 0x49 && segment[tiff + 1] === 0x49;
+  if (!little && !(segment[tiff] === 0x4d && segment[tiff + 1] === 0x4d)) return false;
+  const u16 = (at: number) => view.getUint16(at, little);
+  const u32 = (at: number) => view.getUint32(at, little);
+  const ifd0 = tiff + u32(tiff + 4);
+  if (ifd0 + 2 > segment.length) return false;
+  const entries = u16(ifd0);
+  if (ifd0 + 2 + entries * 12 > segment.length) return false;
+  for (let index = 0; index < entries; index += 1) {
+    const entry = ifd0 + 2 + index * 12;
+    if (u16(entry) !== 0x8825) continue;
+    const gps = tiff + u32(entry + 8);
+    if (gps + 2 > segment.length) return false;
+    const count = u16(gps);
+    if (gps + 2 + count * 12 > segment.length) return false;
+    const unit: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+    for (let item = 0; item < count; item += 1) {
+      const field = gps + 2 + item * 12;
+      const total = (unit[u16(field + 2)] ?? 1) * u32(field + 4);
+      const data = tiff + u32(field + 8);
+      if (total > 4 && data + total <= segment.length) segment.fill(0, data, data + total);
+    }
+    segment.fill(0, gps, gps + 2 + count * 12 + 4);
+  }
+  return true;
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
 function validImage(bytes: Uint8Array): { type: ImageType; width: number; height: number } | null {
   const type = detectImageType(bytes);
   const size = type && readImageSize(bytes, type);
@@ -233,11 +352,13 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
       altText = '';
     }
     if (!altText || altText.length > MAX_ALT_TEXT) return json(422, { error: 'image_alt_required' });
+    const clean = stripImageMetadata(bytes, type);
+    if (!clean || validImage(clean)?.type !== type) return json(422, { error: 'image_type_not_allowed' });
 
     const key = `offers/${offerId}/${deps.newId().toLowerCase()}.${EXTENSIONS[type]}`;
     if (!MEDIA_KEY.test(key)) return json(500, { error: 'invalid_key' });
     try {
-      await deps.admin.put(key, bytes, type);
+      await deps.admin.put(key, clean, type);
     } catch {
       return json(502, { error: 'upload_failed' });
     }
@@ -245,7 +366,7 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
     let result: CallerResult;
     try {
       result = await caller.rpc('connectical_add_offer_media', {
-        p_offer_id: offerId, p_storage_key: key, p_content_type: type, p_byte_size: bytes.length,
+        p_offer_id: offerId, p_storage_key: key, p_content_type: type, p_byte_size: clean.length,
         p_width: size.width, p_height: size.height, p_alt_text: altText,
       });
     } catch {
@@ -276,8 +397,9 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
         ...CORS,
         'Content-Type': row.content_type,
         'Content-Length': String(bytes.length),
-        // Sin sesión solo se ven fotos publicadas; con sesión puede ser una foto aún no aprobada.
-        'Cache-Control': token ? 'private, no-store' : 'public, max-age=300',
+        // Sin sesión solo se ven fotos aprobadas; con sesión puede ser una pendiente o rechazada. Caché pública corta:
+        // si la administración retira una foto, deja de verse en un minuto como mucho.
+        'Cache-Control': token ? 'private, no-store' : 'public, max-age=60',
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'",
       },

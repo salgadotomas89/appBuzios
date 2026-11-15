@@ -7,7 +7,7 @@ set -eu
 expected="$PWD/supabase/checks/expected_schema_inventory.txt"
 container="connectical-schema-inventory-$$"
 actual="$(mktemp "${TMPDIR:-/tmp}/connectical-inventory.XXXXXX")"
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$actual"; }
+cleanup() { docker rm -f -v "$container" >/dev/null 2>&1 || true; rm -f "$actual"; }
 trap cleanup EXIT INT TERM
 
 docker run -d --rm --name "$container" -e POSTGRES_PASSWORD=connectical_local_test_only \

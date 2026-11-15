@@ -13,6 +13,7 @@ const es = {
   sections: {
     applications: 'Solicitudes',
     moderation: 'Publicaciones',
+    photos: 'Fotos',
     incidents: 'Incidencias',
     users: 'Usuarios',
     kpis: 'Indicadores',
@@ -35,6 +36,12 @@ const es = {
   restore: 'Reactivar',
   moderationNote: 'Motivo de la suspensión',
   moderationSaved: 'Publicación actualizada.',
+  photoQueueHint: 'Fotos nuevas pendientes de revisión, de la más antigua a la más reciente. Rechazar exige motivo; el proveedor lo ve.',
+  photoApprove: 'Aprobar foto',
+  photoReject: 'Rechazar foto',
+  photoRejectReason: 'Motivo del rechazo (obligatorio)',
+  photoSaved: 'Foto revisada.',
+  photoOffer: 'Oferta',
   incidentStatus: { open: 'abierta', in_progress: 'en curso', resolved: 'resuelta' } satisfies Record<IncidentStatus, string>,
   incidentCategory: {
     payment: 'Pago',
@@ -97,6 +104,7 @@ const pt: PlatformCopy = {
   sections: {
     applications: 'Solicitações',
     moderation: 'Publicações',
+    photos: 'Fotos',
     incidents: 'Incidentes',
     users: 'Usuários',
     kpis: 'Indicadores',
@@ -119,6 +127,12 @@ const pt: PlatformCopy = {
   restore: 'Reativar',
   moderationNote: 'Motivo da suspensão',
   moderationSaved: 'Publicação atualizada.',
+  photoQueueHint: 'Fotos novas aguardando revisão, da mais antiga à mais recente. Recusar exige motivo; o fornecedor o vê.',
+  photoApprove: 'Aprovar foto',
+  photoReject: 'Recusar foto',
+  photoRejectReason: 'Motivo da recusa (obrigatório)',
+  photoSaved: 'Foto revisada.',
+  photoOffer: 'Oferta',
   incidentStatus: { open: 'aberto', in_progress: 'em andamento', resolved: 'resolvido' },
   incidentCategory: {
     payment: 'Pagamento',
@@ -179,6 +193,7 @@ const en: PlatformCopy = {
   sections: {
     applications: 'Applications',
     moderation: 'Listings',
+    photos: 'Photos',
     incidents: 'Incidents',
     users: 'Users',
     kpis: 'Metrics',
@@ -201,6 +216,12 @@ const en: PlatformCopy = {
   restore: 'Restore',
   moderationNote: 'Reason for suspension',
   moderationSaved: 'Listing updated.',
+  photoQueueHint: 'New photos awaiting review, oldest first. Rejecting needs a reason; the provider sees it.',
+  photoApprove: 'Approve photo',
+  photoReject: 'Reject photo',
+  photoRejectReason: 'Reason for rejection (required)',
+  photoSaved: 'Photo reviewed.',
+  photoOffer: 'Offer',
   incidentStatus: { open: 'open', in_progress: 'in progress', resolved: 'resolved' },
   incidentCategory: {
     payment: 'Payment',

@@ -10,7 +10,7 @@ stages="${*:-1 4 11}"
 supabase_dir="$PWD/supabase"
 for stage in $stages; do
   container="connectical-upgrade-it-$$-$stage"
-  cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
+  cleanup() { docker rm -f -v "$container" >/dev/null 2>&1 || true; }
   trap cleanup EXIT INT TERM
   docker run -d --rm --name "$container" -e POSTGRES_PASSWORD=connectical_local_test_only \
     -v "$supabase_dir:/sb:ro" postgres:17 >/dev/null
