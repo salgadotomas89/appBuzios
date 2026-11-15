@@ -46,3 +46,18 @@ horarias, integración PostgreSQL, ensayo de actualización desde las etapas 1, 
 - Resultados: Jest 210/210 (inicio 161), PostgreSQL 50 verificaciones (inicio 46), quince migraciones.
 - Nada remoto: ni InsForge, ni OAuth, ni pagos. iOS compila con RNKeychain sin ejecutarse; Android sin JDK.
 - No se trabajaron 7 horas: unos 84 minutos de reloj.
+
+## Preparación del piloto cerrado (21:50–22:09, unos 19 min de reloj)
+
+Rama `work/pilot-prep`; merge a `main`: `66ac1bf` (CI de `main` run 43661598642 en verde).
+
+- **Tenant** (solo lectura, con la clave anónima de la app): el host `8ntv6m27` responde, exige verificación de correo
+  por código y no tiene ninguna migración aplicada. Identidad, entorno y aislamiento siguen sin confirmar: no hay
+  acceso al panel ni al CLI. Ver [piloto-cerrado.md](piloto-cerrado.md).
+- **Verificación de correo** (`e36d560`): la app no permitía introducir el código que el tenant exige; ahora sí.
+- **Contrato del SDK** (`fa22b3a`): SDK fijado en 1.5.2 y prueba con el SDK real y red simulada (inicio de sesión,
+  restauración con rotación, revocación, cierre, verificación). Bundles de producción iOS y Android en CI.
+- **Recorrido del piloto** (`12f672a`): `npm run test:pilot-e2e`, ocho pasos con moderación previa activada; en CI.
+- **Simulador iOS** (`7ea0ac2`): CoreSimulator ya está en 1174.21; la app arranca en un iPhone 17 Pro simulado sin
+  errores. Falta el recorrido manual (no hay herramienta para pulsar la pantalla).
+- Jest 215/215. Zod: sin versión compatible corregida (`shared-schemas` 1.2.1 sigue en `zod ^3`).
