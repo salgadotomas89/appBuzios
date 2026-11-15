@@ -25,6 +25,10 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm test -- --ci
+      # Otra zona horaria: detecta pruebas que confunden el día local con el día de Búzios.
+      - run: npm test -- --ci
+        env:
+          TZ: Asia/Tokyo
 
   shared-reservations:
     name: Integración PostgreSQL local
