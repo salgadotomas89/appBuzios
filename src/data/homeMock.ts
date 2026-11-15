@@ -39,6 +39,9 @@ export type Offer = {
   missingFields?: { es: string[]; pt: string[] };
   // Fotos autorizadas del proveedor; el texto alternativo lo escribe él en un solo idioma.
   photos?: Array<{ url: string; alt: string; width: number; height: number }>;
+  // Solo ofertas compartidas: cupo libre por fecha publicada y límites por reserva.
+  freeUnitsByDate?: Record<string, number>;
+  quantityLimits?: { min: number; max: number | null };
 };
 
 export const homeMock = {

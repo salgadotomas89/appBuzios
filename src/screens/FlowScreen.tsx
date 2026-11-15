@@ -16,7 +16,8 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
-import { CATEGORY_ICONS, type Catalog } from '../data/catalog';
+import { CATEGORY_ICONS, filterOffers, type Catalog } from '../data/catalog';
+import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
@@ -79,6 +80,14 @@ const copy = {
     rooms: 'Habitaciones',
     nights: 'Noches',
     addTrip: 'Agregar a Mi viaje',
+    favorites: 'Favoritos',
+    addFavorite: 'Guardar en favoritos',
+    removeFavorite: 'Quitar de favoritos',
+    anyDate: 'Cualquier fecha',
+    chooseDate: 'Elegir fecha',
+    anyPeople: 'Cualquier cantidad',
+    choosePeople: 'Personas',
+    filterHint: 'La fecha filtra solo ofertas con cupo publicado; los ejemplos no tienen calendario.',
     pastDate: 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.',
     operations: 'Reservas compartidas · acceso de operaciones',
     previousDay: 'Día anterior',
@@ -176,6 +185,14 @@ const copy = {
     rooms: 'Quartos',
     nights: 'Noites',
     addTrip: 'Adicionar à Minha viagem',
+    favorites: 'Favoritos',
+    addFavorite: 'Salvar nos favoritos',
+    removeFavorite: 'Remover dos favoritos',
+    anyDate: 'Qualquer data',
+    chooseDate: 'Escolher data',
+    anyPeople: 'Qualquer quantidade',
+    choosePeople: 'Pessoas',
+    filterHint: 'A data filtra só ofertas com vagas publicadas; os exemplos não têm calendário.',
     pastDate: 'Esta data já passou em Búzios. Escolha outra para confirmar.',
     operations: 'Reservas compartilhadas · acesso de operações',
     previousDay: 'Dia anterior',
@@ -294,6 +311,10 @@ export function FlowScreen() {
   const [selectedCategory, setSelectedCategory] = useState<OfferCategory | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [filterDate, setFilterDate] = useState<string | null>(null);
+  const [filterPeople, setFilterPeople] = useState<number | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tripItems, setTripItems] = useState<TripItem[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [serviceFeeRate, setServiceFeeRate] = useState<DemoServiceFeeRate>(
@@ -343,7 +364,25 @@ export function FlowScreen() {
       serviceFeeRate,
     }).catch(error => console.warn('No se pudo guardar el viaje demo', error));
   }, [bookings, serviceFeeRate, storageReady, tripItems]);
-  const matchingOffers = catalog.offers.filter(offer => {
+  useEffect(() => {
+    let active = true;
+    loadFavorites().then(ids => {
+      if (active) setFavorites(ids);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function onToggleFavorite(offerId: string) {
+    setFavorites(current => {
+      const next = toggleFavorite(current, offerId);
+      saveFavorites(next).catch(error => console.warn('No se pudieron guardar los favoritos', error));
+      return next;
+    });
+  }
+
+  const searchedOffers = catalog.offers.filter(offer => {
     const categoryMatch = !selectedCategory || offer.category === selectedCategory;
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const searchMatch =
@@ -352,6 +391,12 @@ export function FlowScreen() {
         .toLocaleLowerCase()
         .includes(normalizedQuery);
     return categoryMatch && searchMatch;
+  });
+  const matchingOffers = filterOffers(searchedOffers, {
+    date: filterDate,
+    people: filterPeople,
+    favoritesOnly,
+    favorites: new Set(favorites),
   });
 
   function openExplore(category?: OfferCategory | null) {
@@ -496,6 +541,13 @@ export function FlowScreen() {
             onOffer={openOffer}
             onBack={() => changeScreen('home')}
             onLanguage={setLanguage}
+            today={today}
+            filterDate={filterDate}
+            onFilterDate={setFilterDate}
+            filterPeople={filterPeople}
+            onFilterPeople={setFilterPeople}
+            favoritesOnly={favoritesOnly}
+            onFavoritesOnly={setFavoritesOnly}
           />
         ) : null}
         {screen === 'detail' && selectedOffer ? (
@@ -510,6 +562,8 @@ export function FlowScreen() {
             onQuantity={setDraftQuantity}
             onNights={setDraftNights}
             today={today}
+            favorite={favorites.includes(selectedOffer.id)}
+            onToggleFavorite={() => onToggleFavorite(selectedOffer.id)}
             onAdd={() => addToTrip(selectedOffer)}
             addLabel={selectedOffer.source === 'shared' ? (words.bookInPortal as string) : (words.addTrip as string)}
             onBack={() => changeScreen('explore')}
@@ -689,6 +743,13 @@ function ExploreView({
   onOffer,
   onBack,
   onLanguage,
+  today,
+  filterDate,
+  onFilterDate,
+  filterPeople,
+  onFilterPeople,
+  favoritesOnly,
+  onFavoritesOnly,
 }: {
   language: Language;
   words: Words;
@@ -702,6 +763,13 @@ function ExploreView({
   onOffer: (offer: Offer) => void;
   onBack: () => void;
   onLanguage: (language: Language) => void;
+  today: string;
+  filterDate: string | null;
+  onFilterDate: (date: string | null) => void;
+  filterPeople: number | null;
+  onFilterPeople: (people: number | null) => void;
+  favoritesOnly: boolean;
+  onFavoritesOnly: (value: boolean) => void;
 }) {
   return (
     <>
@@ -726,6 +794,30 @@ function ExploreView({
           />
         ))}
       </ScrollView>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        <FilterPill label={words.favorites as string} active={favoritesOnly} onPress={() => onFavoritesOnly(!favoritesOnly)} />
+        <FilterPill
+          label={(filterDate ? words.anyDate : words.chooseDate) as string}
+          active={false}
+          onPress={() => onFilterDate(filterDate ? null : today)}
+        />
+        <FilterPill
+          label={(filterPeople ? words.anyPeople : words.choosePeople) as string}
+          active={false}
+          onPress={() => onFilterPeople(filterPeople ? null : 2)}
+        />
+      </ScrollView>
+      {filterDate ? <DateStepper value={filterDate} min={today} language={language} onChange={onFilterDate} /> : null}
+      {filterPeople ? (
+        <NumberStepper
+          value={filterPeople}
+          min={1}
+          max={20}
+          onChange={onFilterPeople}
+          labels={[words.decreaseQuantity as string, words.increaseQuantity as string]}
+        />
+      ) : null}
+      {filterDate || filterPeople ? <Text style={styles.exampleCaption}>{words.filterHint}</Text> : null}
       <CatalogNotice source={catalogSource} words={words} />
       <Text style={styles.resultCount}>{offers.length} {catalogSource === 'shared' ? words.sharedResults : words.results}</Text>
       {offers.length ? (
@@ -769,6 +861,8 @@ function DetailView({
   addLabel,
   onBack,
   today,
+  favorite,
+  onToggleFavorite,
 }: {
   offer: Offer;
   language: Language;
@@ -783,6 +877,8 @@ function DetailView({
   addLabel: string;
   onBack: () => void;
   today: string;
+  favorite: boolean;
+  onToggleFavorite: () => void;
 }) {
   const canBook = offer.availability === 'available' || offer.availability === 'limited';
   const categorySpecific = [
@@ -820,6 +916,15 @@ function DetailView({
       )}
       <Text style={styles.demoLabel}>{offer.source === 'shared' ? words.sharedExample : words.example}</Text>
       <Text style={styles.detailTitle}>{offer.title[language]}</Text>
+      <Pressable
+        onPress={onToggleFavorite}
+        accessibilityRole="button"
+        accessibilityState={{ selected: favorite }}
+        accessibilityLabel={(favorite ? words.removeFavorite : words.addFavorite) as string}
+        style={styles.favoriteButton}
+      >
+        <Text style={styles.favoriteText}>{favorite ? '♥' : '♡'} {favorite ? words.removeFavorite : words.addFavorite}</Text>
+      </Pressable>
       <Text style={styles.detailAvailability}>{availabilityLabel(offer, language)}</Text>
       {offer.price !== undefined ? (
         <View style={styles.detailPriceRow}>
@@ -1410,6 +1515,8 @@ const styles = StyleSheet.create({
   emptyTitle: { textAlign: 'center', fontSize: 18, fontWeight: '600', color: colors.text },
   emptyNote: { marginTop: 8, textAlign: 'center', fontSize: 13, lineHeight: 19, color: colors.muted },
   photoStrip: { gap: 10, marginTop: 16 },
+  favoriteButton: { alignSelf: 'flex-start', paddingVertical: 8 },
+  favoriteText: { color: colors.sea, fontSize: 14, fontWeight: '700' },
   photo: { height: 200, borderRadius: radius.card, backgroundColor: colors.track },
   detailArtwork: { minHeight: 150, marginTop: 16, alignItems: 'center', justifyContent: 'center', borderRadius: radius.card, backgroundColor: colors.sea },
   detailIcon: { width: 68, height: 68, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },

@@ -246,3 +246,24 @@ test('does not let a stored past date be confirmed until it is moved to today or
   pressText(root, 'Confirmar reserva demo');
   expect(hasText(root, 'BF-DEMO-001')).toBe(true);
 });
+
+test('saves favorites on the device and filters the catalog by them', async () => {
+  const renderer = await renderApp();
+  const root = renderer.root;
+  pressText(root, 'Barcos');
+  pressText(root, 'Escuna por 12 playas');
+  pressAccessible(root, 'Guardar en favoritos');
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+  expect(JSON.parse(mockStorage.get('@buzios-flow/favorites-v1') ?? '[]')).toEqual(['barco-escuna']);
+  ReactTestRenderer.act(() => renderer.unmount());
+
+  const reopened = await renderApp(false);
+  pressText(reopened.root, 'Explorar ofertas');
+  pressText(reopened.root, 'Favoritos');
+  expect(hasText(reopened.root, '1 ofertas de ejemplo')).toBe(true);
+  expect(hasText(reopened.root, 'Escuna por 12 playas')).toBe(true);
+  pressText(reopened.root, 'Escuna por 12 playas');
+  expect(reopened.root.findAll(node => node.props.accessibilityLabel === 'Quitar de favoritos').length).toBeGreaterThan(0);
+});

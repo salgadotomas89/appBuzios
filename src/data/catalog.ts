@@ -43,6 +43,9 @@ export function sharedOfferToOffer(
   const location = shared.location?.trim() ?? '';
   const meetingPoint = shared.meeting_point?.trim() ?? '';
   const schedule = shared.schedule?.trim() ?? '';
+  const freeUnitsByDate = ownInventory
+    ? Object.fromEntries(ownInventory.map(item => [item.service_date, Math.max(0, item.total_units - item.held_units - item.sold_units)]))
+    : undefined;
   const missing = {
     es: [...(description ? [] : ['Descripción del proveedor']), 'Qué incluye', 'Política de cancelación'],
     pt: [...(description ? [] : ['Descrição do fornecedor']), 'O que inclui', 'Política de cancelamento'],
@@ -75,6 +78,8 @@ export function sharedOfferToOffer(
       pt: 'Política de cancelamento pendente de definição pela Connectical.',
     },
     missingFields: missing,
+    freeUnitsByDate,
+    quantityLimits: { min: shared.min_quantity ?? 1, max: shared.max_quantity ?? null },
     photos: media
       .filter(item => item.offer_id === shared.id)
       .sort((left, right) => left.position - right.position)
@@ -117,4 +122,24 @@ export function buildCatalog(
       0,
     ),
   };
+}
+
+export type CatalogFilter = { date: string | null; people: number | null; favoritesOnly: boolean; favorites: ReadonlySet<string> };
+
+// Filtros del explorador. Fecha: una oferta compartida necesita cupo libre publicado ese día (si su
+// inventario no se pudo leer, no se descarta: el portal lo confirma). Las de ejemplo no tienen
+// calendario y no se filtran por fecha. Personas: se respetan los límites por reserva cuando existen;
+// en alojamientos la cantidad son habitaciones, así que el número de personas no las descarta.
+export function filterOffers(offers: Offer[], filter: CatalogFilter): Offer[] {
+  return offers.filter(offer => {
+    if (filter.favoritesOnly && !filter.favorites.has(offer.id)) return false;
+    if (filter.date && offer.source === 'shared' && offer.freeUnitsByDate) {
+      if ((offer.freeUnitsByDate[filter.date] ?? 0) < 1) return false;
+    }
+    if (filter.people && offer.priceMode !== 'night' && offer.quantityLimits) {
+      const { min, max } = offer.quantityLimits;
+      if (filter.people < min || (max !== null && filter.people > max)) return false;
+    }
+    return true;
+  });
 }
