@@ -85,6 +85,7 @@ import {
   Field,
   formatBps,
   formatTime,
+  minutesUntil,
   MoneyRow,
   portalStyles,
 } from '../components/PortalControls';
@@ -1010,7 +1011,12 @@ function ReservationList({
             <Text style={styles.helper}>{brlFromCents(reservation.refund_cents)} {words.refundedSoFar}</Text>
           ) : null}
           {awaitingPayment && reservation.hold_expires_at ? (
-            <Text style={styles.helper}>{words.holdExpires}: {formatTime(reservation.hold_expires_at)}</Text>
+            <Text style={styles.helper}>
+              {words.holdExpires}: {formatTime(reservation.hold_expires_at)} ·{' '}
+              {minutesUntil(reservation.hold_expires_at) === 0
+                ? words.holdLapsed
+                : words.holdMinutesLeft.replace('{n}', String(minutesUntil(reservation.hold_expires_at)))}
+            </Text>
           ) : null}
           <Text selectable style={styles.id}>{reservation.id}</Text>
         </View>

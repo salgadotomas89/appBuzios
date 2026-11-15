@@ -17,6 +17,13 @@ export function formatTime(iso: string): string {
     : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+// Minutos enteros que faltan hasta `iso` (0 si ya pasó; null si la fecha no es válida). No depende de la zona horaria.
+export function minutesUntil(iso: string, now: number = Date.now()): number | null {
+  const at = new Date(iso).getTime();
+  if (Number.isNaN(at)) return null;
+  return Math.max(0, Math.ceil((at - now) / 60000));
+}
+
 export function Field({
   label,
   value,

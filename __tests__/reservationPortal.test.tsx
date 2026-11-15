@@ -3,6 +3,7 @@ import { Text, TextInput } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
 import { AuthFlowError } from '../src/auth/authErrors';
 import { ReservationPortal } from '../src/screens/ReservationPortal';
+import { minutesUntil } from '../src/components/PortalControls';
 import * as service from '../src/lib/reservationService';
 import type { SharedOffer, SharedReservation } from '../src/lib/reservationService';
 
@@ -329,6 +330,20 @@ it('discards a quote that resolves after the traveler changed the inputs', async
   }));
   expect(hasText(root, 'R$ 339,20')).toBe(false);
   expect(hasText(root, 'Reservar con pago simulado')).toBe(false);
+});
+
+it('tells the traveler how many minutes are left to pay a hold, independent of the time zone', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'r-soon', status: 'held', payment_status: null, hold_expires_at: new Date(Date.now() + 6.5 * 60000).toISOString() }),
+    reservation({ id: 'r-late', status: 'pending_payment', payment_status: 'pending', hold_expires_at: new Date(Date.now() - 60000).toISOString() }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'quedan 7 min para pagar')).toBe(true);
+  expect(hasText(root, 'el plazo para pagar terminó; actualiza la lista')).toBe(true);
+  expect(minutesUntil('2099-01-01T00:10:00Z', Date.parse('2099-01-01T00:00:01Z'))).toBe(10);
+  expect(minutesUntil('2099-01-01T00:10:00Z', Date.parse('2099-01-01T00:10:00Z'))).toBe(0);
+  expect(minutesUntil('not a date')).toBeNull();
 });
 
 it('lets a traveler retry a pending simulated payment and labels admin events', async () => {

@@ -104,6 +104,8 @@ const es = {
   } satisfies Record<SimulatedOutcome, string>,
   payNow: 'Pagar (simulado)',
   holdExpires: 'retención vence',
+  holdMinutesLeft: 'quedan {n} min para pagar',
+  holdLapsed: 'el plazo para pagar terminó; actualiza la lista',
   paymentResult: 'Resultado',
   eventTypes: {
     reservation_held: 'Cupo retenido',
@@ -374,6 +376,8 @@ const pt: PortalCopy = {
   outcomes: { approved: 'Aprovado', rejected: 'Recusado', pending: 'Pendente' },
   payNow: 'Pagar (simulado)',
   holdExpires: 'retenção expira',
+  holdMinutesLeft: 'faltam {n} min para pagar',
+  holdLapsed: 'o prazo para pagar terminou; atualize a lista',
   paymentResult: 'Resultado',
   eventTypes: {
     reservation_held: 'Vaga retida',
@@ -650,6 +654,8 @@ const en: PortalCopy = {
   outcomes: { approved: 'Approved', rejected: 'Declined', pending: 'Pending' },
   payNow: 'Pay (simulated)',
   holdExpires: 'hold expires',
+  holdMinutesLeft: '{n} min left to pay',
+  holdLapsed: 'the time to pay is over; refresh the list',
   paymentResult: 'Result',
   eventTypes: {
     reservation_held: 'Spot held',
