@@ -1,27 +1,28 @@
 # Primer piloto cerrado — preparación y criterios
 
-Para el equipo que ejecute el piloto. **El piloto no está listo**: falta aplicar las migraciones en el tenant de ensayo,
-probar el backend remoto y hacer al menos un recorrido real en un iPhone o Android. Reservas comerciales y pagos reales
-siguen apagados; todo cobro es simulado.
+Para el equipo que ejecute el piloto. **El piloto no está listo**: las migraciones ya están aplicadas y verificadas
+en buziosflow, pero falta comprobar que llegan los códigos de verificación por correo y hacer al menos un recorrido
+real en un iPhone o Android. Reservas comerciales y pagos reales siguen apagados; todo cobro es simulado.
 
-## Evidencia sobre el tenant (14-11-2026, 21:51, solo lectura)
-
-Con la clave anónima pública que ya lleva la app (`.env`), sin crear ni modificar nada:
+## Estado del tenant buziosflow (15-11-2026)
 
 | Comprobación | Resultado |
 | --- | --- |
-| Host configurado en la app | `8ntv6m27.us-east.insforge.app` |
-| `GET /api/auth/public-config` | 200: registro abierto, verificación de correo **obligatoria por código**, contraseña mínima 6, OAuth Google y GitHub ya configurados |
-| Lectura de `connectical_offers` (`limit=0`) | 404 `42P01 relation does not exist`: **ninguna migración aplicada** |
+| Proyecto | buziosflow, `ykfv5j3m.us-east.insforge.app`, vinculado con el CLI; la app apunta a él |
+| Respaldo previo | `pre-reservas` (`f374147d-…`), verificado y restaurado en local |
+| Migraciones | 15 aplicadas; verificación (14/14), conciliación (0 filas) e inventario (257 líneas) sin diferencias |
+| App con clave anónima | catálogo, inventario y fotos legibles; RPC privadas rechazadas |
+| Barrido de retenciones | schedule `connectical-hold-sweep` cada 2 minutos, primera ejecución 200 y `succeeded` |
+| Datos | ninguno: 0 usuarios, 0 ofertas |
+| Correo | SMTP propio desactivado con verificación por código obligatoria: **sin comprobar** |
 
-Esto **no prueba** que el proyecto sea OfertasApp, que sea de ensayo ni que esté aislado de Connectical Logística: eso
-solo se confirma en el panel de InsForge. No hay `.insforge/project.json` ni sesión del CLI en este equipo.
+El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md).
 
 ## Antes del piloto (intervención humana)
 
-1. Confirmar en el panel de InsForge proyecto, entorno de ensayo y aislamiento; crear un snapshot.
-2. Seguir [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md): preflight, quince migraciones, verificación,
-   conciliación e inventario del esquema (debe coincidir con `supabase/checks/expected_schema_inventory.txt`).
+1. ~~Respaldo, quince migraciones, verificación, conciliación e inventario~~: hecho el 15-11-2026.
+2. Registrarse desde la app con un correo del equipo y comprobar que llega el código. Si no llega, configurar SMTP
+   (`[auth.smtp]` con `npx -y @insforge/cli config apply`), lo que requiere una cuenta de correo del equipo.
 3. Configuración preparada para el piloto (**no aplicada en ningún entorno real**):
 
    ```sql
@@ -60,7 +61,8 @@ iniciar sesión), cambio de idioma ES/PT/EN y lector de pantalla en el detalle d
 
 ## Criterios para declarar el piloto listo
 
-- Migraciones aplicadas en el tenant de ensayo con verificación, conciliación e inventario sin diferencias.
+- ~~Migraciones aplicadas con verificación, conciliación e inventario sin diferencias~~ (15-11-2026).
+- Código de verificación recibido por correo en un registro real.
 - Recorrido completo de la tabla anterior en el tenant, con al menos un iPhone o un Android reales.
 - Sesión persistente comprobada en dispositivo (lista en [autenticacion-oauth.md](autenticacion-oauth.md)).
 - Decisiones registradas: moderación previa, comisiones de los proveedores del piloto, bucket de fotos.
