@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -794,13 +795,29 @@ function DetailView({
   return (
     <>
       <Header language={language} words={words} onBack={onBack} />
-      <View style={styles.detailArtwork}>
-        <View style={styles.detailIcon}>
-          <Icon name={offer.icon} size={38} color={colors.onDark} />
+      {offer.photos?.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+          {offer.photos.map(photo => (
+            <Image
+              key={photo.url}
+              source={{ uri: photo.url }}
+              accessibilityLabel={photo.alt}
+              accessible
+              resizeMode="cover"
+              style={[styles.photo, { aspectRatio: photo.width / photo.height }]}
+            />
+          ))}
+        </ScrollView>
+      ) : (
+        // Sin fotos autorizadas se muestra la ilustración de la categoría.
+        <View style={styles.detailArtwork}>
+          <View style={styles.detailIcon}>
+            <Icon name={offer.icon} size={38} color={colors.onDark} />
+          </View>
+          <Text style={styles.detailCategory}>{categoryName(offer.category, language).toUpperCase()}</Text>
+          <Text style={styles.detailLocation}>{offer.location[language]}</Text>
         </View>
-        <Text style={styles.detailCategory}>{categoryName(offer.category, language).toUpperCase()}</Text>
-        <Text style={styles.detailLocation}>{offer.location[language]}</Text>
-      </View>
+      )}
       <Text style={styles.demoLabel}>{offer.source === 'shared' ? words.sharedExample : words.example}</Text>
       <Text style={styles.detailTitle}>{offer.title[language]}</Text>
       <Text style={styles.detailAvailability}>{availabilityLabel(offer, language)}</Text>
@@ -1392,6 +1409,8 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 20 },
   emptyTitle: { textAlign: 'center', fontSize: 18, fontWeight: '600', color: colors.text },
   emptyNote: { marginTop: 8, textAlign: 'center', fontSize: 13, lineHeight: 19, color: colors.muted },
+  photoStrip: { gap: 10, marginTop: 16 },
+  photo: { height: 200, borderRadius: radius.card, backgroundColor: colors.track },
   detailArtwork: { minHeight: 150, marginTop: 16, alignItems: 'center', justifyContent: 'center', borderRadius: radius.card, backgroundColor: colors.sea },
   detailIcon: { width: 68, height: 68, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },
   detailCategory: { marginTop: 10, fontSize: 10, fontWeight: '700', color: colors.sand, letterSpacing: 1 },

@@ -70,3 +70,13 @@ it('uses the provider details when present and only lists what is still missing'
   expect(bare.meetingPoint).toBeUndefined();
   expect(bare.missingFields?.es[0]).toBe('Descripción del proveedor');
 });
+
+it('attaches the provider photos in order and leaves the illustration when there are none', () => {
+  const media = [
+    { id: 'm2', offer_id: 'o-1', url: 'https://cdn.example/2.jpg', content_type: 'image/jpeg', width: 1200, height: 800, alt_text: 'Convés', position: 1 },
+    { id: 'm1', offer_id: 'o-1', url: 'https://cdn.example/1.jpg', content_type: 'image/jpeg', width: 1200, height: 800, alt_text: 'Proa', position: 0 },
+    { id: 'm3', offer_id: 'other', url: 'https://cdn.example/3.jpg', content_type: 'image/jpeg', width: 1200, height: 800, alt_text: 'Outra', position: 0 },
+  ];
+  expect(sharedOfferToOffer(shared, null, media).photos?.map(photo => photo.alt)).toEqual(['Proa', 'Convés']);
+  expect(sharedOfferToOffer(shared, null).photos).toEqual([]);
+});

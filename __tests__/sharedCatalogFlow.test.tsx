@@ -26,7 +26,10 @@ jest.mock('../src/lib/reservationService', () => ({
   getSharedRole: jest.fn(async () => null),
 }));
 
+jest.mock('../src/lib/platformService', () => ({ listOfferMedia: jest.fn(async () => []) }));
+
 const mocked = service as jest.Mocked<typeof service>;
+const mockedPlatform = jest.requireMock('../src/lib/platformService') as { listOfferMedia: jest.Mock };
 
 function flattenText(children: unknown): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
@@ -104,4 +107,20 @@ test('does not mark offers as sold out when the inventory read may be truncated'
   expect(hasText(root, 'Cupo por confirmar en el portal')).toBe(true);
   expect(hasText(root, 'Sin cupo publicado')).toBe(false);
   expect(hasText(root, 'Reservar en el portal')).toBe(true);
+});
+
+test('shows the provider photos with their alt text in the offer detail', async () => {
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-photo', provider_id: 'p-1', category: 'barcos', title: 'Escuna com fotos',
+    base_price_cents: 9000, price_mode: 'person', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue([]);
+  mockedPlatform.listOfferMedia.mockResolvedValueOnce([
+    { id: 'm1', offer_id: 'o-photo', url: 'https://cdn.example/proa.jpg', content_type: 'image/jpeg', width: 1200, height: 800, alt_text: 'Proa da escuna', position: 0 },
+  ]);
+  const root = await renderApp();
+  await pressText(root, 'Escuna com fotos');
+  const images = root.findAll(node => node.props.accessibilityLabel === 'Proa da escuna' && node.props.source);
+  expect(images.length).toBeGreaterThan(0);
+  expect(images[0].props.source).toEqual({ uri: 'https://cdn.example/proa.jpg' });
 });

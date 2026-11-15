@@ -48,6 +48,7 @@ grant authenticated to integration_session;
 create schema auth;
 create table auth.users (
   id uuid primary key,
+  email text,
   raw_user_meta_data jsonb not null default '{}'::jsonb
 );
 create function auth.uid() returns uuid language sql stable as $$
@@ -315,11 +316,11 @@ fi
 grep -q 'inventory_not_found' "$workdir/gap.err" || { echo "Unexpected error for unpublished nights" >&2; cat "$workdir/gap.err" >&2; exit 1; }
 echo "PASS stay with unpublished nights is rejected"
 
-if as_user "$traveler_a" "select public.connectical_create_quote('$pousada', current_date - 2, 1, 1, 600);" >/dev/null 2>&1; then
+if as_user "$traveler_a" "select public.connectical_create_quote('$pousada', public.connectical_today() - 1, 1, 1, 600);" >/dev/null 2>&1; then
   echo "Quote for a past service date was not rejected" >&2
   exit 1
 fi
-if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', current_date - 2, 3);" >/dev/null 2>&1; then
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', public.connectical_today() - 1, 3);" >/dev/null 2>&1; then
   echo "Inventory for a past service date was not rejected" >&2
   exit 1
 fi
@@ -612,7 +613,7 @@ if as_user "$provider_user" "select public.connectical_provider_publish_inventor
 fi
 partial_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_inventory where offer_id = '$pay_offer' and service_date in (current_date + 78, current_date + 79);" | tail -1)
 [ "$partial_rows" = '0' ] || { echo "Failed range publish left $partial_rows partial rows" >&2; exit 1; }
-for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', current_date - 1, 3, 1"; do
+for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', public.connectical_today() - 1, 3, 1"; do
   if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range($bad);" >/dev/null 2>&1; then
     echo "Invalid range publish was accepted: $bad" >&2; exit 1
   fi
@@ -1010,6 +1011,185 @@ ingest_priv() { docker exec "$container" psql -qAt -U postgres -d postgres -c "s
 priv_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
 [ -z "$priv_reconcile" ] || { echo "Inventory does not reconcile after privacy checks: $priv_reconcile" >&2; exit 1; }
 echo "PASS travelers never receive commissions, providers never traveler ids, and simulated payments obey a server switch"
+
+# Provider onboarding: an application grants nothing until an admin approves it with an explicit rate.
+applicant='13000000-0000-4000-8000-000000000001'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "insert into auth.users (id) values ('$applicant');"
+apply_sql="select public.connectical_submit_provider_application('Pousada Solicitante', 'pousadas', 'Ana Souza', '+55 22 99999-0000', 'ana@example.com', 'Geribá', 'Seis quartos com vista')"
+for bad in "'P', 'pousadas', 'Ana', '+55 22 99999-0000', 'ana@example.com', 'Geribá', ''" \
+  "'Pousada', 'hotel', 'Ana', '+55 22 99999-0000', 'ana@example.com', 'Geribá', ''" \
+  "'Pousada', 'pousadas', 'Ana', 'call me', 'ana@example.com', 'Geribá', ''" \
+  "'Pousada', 'pousadas', 'Ana', '+55 22 99999-0000', 'not-an-email', 'Geribá', ''"; do
+  if as_user "$applicant" "select public.connectical_submit_provider_application($bad);" >/dev/null 2>&1; then
+    echo "Invalid provider application accepted: $bad" >&2; exit 1
+  fi
+done
+application_id=$(as_user "$applicant" "$apply_sql;")
+if as_user "$applicant" "$apply_sql;" >/dev/null 2>&1; then echo "Second pending application accepted" >&2; exit 1; fi
+if as_user "$provider_user" "$apply_sql;" >/dev/null 2>&1; then echo "Existing provider could apply again" >&2; exit 1; fi
+still_traveler=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select role from public.connectical_profiles where user_id = '$applicant';" | tail -1)
+[ "$still_traveler" = 'traveler' ] || { echo "Submitting an application changed the role: $still_traveler" >&2; exit 1; }
+for actor in "$applicant" "$provider_user" "$traveler_a"; do
+  for admin_call in "connectical_admin_review_provider_application('$application_id', 'approved', '', 1000)" \
+    "connectical_admin_list_provider_applications('pending')"; do
+    if as_user "$actor" "select public.$admin_call;" >/dev/null 2>&1; then
+      echo "Non-admin ran $admin_call" >&2; exit 1
+    fi
+  done
+done
+if as_user "$admin_user" "select public.connectical_admin_review_provider_application('$application_id', 'approved', '', null);" >/dev/null 2>&1; then
+  echo "Approval without an explicit commission was accepted" >&2; exit 1
+fi
+pending_seen=$(as_user "$admin_user" "select count(*) from public.connectical_admin_list_provider_applications('pending') where id = '$application_id';")
+[ "$pending_seen" = '1' ] || { echo "Admin does not see the pending application" >&2; exit 1; }
+approved=$(as_user "$admin_user" "select a.status || '|' || (a.provider_id is not null) from public.connectical_admin_review_provider_application('$application_id', 'approved', 'Documentos revisados', 1000) a;")
+new_role=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select p.role || '|' || pr.commission_rate_bps || '|' || pr.active from public.connectical_profiles p join public.connectical_providers pr on pr.owner_user_id = p.user_id where p.user_id = '$applicant';" | tail -1)
+[ "$approved" = 'approved|true' ] && [ "$new_role" = 'provider|1000|true' ] || { echo "Approval mismatch: $approved $new_role" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_admin_review_provider_application('$application_id', 'rejected', 'again', null);" >/dev/null 2>&1; then
+  echo "A reviewed application was reviewed again" >&2; exit 1
+fi
+mine=$(as_user "$applicant" "select status || '|' || review_note from public.connectical_my_provider_application();")
+[ "$mine" = 'approved|Documentos revisados' ] || { echo "Applicant view mismatch: $mine" >&2; exit 1; }
+new_offer=$(as_user "$applicant" "select (public.connectical_provider_upsert_offer(null, 'pousadas', 'Quarto aprovado', 30000, 'night', true)).id;")
+[ -n "$new_offer" ] || { echo "Approved provider could not publish" >&2; exit 1; }
+rejected_user='13000000-0000-4000-8000-000000000002'
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "insert into auth.users (id) values ('$rejected_user');"
+second_app=$(as_user "$rejected_user" "$apply_sql;")
+if as_user "$admin_user" "select public.connectical_admin_review_provider_application('$second_app', 'rejected', '  ', null);" >/dev/null 2>&1; then
+  echo "Rejection without a reason was accepted" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_review_provider_application('$second_app', 'rejected', 'Falta alvará de funcionamento', null);" >/dev/null
+rejected_view=$(as_user "$rejected_user" "select status || '|' || review_note from public.connectical_my_provider_application();")
+rejected_role=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select role from public.connectical_profiles where user_id = '$rejected_user';" | tail -1)
+[ "$rejected_view" = 'rejected|Falta alvará de funcionamento' ] && [ "$rejected_role" = 'traveler' ] || { echo "Rejection mismatch: $rejected_view $rejected_role" >&2; exit 1; }
+if as_user "$rejected_user" "select * from public.connectical_provider_applications;" >/dev/null 2>&1; then
+  echo "Applications table readable through the API" >&2; exit 1
+fi
+echo "PASS provider applications grant nothing until an admin approves them with an explicit commission"
+
+# Admin operations: moderation, audit log, incidents, users, KPIs and content-only campaigns.
+mod_offer="$new_offer"
+as_user "$applicant" "select public.connectical_provider_publish_inventory('$mod_offer', current_date + 190, 2);" >/dev/null
+if as_user "$applicant" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', 'x');" >/dev/null 2>&1; then
+  echo "Provider could moderate offers" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', '');" >/dev/null 2>&1; then
+  echo "Suspension without a reason was accepted" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', 'Fotos não autorizadas');" >/dev/null
+hidden=$(as_user "$traveler_a" "select count(*) from public.connectical_offers where id = '$mod_offer';")
+hidden_inventory=$(as_user "$traveler_a" "select count(*) from public.connectical_inventory where offer_id = '$mod_offer';")
+owner_sees=$(as_user "$applicant" "select moderation_status from public.connectical_offers where id = '$mod_offer';")
+[ "$hidden" = '0' ] && [ "$hidden_inventory" = '0' ] && [ "$owner_sees" = 'suspended' ] || { echo "Suspended offer visibility: $hidden $hidden_inventory $owner_sees" >&2; exit 1; }
+if as_user "$traveler_a" "select public.connectical_create_quote('$mod_offer', current_date + 190, 1, 1, 600);" >/dev/null 2>&1; then
+  echo "Suspended offer could be quoted" >&2; exit 1
+fi
+as_user "$applicant" "select public.connectical_provider_upsert_offer('$mod_offer', 'pousadas', 'Quarto editado', 30000, 'night', true);" >/dev/null
+[ "$(as_user "$applicant" "select moderation_status from public.connectical_offers where id = '$mod_offer';")" = 'suspended' ] || { echo "Provider edit lifted a suspension" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'approved', '');" >/dev/null
+as_user "$traveler_a" "select public.connectical_create_quote('$mod_offer', current_date + 190, 1, 1, 600);" >/dev/null
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_settings set value = 'true' where key = 'offer_moderation_required';"
+pending_offer=$(as_user "$applicant" "select (public.connectical_provider_upsert_offer(null, 'pousadas', 'Quarto novo', 31000, 'night', true)).moderation_status;")
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_settings set value = 'false' where key = 'offer_moderation_required';"
+[ "$pending_offer" = 'pending' ] || { echo "Required moderation did not hold the new offer: $pending_offer" >&2; exit 1; }
+audit=$(as_user "$admin_user" "select string_agg(distinct action, ',' order by action) from public.connectical_admin_list_audit_log(1000) where actor_user_id = '$admin_user';")
+case "$audit" in
+  *application_approved*application_rejected*offer_terms_changed*provider_created*role_changed*) ;;
+  *) echo "Audit log is missing admin actions: $audit" >&2; exit 1 ;;
+esac
+incident_res=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select id from public.connectical_reservations where traveler_user_id = '$traveler_a' limit 1;" | tail -1)
+if as_user "$traveler_b" "select public.connectical_report_incident('$incident_res', 'service', 'Not my reservation at all');" >/dev/null 2>&1; then
+  echo "Traveler could report on someone else's reservation" >&2; exit 1
+fi
+if as_user "$traveler_a" "select public.connectical_report_incident('$incident_res', 'service', 'short');" >/dev/null 2>&1; then
+  echo "Too-short incident accepted" >&2; exit 1
+fi
+incident=$(as_user "$traveler_a" "select public.connectical_report_incident('$incident_res', 'service', 'O barco saiu 40 minutos atrasado.');")
+for actor in "$traveler_a" "$provider_user"; do
+  for admin_call in "connectical_admin_update_incident('$incident', 'resolved', 'x')" "connectical_admin_list_incidents(null)" \
+    "connectical_admin_list_users(null)" "connectical_admin_kpis(current_date - 1, current_date + 1)" \
+    "connectical_admin_list_audit_log(10)" "connectical_admin_list_offers_for_moderation()" \
+    "connectical_admin_save_campaign(null, 'Promo', '', null, current_date, current_date + 5, 'active')" "connectical_admin_list_campaigns()"; do
+    if as_user "$actor" "select public.$admin_call;" >/dev/null 2>&1; then
+      echo "Non-admin ran $admin_call" >&2; exit 1
+    fi
+  done
+done
+as_user "$admin_user" "select public.connectical_admin_update_incident('$incident', 'resolved', 'Reembolso parcial em análise');" >/dev/null
+my_incident=$(as_user "$traveler_a" "select status || '|' || admin_note from public.connectical_my_incidents() where id = '$incident';")
+[ "$my_incident" = 'resolved|Reembolso parcial em análise' ] || { echo "Incident follow-up mismatch: $my_incident" >&2; exit 1; }
+users=$(as_user "$admin_user" "select count(*) filter (where role = 'admin') || '|' || count(*) filter (where role = 'provider' and user_id = '$applicant') from public.connectical_admin_list_users(null);")
+[ "$users" = '1|1' ] || { echo "Admin user list mismatch: $users" >&2; exit 1; }
+kpis=$(as_user "$admin_user" "select (k.quotes > 0) || '|' || (k.confirmed > 0) || '|' || (k.confirmed_gross_cents > 0) || '|' || (k.quote_to_confirmed_bps between 1 and 10000) from public.connectical_admin_kpis(current_date - 1, current_date + 1) k;")
+[ "$kpis" = 'true|true|true|true' ] || { echo "KPI mismatch: $kpis" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_admin_kpis(current_date, current_date - 1);" >/dev/null 2>&1; then
+  echo "Inverted KPI period accepted" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_save_campaign(null, 'Verão em Búzios', 'Passeios ao pôr do sol', 'barcos', current_date - 1, current_date + 10, 'active');" >/dev/null
+as_user "$admin_user" "select public.connectical_admin_save_campaign(null, 'Rascunho', '', null, current_date, current_date + 1, 'draft');" >/dev/null
+if as_user "$admin_user" "select public.connectical_admin_save_campaign(null, 'Fim antes', '', null, current_date, current_date - 1, 'active');" >/dev/null 2>&1; then
+  echo "Campaign ending before it starts was accepted" >&2; exit 1
+fi
+visible=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select string_agg(title, ',') from public.connectical_active_campaigns();" | tail -1)
+[ "$visible" = 'Verão em Búzios' ] || { echo "Active campaigns for anon mismatch: $visible" >&2; exit 1; }
+echo "PASS moderation, audit log, incidents, users, KPIs and campaigns are admin-only and behave as specified"
+
+# Offer photos: metadata only, owner-or-admin writes, key bound to the offer, public only when visible.
+media_key="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+add_media() { as_user "$1" "select public.connectical_add_offer_media('$mod_offer', '$2', 'https://cdn.example/$2', '$3', $4, $5, $6, '$7');"; }
+for actor in "$traveler_a" "$provider_user"; do
+  if add_media "$actor" "$media_key" image/jpeg 2000 1200 900 'Quarto' >/dev/null 2>&1; then
+    echo "Non-owner could add offer media" >&2; exit 1
+  fi
+done
+other_key="offers/$range_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).jpg"
+for bad in "$other_key|image/jpeg|2000|1200|900|Quarto" "$media_key|image/gif|2000|1200|900|Quarto" \
+  "$media_key|image/jpeg|6000000|1200|900|Quarto" "$media_key|image/jpeg|2000|300|900|Quarto" "$media_key|image/jpeg|2000|1200|900| "; do
+  IFS='|' read -r bkey btype bsize bw bh balt <<EOF
+$bad
+EOF
+  if add_media "$applicant" "$bkey" "$btype" "$bsize" "$bw" "$bh" "$balt" >/dev/null 2>&1; then
+    echo "Invalid offer media accepted: $bad" >&2; exit 1
+  fi
+done
+media_id=$(add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Quarto com vista para o mar')
+if add_media "$applicant" "$media_key" image/jpeg 2000 1200 900 'Duplicada' >/dev/null 2>&1; then
+  echo "Duplicate storage key accepted" >&2; exit 1
+fi
+public_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select alt_text from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+[ "$public_media" = 'Quarto com vista para o mar' ] || { echo "Visible offer photo not readable by anon: $public_media" >&2; exit 1; }
+if docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select storage_key from public.connectical_offer_media limit 1;" >/dev/null 2>&1; then
+  echo "Storage keys readable by anon" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'suspended', 'Revisão de fotos');" >/dev/null
+hidden_media=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) from public.connectical_offer_media where offer_id = '$mod_offer';" | tail -1)
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$mod_offer', 'approved', '');" >/dev/null
+[ "$hidden_media" = '0' ] || { echo "Photos of a suspended offer stayed public" >&2; exit 1; }
+for i in 2 3 4 5 6 7 8 9 10; do
+  k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+  add_media "$applicant" "$k" image/png 3000 1000 1000 "Foto $i" >/dev/null
+done
+k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+if add_media "$applicant" "$k" image/png 3000 1000 1000 'Foto 11' >/dev/null 2>&1; then
+  echo "Eleventh photo accepted" >&2; exit 1
+fi
+if as_user "$provider_user" "select public.connectical_remove_offer_media('$media_id');" >/dev/null 2>&1; then
+  echo "Non-owner could remove offer media" >&2; exit 1
+fi
+removed_key=$(as_user "$applicant" "select public.connectical_remove_offer_media('$media_id');")
+[ "$removed_key" = "$media_key" ] || { echo "Removal did not return the storage key: $removed_key" >&2; exit 1; }
+echo "PASS offer photos: owner-only metadata, key bound to the offer, limits, visibility and removal key"
+
+# Anonymous catalog: visitors without a session read published, visible offers and their inventory.
+anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
+anon_offers=$(anon_read "select count(*) from public.connectical_offers;")
+anon_inventory=$(anon_read "select count(*) from public.connectical_inventory;")
+anon_suspended=$(anon_read "select count(*) from public.connectical_offers where moderation_status <> 'approved' or not published;")
+case "$anon_offers|$anon_inventory" in
+  *ERROR*|0\|*|*\|0) echo "Anonymous catalog read failed: offers=$anon_offers inventory=$anon_inventory" >&2; exit 1 ;;
+esac
+[ "$anon_suspended" = '0' ] || { echo "Anonymous visitors see hidden offers: $anon_suspended" >&2; exit 1; }
+echo "PASS visitors without a session read published offers and inventory, never hidden ones"
 
 # The read-only checklist operators paste into the trial tenant must pass here too.
 verify_failed=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \

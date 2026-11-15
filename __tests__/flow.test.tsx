@@ -2,6 +2,7 @@ import React from 'react';
 import { Text } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
 import App from '../App';
+import { addDays, buziosIsoDate } from '../src/utils/portalInput';
 
 const mockStorage = new Map<string, string>();
 
@@ -174,8 +175,8 @@ test('updates the itinerary date selected in offer detail', async () => {
   pressAccessible(root, 'Día siguiente');
   pressText(root, 'Agregar a Mi viaje');
 
-  const nextDate = new Date();
-  nextDate.setDate(nextDate.getDate() + 1);
+  // La app parte del día de Búzios, no del día local del dispositivo (difieren de 21:00 a medianoche).
+  const nextDate = new Date(`${addDays(buziosIsoDate(), 1)}T12:00:00`);
   const expectedDate = `${['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][nextDate.getDay()]}, ${nextDate.getDate()} ${['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][nextDate.getMonth()]}`;
   expect(hasText(root, expectedDate)).toBe(true);
 });

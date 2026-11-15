@@ -1,4 +1,5 @@
 import type { IconName } from '../components/Icon';
+import type { OfferMedia } from '../lib/platformService';
 import type { SharedInventory, SharedOffer } from '../lib/reservationService';
 import { discountPercent } from '../utils/format';
 import type { CategoryStat, Offer, OfferCategory } from './homeMock';
@@ -27,7 +28,11 @@ const PRICE_UNITS: Record<Offer['priceMode'], { es: string; pt: string }> = {
 
 const CATEGORY_ORDER: OfferCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
 
-export function sharedOfferToOffer(shared: SharedOffer, inventory: SharedInventory[] | null): Offer {
+export function sharedOfferToOffer(
+  shared: SharedOffer,
+  inventory: SharedInventory[] | null,
+  media: OfferMedia[] = [],
+): Offer {
   const ownInventory = inventory?.filter(item => item.offer_id === shared.id) ?? null;
   const freeUnits = ownInventory?.reduce(
     (sum, item) => sum + Math.max(0, item.total_units - item.held_units - item.sold_units),
@@ -70,6 +75,10 @@ export function sharedOfferToOffer(shared: SharedOffer, inventory: SharedInvento
       pt: 'Política de cancelamento pendente de definição pela Connectical.',
     },
     missingFields: missing,
+    photos: media
+      .filter(item => item.offer_id === shared.id)
+      .sort((left, right) => left.position - right.position)
+      .map(item => ({ url: item.url, alt: item.alt_text, width: item.width, height: item.height })),
   };
 }
 
@@ -89,9 +98,9 @@ export type Catalog = {
 export function buildCatalog(
   demoOffers: Offer[],
   categoryLabels: CategoryStat[],
-  shared: { offers: SharedOffer[]; inventory: SharedInventory[] | null } | null,
+  shared: { offers: SharedOffer[]; inventory: SharedInventory[] | null; media?: OfferMedia[] } | null,
 ): Catalog {
-  const sharedOffers = shared?.offers.map(offer => sharedOfferToOffer(offer, shared.inventory)) ?? [];
+  const sharedOffers = shared?.offers.map(offer => sharedOfferToOffer(offer, shared.inventory, shared.media)) ?? [];
   const offers = [...sharedOffers, ...demoOffers.map(offer => ({ ...offer, source: 'demo' as const }))];
   const labels = new Map(categoryLabels.map(category => [category.id, category]));
   const categories = CATEGORY_ORDER.map(id => ({

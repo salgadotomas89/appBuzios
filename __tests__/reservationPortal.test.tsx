@@ -16,6 +16,7 @@ jest.mock('../src/lib/reservationService', () => {
     'upsertProviderOffer', 'publishProviderInventory', 'listOfferAvailability', 'recordSharedRefund',
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
     'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
+    'restoreSharedSession', 'isSharedSessionPersisted',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -91,6 +92,8 @@ beforeEach(() => {
   mocked.getSweepHealth.mockResolvedValue(null);
   mocked.listCommissionTerms.mockResolvedValue([]);
   mocked.listPaymentReviews.mockResolvedValue([]);
+  mocked.restoreSharedSession.mockResolvedValue(null);
+  mocked.isSharedSessionPersisted.mockReturnValue(true);
 });
 
 it('shows the sign-in form when there is no session', async () => {
@@ -614,4 +617,28 @@ it('publishes a new offer only after its details and inventory are saved, and re
   expect(mocked.upsertProviderOffer.mock.calls.slice(1).map(call => [call[0].offerId, call[0].published]))
     .toEqual([['offer-new', true]]);
   expect(mocked.publishProviderInventory).toHaveBeenCalledTimes(2);
+});
+
+it('explains an expired or unreachable stored session and still shows the sign-in form', async () => {
+  mocked.restoreSharedSession.mockResolvedValueOnce('expired');
+  mocked.getSharedRole.mockResolvedValue(null);
+  let root = await render();
+  expect(hasText(root, 'Tu sesión expiró. Inicia sesión de nuevo.')).toBe(true);
+  expect(hasText(root, 'Acceso de cuenta')).toBe(true);
+
+  mocked.restoreSharedSession.mockResolvedValueOnce('unavailable');
+  root = await render('pt');
+  expect(hasText(root, 'Não foi possível verificar sua sessão por falta de conexão.')).toBe(true);
+});
+
+it('warns after sign-in when the session could not be stored on the device', async () => {
+  mocked.getSharedRole.mockResolvedValueOnce(null).mockResolvedValue('traveler');
+  mocked.signInSharedAccount.mockResolvedValue(undefined);
+  mocked.isSharedSessionPersisted.mockReturnValue(false);
+  const root = await render();
+  await type(root, 'Correo', 'ana@example.com');
+  await type(root, 'Contraseña', 'secret123');
+  await press(root, 'Iniciar sesión');
+  expect(hasText(root, 'no se pudo guardar en el dispositivo')).toBe(true);
+  expect(hasText(root, 'Mis reservas')).toBe(true);
 });

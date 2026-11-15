@@ -7,6 +7,7 @@ import {
   type SharedInventory,
   type SharedOffer,
 } from '../lib/reservationService';
+import { listOfferMedia, type OfferMedia } from '../lib/platformService';
 import { buziosIsoDate } from '../utils/portalInput';
 import { buildCatalog, type Catalog } from './catalog';
 import { homeMock } from './homeMock';
@@ -17,7 +18,7 @@ export type CatalogSource = 'demo' | 'loading' | 'shared' | 'demo_fallback';
 // Si la lectura falla, sigue con el ejemplo e informa 'demo_fallback' para que la pantalla lo diga.
 export function useCatalog(sharedEnabled: boolean): Catalog & { source: CatalogSource } {
   const active = sharedEnabled && isInsforgeConfigured();
-  const [shared, setShared] = useState<{ offers: SharedOffer[]; inventory: SharedInventory[] | null } | null>(null);
+  const [shared, setShared] = useState<{ offers: SharedOffer[]; inventory: SharedInventory[] | null; media: OfferMedia[] } | null>(null);
   const [source, setSource] = useState<CatalogSource>(active ? 'loading' : 'demo');
 
   useEffect(() => {
@@ -31,8 +32,10 @@ export function useCatalog(sharedEnabled: boolean): Catalog & { source: CatalogS
         // Una lectura truncada podría omitir el cupo de alguna oferta y mostrarla sin cupo:
         // en ese caso la disponibilidad queda por confirmar en el portal.
         const inventory = rows && rows.length < PUBLISHED_AVAILABILITY_LIMIT ? rows : null;
+        // Sin fotos la oferta se muestra con su ilustración de categoría.
+        const media = await listOfferMedia(offers.map(offer => offer.id)).catch(() => []);
         if (!mounted) return;
-        setShared({ offers, inventory });
+        setShared({ offers, inventory, media });
         setSource('shared');
       } catch {
         if (mounted) setSource('demo_fallback');
