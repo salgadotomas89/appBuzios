@@ -30,6 +30,40 @@ Barrido de retenciones: `project_admin` no tiene acceso a `cron`, así que se pr
 `npx -y @insforge/cli schedules create` llamando por HTTP a `connectical_system_run_hold_sweep`; antes hay que
 confirmar en el tenant con qué rol ejecuta esa llamada la clave de API (no debe ser `anon` ni `authenticated`).
 
+### Aplicado en buziosflow (15-11-2026, con autorización expresa)
+
+| Paso | Resultado |
+| --- | --- |
+| `current` | buziosflow (`bfab79dc-…`), `ykfv5j3m.us-east.insforge.app` |
+| Estado previo | 0 tablas en `public`, 0 usuarios, 0 migraciones, 0 backups; `main` en `54df930` con CI verde; `migrations/` sin cambios desde ese commit |
+| Respaldo `pre-reservas` | id `f374147d-f4ff-4071-a20f-dcf42b7f9ea5`, `completed`, archivo `20261115_095131.sql.gz` (31 442 bytes). Descargado, `gzip -t` correcto y restaurado en un PostgreSQL 15 local: 49 tablas de los esquemas de InsForge; solo fallan las extensiones que esa imagen no trae (`vector`, `http`, `pg_cron`) |
+| `db migrations up --all` | 15 aplicadas (09:52 UTC), `db migrations list` las muestra todas |
+| `verify_migrations.sql` | 14 comprobaciones, todas `true` |
+| `reconcile_inventory.sql` | 0 filas |
+| Inventario del esquema | 257 líneas, **idéntico** a `expected_schema_inventory.txt` |
+| App con la clave anónima (SDK real) | lee ofertas, inventario y fotos (0 filas); `connectical_ensure_profile` y `connectical_list_reservations` rechazan a `anon` (42501). `select *` sobre ofertas da 401/42501 por los permisos por columna: la app siempre nombra las columnas |
+| Ajustes por defecto | `offer_moderation_required = false`, `simulated_payments_enabled = true`, sin `media_public_base_url` |
+| Otros esquemas | sin cambios fuera de `public` (17 tablas `connectical_*`) |
+
+Barrido programado: la clave de API ejecuta las RPC como `project_admin` (dueño y único con `EXECUTE` sobre
+`connectical_system_*`). Una llamada manual (`db rpc connectical_system_run_hold_sweep --data '{}'`) terminó
+`succeeded` con 0 expiradas. Sin cuerpo, el CLI usa GET y la base la ejecuta en solo lectura (`cannot execute
+INSERT in a read-only transaction`): el schedule debe ser POST con `{}`. Creado así:
+
+```sh
+npx -y @insforge/cli schedules create --name connectical-hold-sweep --cron "*/2 * * * *" \
+  --url "https://ykfv5j3m.us-east.insforge.app/api/database/rpc/connectical_system_run_hold_sweep" \
+  --method POST --headers '{"Authorization":"Bearer ${{secrets.API_KEY}}","Content-Type":"application/json"}' --body '{}'
+# Para retirarlo: npx -y @insforge/cli schedules delete f195463f-70b8-4491-bc2f-e679b77a1bc5
+```
+
+Recuperación ante un problema grave: `npx -y @insforge/cli backups restore f374147d-f4ff-4071-a20f-dcf42b7f9ea5`
+(sobrescribe todo; vuelve a la base vacía).
+
+Pendiente: SMTP sigue desactivado (`[auth.smtp] enabled = false`) con verificación por código obligatoria. La
+documentación no aclara si InsForge envía los códigos sin SMTP propio; hay que comprobarlo con un registro real
+desde la app usando un correo del equipo. No se crearon usuarios ni datos de prueba en el tenant.
+
 ## 0. Antes de empezar
 
 - [ ] En el panel de InsForge, confirmar que el proyecto es **OfertasApp** con host `8ntv6m27.us-east.insforge.app`,

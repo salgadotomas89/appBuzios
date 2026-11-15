@@ -2,7 +2,7 @@
 
 Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
-InsForge remoto no tiene aplicada ninguna migración.
+Actualización 15-11-2026: las 15 migraciones están aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos).
 
 Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SIMULADO** (funciona sin efectos reales) ·
 **BLOQUEADO** (depende de algo externo) · **NO IMPLEMENTADO**.
@@ -11,7 +11,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | --- | --- | --- | --- |
 | Inventario por noche y concurrencia | COMPLETO | Migraciones 0001/202611140001; carreras de 8 sesiones, varias habitaciones, cancelación concurrente, Año Nuevo; conciliación global | P0 hecho |
 | Retenciones de 10 min y expiración diferida | COMPLETO | Se liberan al listar o reservar; pruebas de retención vencida | P0 hecho |
-| Barrido programado de retenciones | PARCIAL | Función con registro, sin solapes y aislamiento por oferta (0006), probada; **scheduler no instalado** (bloqueado por tenant) | P0 |
+| Barrido programado de retenciones | PARCIAL | Función con registro, sin solapes y aislamiento por oferta (0006), probada; schedule `connectical-hold-sweep` cada 2 minutos en buziosflow, ejecutando con éxito (15-11-2026) | P0 hecho |
 | Idempotencia de reservas | COMPLETO | Doble envío simultáneo, reintento tras vencer la cotización | P0 hecho |
 | Pagos simulados (tarjeta, Pix) | SIMULADO | `simulate_payment`: aprobado, rechazado, pendiente, reintentos; interruptor en la base de datos (0010), que hay que apagar antes de una pasarela real | — |
 | Webhooks de pasarela | PARCIAL | Ingesta idempotente con revisión de doble cobro (0008), probada; **falta el manejador firmado** y una pasarela contratada | P1 |
@@ -43,4 +43,4 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | iOS | PARCIAL | Compila y **arranca en un iPhone 17 Pro simulado** sin errores en los logs; bundle de producción en CI. Falta el recorrido manual y un iPhone real | P1 |
 | Android | BLOQUEADO | Sin JDK 17 ni Android SDK; `scripts/setup-android-env.sh` lo instala con aprobación. El release ya no firma con la clave debug (cambio de Gradle sin compilar aquí) | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |
-| Despliegue InsForge | BLOQUEADO | Tenant sin confirmar; runbook y preflight listos | Decisión humana |
+| Despliegue InsForge | COMPLETO | buziosflow: respaldo previo, 15 migraciones, verificación, conciliación e inventario sin diferencias (15-11-2026). Falta comprobar los códigos de correo (SMTP propio desactivado) | P0 hecho |
