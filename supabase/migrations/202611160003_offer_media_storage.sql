@@ -12,6 +12,11 @@
 --   * La lectura no se toca: en un bucket público las descargas directas no pasan por RLS (documentación de
 --     InsForge). Las fotos de ofertas sin aprobar solo son accesibles para quien conozca su clave aleatoria.
 --   * La clave de API (administración del proyecto) no pasa por RLS.
+--
+-- No se puede aplicar con `db migrations up` en InsForge 2.3.5: el backend ejecuta las migraciones con
+-- SET LOCAL ROLE project_admin y crear políticas exige ser dueño de storage.objects (postgres). Ensayada sobre una
+-- restauración exacta de buziosflow (15-11-2026): "must be owner of table objects" y la transacción no deja nada.
+-- Va detrás de los índices para no bloquearlos; necesita que InsForge la aplique o un procedimiento suyo.
 
 create or replace function public.connectical_can_write_offer_media_object(
   p_bucket text,
