@@ -29,6 +29,9 @@ jobs:
       - run: npm test -- --ci
         env:
           TZ: Asia/Tokyo
+      # Bundle de producción con Metro: detecta dependencias que Jest resuelve distinto (shared-schemas es ESM).
+      - run: npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/ios.jsbundle" --assets-dest "$RUNNER_TEMP/ios-assets"
+      - run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/android.jsbundle" --assets-dest "$RUNNER_TEMP/android-assets"
 
   shared-reservations:
     name: Integración PostgreSQL local

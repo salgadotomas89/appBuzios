@@ -5,7 +5,9 @@ credenciales: OAuth productivo requiere aprobación humana.
 
 ## Estado actual (verificado en el código de `@insforge/sdk@1.5.2`)
 
-- La app usa correo y contraseña. No se probó contra el tenant: depende de confirmarlo y de aplicar las migraciones.
+- La app usa correo y contraseña, con verificación del correo por código de 6 dígitos (el tenant la exige:
+  `requireEmailVerification: true`, `verifyEmailMethod: code`, leído de su configuración pública). No se probó
+  contra el tenant: depende de confirmarlo y de aplicar las migraciones.
 - **Persistencia de sesión implementada y probada con dobles, no en dispositivo** (15-11-2026):
   - `src/lib/insforge.ts` crea el cliente con `isServerMode: true`, que activa el flujo móvil documentado del SDK
     (`client_type=mobile`): el inicio de sesión devuelve `refreshToken` y `auth.refreshSession({ refreshToken })`
@@ -28,6 +30,23 @@ credenciales: OAuth productivo requiere aprobación humana.
   `codeVerifier`; `exchangeOAuthCode(code, codeVerifier)` completa el inicio de sesión. El SDK guarda el verificador en
   `sessionStorage`, que no existe en React Native: la app debe conservarlo y pasarlo explícitamente.
 - Existe `signInWithIdToken` para Google con SDK nativo (según los tipos del SDK, solo Google por ahora).
+
+## Riesgo de `isServerMode` (revisado el 14-11-2026, noche)
+
+- **Estado del SDK:** `@insforge/sdk` 1.5.2 (31-07-2026) sigue siendo la última versión publicada. Su README y su
+  `SDK-REFERENCE.md` no documentan React Native ni un modo móvil; el flujo `client_type=mobile` solo se activa con
+  `isServerMode`, marcado `@deprecated` en favor de los ayudantes SSR, que dependen de cookies.
+- **Qué cambia ese modo** (leído en `dist/index.js`): el inicio de sesión, la verificación de correo, la renovación
+  y el cierre usan `?client_type=mobile`; el refresh token viaja en el cuerpo (`refresh_token`); el SDK no renueva
+  solo ni rellena `getCurrentUser`; no hay detección automática de callbacks OAuth. El gestor de sesión cubre cada
+  punto.
+- **Mitigaciones aplicadas:** el SDK queda fijado en `1.5.2` exacto (antes `^1.5.2`, que admitía una 1.6 que podría
+  retirar el modo) y `__tests__/sdkSessionContract.test.ts` ejecuta el SDK real con la red simulada: inicio de sesión,
+  restauración con refresh en el cuerpo y token rotado, revocación (401) que borra la sesión y vuelta a la clave
+  anónima tras cerrar sesión, y verificación de correo por código. Una actualización que cambie el contrato falla ahí.
+- **Pendiente con InsForge:** preguntar si el flujo móvil seguirá soportado y si existe un adaptador de almacenamiento
+  oficial para React Native; confirmar en el tenant de ensayo que el endpoint móvil emite y rota el refresh token y
+  que el logout lo revoca (el SDK no lo envía al cerrar sesión).
 
 ## Prueba en dispositivo (cuando haya simulador o teléfono)
 
