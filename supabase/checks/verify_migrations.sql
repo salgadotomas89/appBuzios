@@ -25,7 +25,7 @@ with checks(name, ok) as (
           'connectical_create_traveler_profile', 'connectical_system_expire_holds',
           'connectical_system_run_hold_sweep', 'connectical_system_ingest_payment_event',
           'connectical_redact_reservation', 'connectical_offer_moderation_guard', 'connectical_audit_change',
-          'connectical_can_manage_offer'))),
+          'connectical_can_manage_offer', 'connectical_prune_sweep_runs'))),
     ('app RPCs executable by authenticated',
       (select count(*) = 37 and bool_and(has_function_privilege('authenticated', p.oid, 'execute'))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
