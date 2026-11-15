@@ -18,6 +18,7 @@ jest.mock('../src/lib/reservationService', () => {
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
     'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
     'restoreSharedSession', 'isSharedSessionPersisted', 'verifyTravelerEmail', 'resendVerificationCode',
+    'requestPasswordReset', 'resetAccountPassword',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -676,6 +677,38 @@ it('asks for the emailed code after sign-up, validates it and signs the traveler
   await press(root, 'Verificar correo');
   expect(mocked.verifyTravelerEmail).toHaveBeenCalledWith('ana@example.com', '123456');
   expect(hasText(root, 'Mis reservas')).toBe(true);
+});
+
+it('sends a password reset code, checks the new password and changes it without signing in', async () => {
+  mocked.getSharedRole.mockResolvedValue(null);
+  mocked.requestPasswordReset.mockResolvedValue(undefined);
+  mocked.resetAccountPassword
+    .mockRejectedValueOnce(new AuthFlowError('invalid_code', 'Invalid or expired code'))
+    .mockResolvedValue(undefined);
+  const root = await render();
+  await type(root, 'Correo', ' ana@example.com ');
+  await press(root, '¿Olvidaste tu contraseña?');
+  expect(mocked.requestPasswordReset).toHaveBeenCalledWith('ana@example.com');
+  expect(hasText(root, 'te enviamos un código de 6 dígitos para cambiar la contraseña')).toBe(true);
+
+  await type(root, 'Código de verificación (6 dígitos)', '123456');
+  await type(root, 'Contraseña nueva (mínimo 8 caracteres)', 'corta');
+  await press(root, 'Cambiar contraseña');
+  expect(hasText(root, 'La contraseña debe tener al menos 8 caracteres.')).toBe(true);
+  expect(mocked.resetAccountPassword).not.toHaveBeenCalled();
+
+  await type(root, 'Contraseña nueva (mínimo 8 caracteres)', 'nueva-clave-1');
+  await press(root, 'Cambiar contraseña');
+  expect(hasText(root, 'El código no es válido o ya venció.')).toBe(true);
+
+  await press(root, 'Reenviar código');
+  expect(mocked.requestPasswordReset).toHaveBeenCalledTimes(2);
+  await type(root, 'Código de verificación (6 dígitos)', '654321');
+  await press(root, 'Cambiar contraseña');
+  expect(mocked.resetAccountPassword).toHaveBeenLastCalledWith('ana@example.com', '654321', 'nueva-clave-1');
+  expect(hasText(root, 'Contraseña cambiada. Inicia sesión con la nueva.')).toBe(true);
+  expect(mocked.signInSharedAccount).not.toHaveBeenCalled();
+  expect(hasText(root, 'Cambiar contraseña')).toBe(false);
 });
 
 it('shows sign-in and verification rejections in the chosen language', async () => {

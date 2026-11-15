@@ -109,3 +109,22 @@ it('verifies an emailed code through the mobile endpoint and stores the session'
   expect(net.calls[0]).toMatchObject({ method: 'POST', path: '/api/auth/email/verify?client_type=mobile', body: { email: 'n@b.c', otp: '123456' } });
   expect(store.value()).toEqual({ userId: 'u9', refreshToken: 'rv' });
 });
+
+it('resets a password by code through the email endpoints with the anon key, without creating a session', async () => {
+  const net = fakeNetwork({
+    '/api/auth/email/send-reset-password': () => ({ status: 200, json: { success: true, message: 'sent' } }),
+    '/api/auth/email/exchange-reset-password-token': () => ({ status: 200, json: { token: 'reset-token', expiresAt: '2099-01-01T00:00:00Z' } }),
+    '/api/auth/email/reset-password': () => ({ status: 200, json: { message: 'Password reset successfully. Please login with your new password.' } }),
+  });
+  const client = createClient({ baseUrl: BASE, anonKey: ANON, isServerMode: true, fetch: net.fetch as unknown as typeof fetch, retryCount: 0 });
+  expect((await client.auth.sendResetPasswordEmail({ email: 'n@b.c' })).error).toBeNull();
+  const exchanged = await client.auth.exchangeResetPasswordToken({ email: 'n@b.c', code: '123456' });
+  expect(exchanged.data?.token).toBe('reset-token');
+  expect((await client.auth.resetPassword({ newPassword: 'nueva-clave-1', otp: 'reset-token' })).error).toBeNull();
+  expect(net.calls.map(call => [call.method, call.path, call.body])).toEqual([
+    ['POST', '/api/auth/email/send-reset-password', { email: 'n@b.c' }],
+    ['POST', '/api/auth/email/exchange-reset-password-token', { email: 'n@b.c', code: '123456' }],
+    ['POST', '/api/auth/email/reset-password', { newPassword: 'nueva-clave-1', otp: 'reset-token' }],
+  ]);
+  expect(net.calls.every(call => call.auth === `Bearer ${ANON}`)).toBe(true);
+});

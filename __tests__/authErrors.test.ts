@@ -11,6 +11,9 @@ it('classifies only the rejections the HTTP status identifies without ambiguity'
   expect(classifyAuthFailure('sign_up', 401)).toBe('unknown');
   expect(classifyAuthFailure('sign_in', 403)).toBe('unknown');
   expect(classifyAuthFailure('verify', 500)).toBe('unknown');
+  expect(classifyAuthFailure('reset_code', 400)).toBe('invalid_code');
+  expect(classifyAuthFailure('reset_password', 400)).toBe('unknown');
+  expect(classifyAuthFailure('reset_request', 429)).toBe('rate_limited');
 });
 
 it('keeps the server message next to the kind', () => {

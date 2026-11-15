@@ -299,6 +299,23 @@ export async function resendVerificationCode(email: string): Promise<void> {
   if (error) throw toAuthFlowError('resend', error);
 }
 
+// Recuperación de contraseña por código (resetPasswordMethod = code en buziosflow). El servidor no revela si el
+// correo tiene cuenta: responde igual y solo envía el código si existe. Cambiar la contraseña no inicia sesión.
+export async function requestPasswordReset(email: string): Promise<void> {
+  const { error } = await getClient().auth.sendResetPasswordEmail({ email });
+  if (error) throw toAuthFlowError('reset_request', error);
+}
+
+// El código se canjea por un token de un solo uso y con él se fija la contraseña nueva.
+export async function resetAccountPassword(email: string, code: string, newPassword: string): Promise<void> {
+  const auth = getClient().auth;
+  const exchanged = await auth.exchangeResetPasswordToken({ email, code });
+  if (exchanged.error) throw toAuthFlowError('reset_code', exchanged.error);
+  if (!exchanged.data?.token) throw new Error('InsForge no devolvió el permiso para cambiar la contraseña.');
+  const { error } = await auth.resetPassword({ newPassword, otp: exchanged.data.token });
+  if (error) throw toAuthFlowError('reset_password', error);
+}
+
 // Borra la sesión del dispositivo aunque el servidor no responda.
 export async function signOutSharedAccount(): Promise<void> {
   getClient();

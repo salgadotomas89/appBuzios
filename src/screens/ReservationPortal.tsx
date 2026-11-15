@@ -29,6 +29,8 @@ import {
   restoreSharedSession,
   verifyTravelerEmail,
   resendVerificationCode,
+  requestPasswordReset,
+  resetAccountPassword,
   isSharedSessionPersisted,
   publishProviderInventoryRange,
   setProviderOfferDetails,
@@ -127,6 +129,10 @@ export function ReservationPortal({
   // Correo pendiente de verificar tras registrarse; muestra el campo del código.
   const [pendingVerification, setPendingVerification] = useState<string | null>(null);
   const [verificationCode, setVerificationCode] = useState('');
+  // Correo con un código de cambio de contraseña pedido; muestra el código y la contraseña nueva.
+  const [pendingReset, setPendingReset] = useState<string | null>(null);
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [role, setRole] = useState<SharedRole | null>(null);
   const [offers, setOffers] = useState<SharedOffer[]>([]);
   const [providers, setProviders] = useState<SharedProvider[]>([]);
@@ -308,6 +314,31 @@ export function ReservationPortal({
     run(async () => {
       await resendVerificationCode(pendingVerification);
       return words.codeResent;
+    });
+  }
+
+  function requestReset(target: string) {
+    run(async () => {
+      await requestPasswordReset(target);
+      setPendingVerification(null);
+      setPendingReset(target);
+      setResetCode('');
+      return words.resetSent;
+    });
+  }
+
+  function changePassword() {
+    if (!pendingReset) return;
+    run(async () => {
+      const code = resetCode.trim();
+      if (!/^\d{6}$/.test(code)) throw new InputValidationError(words.codeFormat);
+      if (newPassword.length < 8) throw new InputValidationError(words.passwordHint);
+      await resetAccountPassword(pendingReset, code, newPassword);
+      setPendingReset(null);
+      setResetCode('');
+      setNewPassword('');
+      setPassword('');
+      return words.passwordChanged;
     });
   }
 
@@ -558,6 +589,18 @@ export function ReservationPortal({
           <ActionButton title={words.signIn} onPress={signIn} disabled={busy || !email.trim() || !password} />
           <ActionButton title={words.signUp} onPress={signUp} disabled={busy || !name.trim() || !email.trim() || password.length < 8} secondary />
           {password && password.length < 8 ? <Text style={styles.helper}>{words.passwordHint}</Text> : null}
+          <Pressable onPress={() => requestReset(email.trim())} disabled={busy || !email.trim()} accessibilityRole="button" accessibilityState={{ disabled: busy || !email.trim() }}>
+            <Text style={styles.link}>{words.forgotPassword}</Text>
+          </Pressable>
+          {pendingReset ? (
+            <View style={styles.quote}>
+              <Text style={styles.helper}>{pendingReset}</Text>
+              <TextInput value={resetCode} onChangeText={setResetCode} keyboardType="number-pad" maxLength={6} autoComplete="one-time-code" placeholder={words.verificationCode} accessibilityLabel={words.verificationCode} placeholderTextColor={colors.muted} style={styles.input} />
+              <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry autoComplete="new-password" placeholder={words.newPassword} accessibilityLabel={words.newPassword} placeholderTextColor={colors.muted} style={styles.input} />
+              <ActionButton title={words.changePassword} onPress={changePassword} disabled={busy} />
+              <ActionButton title={words.resendCode} onPress={() => requestReset(pendingReset)} disabled={busy} secondary />
+            </View>
+          ) : null}
           {pendingVerification ? (
             <View style={styles.quote}>
               <Text style={styles.helper}>{pendingVerification}</Text>

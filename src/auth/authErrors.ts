@@ -3,7 +3,7 @@
 // ambigüedad (401 en el inicio de sesión comprobado contra buziosflow el 15-11-2026); el resto queda como
 // 'unknown' y la pantalla añade el mensaje original del servidor.
 
-export type AuthAction = 'sign_in' | 'sign_up' | 'verify' | 'resend';
+export type AuthAction = 'sign_in' | 'sign_up' | 'verify' | 'resend' | 'reset_request' | 'reset_code' | 'reset_password';
 export type AuthFailureKind = 'invalid_credentials' | 'invalid_code' | 'email_in_use' | 'rate_limited' | 'network' | 'unknown';
 
 export class AuthFlowError extends Error {
@@ -20,7 +20,7 @@ export function classifyAuthFailure(action: AuthAction, status: number | undefin
   if (status === undefined || status === 0) return 'network';
   if (status === 429) return 'rate_limited';
   if (action === 'sign_in' && status === 401) return 'invalid_credentials';
-  if (action === 'verify' && (status === 400 || status === 401)) return 'invalid_code';
+  if ((action === 'verify' || action === 'reset_code') && (status === 400 || status === 401)) return 'invalid_code';
   if (action === 'sign_up' && status === 409) return 'email_in_use';
   return 'unknown';
 }
