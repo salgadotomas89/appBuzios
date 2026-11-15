@@ -57,30 +57,84 @@ npx -y @insforge/cli schedules create --name connectical-hold-sweep --cron "*/2 
 # Para retirarlo: npx -y @insforge/cli schedules delete f195463f-70b8-4491-bc2f-e679b77a1bc5
 ```
 
-Recuperación ante un problema grave: `npx -y @insforge/cli backups restore f374147d-f4ff-4071-a20f-dcf42b7f9ea5`
-(sobrescribe todo; vuelve a la base vacía).
+Pendiente: SMTP sigue desactivado (`[auth.smtp] enabled = false`) con verificación por código obligatoria. No se
+crearon usuarios ni datos de prueba en el tenant.
 
-Pendiente: SMTP sigue desactivado (`[auth.smtp] enabled = false`) con verificación por código obligatoria. La
-documentación no aclara si InsForge envía los códigos sin SMTP propio; hay que comprobarlo con un registro real
-desde la app usando un correo del equipo. No se crearon usuarios ni datos de prueba en el tenant.
+### Respaldo y recuperación tras las 15 migraciones (15-11-2026, tarde)
 
-### Integración operativa (15-11-2026): preparado, sin aplicar
+El plan gratuito admite **un** respaldo manual. Se sustituyó `pre-reservas` solo después de demostrar una
+recuperación completa de la base actual, según la autorización:
 
-Comprobación de solo lectura en cualquier momento: `npm run check:remote-schema` (migraciones aplicadas frente a
-`migrations/`, verificación, conciliación e inventario, que ahora incluye índices y las políticas `connectical_*` de
-`storage.objects`). Con migraciones pendientes muestra la diferencia esperada sin fallar.
+1. `npx -y @insforge/cli db connection-string` da la URL de `postgres` (superusuario); se usó solo para leer y
+   volcar, sin imprimirla. Con un snapshot exportado (`pg_export_snapshot`) se tomó `pg_dump -Fc` de la base entera,
+   `pg_dumpall --roles-only --no-role-passwords` y una huella de la base en esa misma transacción
+   (`fingerprint.sql`: esquemas, tablas, columnas, restricciones, índices, funciones con md5 del código, políticas,
+   triggers, permisos normalizados, secuencias y md5 de las filas de cada tabla).
+2. Restauración en PostgreSQL 15 con `pgvector`, `pg_cron` y `http` (como el tenant), en una red de Docker sin
+   salida y con `cron.launch_active_jobs=off`: **los trabajos de `pg_cron` de la copia llaman al tenant real** si se
+   restauran con red. Único error: `SET transaction_timeout` (parámetro de `pg_dump` 17 que la 15 no conoce).
+3. Huella de la copia ordenada = huella del tenant: **0 diferencias** en 1525 líneas (72 relaciones, 80 funciones,
+   16 políticas, 41 triggers, 69 tablas y 1087 filas).
+4. Después: `backups delete f374147d-…` (`pre-reservas`, cuyo volcado sigue en local) y
+   `backups create --name post-migraciones-15 --wait` → `e134bb27-09f2-43f3-92fa-257a31fa6864`, `completed`
+   17:48 UTC. Descargado y restaurado igual: estructura idéntica; los datos solo difieren en lo que cambió en esos
+   3 minutos (dos pasadas del barrido, sus registros de cron y `last_used_at` del secreto del schedule).
 
-**Migraciones preparadas, pendientes de autorización específica** (probadas en los cinco harnesses y en CI):
+Copias en `~/RespaldosBuziosFlow/` (fuera del repositorio, solo lectura, `MANIFEST.sha256` verificado): el volcado
+de `pre-reservas`, el de la plataforma `post-migraciones-15` y la carpeta `20261115_post-migraciones-15/` con el
+volcado por snapshot, los roles, las dos huellas y un `LEEME.txt` con el procedimiento. Contienen hashes de
+contraseñas y secretos cifrados: no compartir.
 
-| Versión | Qué hace | Riesgo |
+El procedimiento quedó en `npm run backup:verified` ([scripts/backup-verified.sh](../scripts/backup-verified.sh),
+huella en `supabase/checks/database_fingerprint.sql`): vuelca con snapshot, restaura aislado y compara; falla si
+algo difiere. Las secuencias no siguen el snapshot, así que se comprueba que no queden por detrás de su columna en
+lugar de comparar su valor. Tras las migraciones 16 y 17 se ejecutó otra vez: `PASS` (1530 líneas, 69 tablas),
+copia en `~/RespaldosBuziosFlow/20261115_180303_snapshot/`.
+
+Recuperación ante un problema grave: `npx -y @insforge/cli backups restore e134bb27-09f2-43f3-92fa-257a31fa6864`
+(sobrescribe todo; vuelve al estado tras las 15 migraciones). No se ha restaurado nunca sobre la base productiva.
+
+### Migraciones 16 a 18 (15-11-2026, tarde, con autorización condicionada)
+
+Antes de aplicar en producción se ensayaron las tres sobre la restauración exacta, ejecutando cada una como el
+backend (`BEGIN`, `SET LOCAL search_path TO public`, `SET LOCAL ROLE project_admin`):
+
+| Versión | Ensayo en la copia | En buziosflow |
 | --- | --- | --- |
-| `20261116000001_sweep-runs-retention` | El barrido borra su propio registro: ejecuciones sin efecto a los 30 días, con efecto o `partial` a los 180, como mucho 1000 por pasada. Hoy crece ~720 filas/día | Bajo: reemplaza la función del barrido; si la limpieza falla, la pasada queda `partial` |
-| `20261116000002_offer-media-storage` | Políticas RESTRICTIVE en `storage.objects` para el bucket `offer-media`: solo imágenes (JPEG/PNG/WebP, ≤ 5 MB) con clave `offers/<oferta>/<uuid>.<ext>`, subidas o borradas por quien gestiona esa oferta. Otros buckets sin cambios | Medio: `storage.objects` pertenece a `postgres` y `project_admin` no es miembro; la documentación de InsForge dice que estas políticas se gestionan con migraciones, pero no está comprobado. Si falla, la transacción no deja nada |
-| `20261116000003_foreign-key-indexes` | Seis índices de claves foráneas señalados por el advisor | Bajo: tablas vacías |
+| `20261116000001_sweep-runs-retention` | aplica; una pasada `succeeded` sin borrar nada | **Aplicada** (`db migrations up <archivo>`). Funciones `SECURITY DEFINER` sin `EXECUTE` para `anon` ni `authenticated`; verificación 15/15; la primera pasada programada (17:58 UTC) `succeeded` y no borró filas (242 → 243, la más antigua sigue siendo la de las 09:55) |
+| `20261116000002_foreign-key-indexes` | aplica | **Aplicada** con las cuatro tablas vacías y sin sesiones activas; los seis índices válidos |
+| `20261116000003_offer-media-storage` | **falla**: `must be owner of table objects`; la transacción no deja nada (ni la función auxiliar) | **Sin aplicar** |
 
-Aplicación propuesta (cuando se autorice): `backups` (la cuota manual del plan es 1 y la ocupa `pre-reservas`: hay
-que decidir si se reemplaza; su volcado está en `~/RespaldosBuziosFlow/`), `npx -y @insforge/cli db migrations up
---all`, `npm run check:remote-schema` sin diferencias y `schedules logs` con ejecuciones correctas.
+La migración de storage iba antes que los índices; se intercambió el orden (mismo contenido, CI verde en
+`8b70192`) para no bloquear los índices y poder aplicarla después. Tras aplicar:
+`npm run check:remote-schema` → 17 de 18, verificación y conciliación correctas y el inventario solo difiere en lo
+que crea la migración de storage.
+
+**Por qué no se aplica la de storage.** InsForge 2.3.5 (la versión del tenant, igual a la del código abierto
+consultado) ejecuta las migraciones con `SET LOCAL ROLE project_admin`; crear o borrar políticas en
+`storage.objects` exige ser su dueño (`postgres`) y `project_admin` no es miembro de ese rol. La documentación de
+InsForge dice que estas políticas se gestionan con una migración propia, pero en esta versión no es posible. Con la
+URL de `postgres` funcionaría, pero sería elevar privilegios para saltarse una restricción de la plataforma: no se
+hizo. Opciones: que InsForge la aplique o habilite el procedimiento (reporte preparado abajo), o una decisión
+expresa del responsable de aplicarla con la conexión de `postgres` que da el propio CLI.
+
+Reporte para InsForge (no enviado: el envío desde esta sesión fue denegado; se puede mandar con
+`npx -y @insforge/cli feedback --type bug --component backend --area storage`): «Custom migrations cannot create
+policies on storage.objects although the storage RLS docs say to put them in a custom migration. On 2.3.5
+DatabaseMigrationService runs migrations under SET LOCAL ROLE project_admin, storage.objects is owned by postgres,
+so CREATE/DROP POLICY fails with "must be owner of table objects". Reproduced on an exact restore of the project.»
+
+**Fotos: sin bucket.** Mientras no existan esas políticas, cualquier usuario autenticado puede subir a cualquier
+bucket (políticas por defecto `storage_objects_owner_*`), y un bucket público sirve sus objetos sin pasar por RLS.
+Hoy no hay buckets, así que no hay exposición. Orden para activarlas cuando la migración esté aplicada: crear el
+bucket (`npx -y @insforge/cli storage create-bucket offer-media`), fijar `media_public_base_url` a
+`https://ykfv5j3m.us-east.insforge.app/api/storage/buckets/offer-media/objects/` y comprobar con cuentas reales que
+un turista no puede subir, que un proveedor no puede escribir en ofertas de otro, que el dueño sí, y que no se
+puede sobrescribir ni borrar lo ajeno. El contenido se valida en la app por la firma del archivo (JPEG, PNG o WebP,
+no por la extensión); el servidor solo puede comprobar tipo declarado, tamaño y forma de la clave. En un bucket
+público, las fotos de una oferta aún no aprobada son accesibles para quien conozca su clave aleatoria.
+Alternativa sin políticas de storage: bucket privado y una función que sirva solo las fotos aprobadas; las subidas
+ajenas quedarían visibles únicamente para quien las subió. Requiere decisión y desplegar una función.
 
 **Primer administrador** (`scripts/promote-admin.sh`): solo promueve una cuenta existente, con el correo verificado,
 no anónima, que ya inició sesión en la app y es `traveler`; sin `--additional` se niega si ya hay un admin. Por
@@ -94,21 +148,39 @@ sh scripts/promote-admin.sh correo@equipo.com --apply   # promover
 **Códigos de verificación** (`node scripts/verify-email-delivery.mjs correo@equipo.com`, lo ejecuta una persona):
 registra la cuenta como la app, mira en `auth.email_otps` si el servidor generó el código (solo recuentos y fechas;
 los códigos se guardan con hash), pide el código recibido y verifica. Concluye entre «entregado y verificado»,
-«generado pero no entregado» (configurar SMTP o revisar spam) y «no generado». Las plantillas de correo del tenant
-están en inglés (`email.templates`); traducirlas es un cambio de configuración pendiente de decisión.
+«generado pero no entregado» (configurar SMTP o revisar spam) y «no generado». Sin ejecutar todavía: necesita un
+correo del equipo y a la persona que lo lea.
 
-**Fotos, orden para activarlas**: aplicar `20261116000002`; crear el bucket público
-(`npx -y @insforge/cli storage create-bucket offer-media`); fijar `media_public_base_url` a
-`https://ykfv5j3m.us-east.insforge.app/api/storage/buckets/offer-media/objects/`; con la cuenta del equipo, comprobar
-que un turista no puede subir a `offer-media` y que el dueño sí. El servidor trata igual la clave con barras literales
-(como la construye la base) y codificadas (como el SDK); falta confirmarlo con un objeto real. El adaptador
-`createInsforgeMediaStorage` está probado con el SDK y no lo usa ninguna pantalla (falta el selector de fotos).
+**Idioma de los correos.** Sin SMTP propio, InsForge Cloud envía los correos con su proveedor gestionado, que solo
+recibe el tipo de plantilla y las variables y usa **su propia plantilla en inglés**; las de `email.templates` solo
+se usan con SMTP. Además hay una plantilla por tipo, sin selección por idioma. Por eso:
+
+- `config/email-templates/pt-BR/` tiene las cinco plantillas en portugués (mismas variables `{{ token }}` y
+  `{{ link }}`) y `subjects.json` con los asuntos. Se cargan en el panel de InsForge (Auth → plantillas; no hay
+  comando del CLI) **cuando se active SMTP**; antes no tienen efecto.
+- La app avisa al turista, en su idioma, de que el correo llega por ahora en inglés y con qué asunto.
+
+**Alternativa SMTP (preparada, sin contratar ni activar).** `[auth.smtp]` en `insforge.toml`
+(`npx -y @insforge/cli config export`, editar, `config plan`, `config apply`): `enabled`, `host`, `port` (465 o
+587), `username`, `sender_email`, `sender_name`, `min_interval_seconds` (hoy 60); la contraseña se carga en el panel.
+Sirve una cuenta de correo del equipo con SMTP o un proveedor transaccional; elegirlo es decisión del equipo.
+Con SMTP activo, cargar las plantillas en portugués y repetir `verify-email-delivery.mjs`.
+
+**Recuperación de contraseña** (`resetPasswordMethod = code` en el tenant): la app pide el código con
+`sendResetPasswordEmail` (el servidor no revela si el correo tiene cuenta), lo canjea por un token de un solo uso y
+fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simulada; sin probar contra el tenant.
+
+### Comprobación del tenant, advisor y contrato con la app
+
+Comprobación de solo lectura en cualquier momento: `npm run check:remote-schema` (migraciones aplicadas frente a
+`migrations/`, verificación, conciliación e inventario, que incluye índices y las políticas `connectical_*` de
+`storage.objects`). Con migraciones pendientes muestra la diferencia esperada sin fallar.
 
 **Advisor de InsForge** (escaneo del 15-11-2026: 51 críticos, 23 avisos, 9 informativos). Los críticos son del diseño:
 43 `dangerous-function` son las RPC `SECURITY DEFINER` que comprueban `auth.uid()` y el rol por dentro (las pruebas
 cubren sus rechazos); las que puede llamar `anon` (`is_admin`, `owns_offer`, `active_campaigns`) solo responden sobre
 el propio llamante o campañas públicas. 8 `rls-no-policy` son tablas a las que solo se llega por RPC. Avisos: índices
-de claves foráneas (migración 3 de arriba) y cinco políticas que conviene reescribir con `(select auth.uid())` cuando
+de claves foráneas (aplicados en `20261116000002`) y cinco políticas que conviene reescribir con `(select auth.uid())` cuando
 haya volumen. No se suprimió ningún hallazgo.
 
 **Contrato app ↔ tenant**: las 70 combinaciones de columna y rol que la app selecciona tienen permiso; el inicio de

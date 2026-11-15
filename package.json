@@ -14,7 +14,8 @@
     "test:pilot-e2e": "sh scripts/test-pilot-e2e.sh",
     "test:insforge-compat": "sh scripts/test-insforge-compat.sh",
     "check:insforge-migrations": "sh scripts/sync-insforge-migrations.sh --check",
-    "check:remote-schema": "sh scripts/check-remote-schema.sh"
+    "check:remote-schema": "sh scripts/check-remote-schema.sh",
+    "backup:verified": "sh scripts/backup-verified.sh"
   },
   "dependencies": {
     "@insforge/sdk": "1.5.2",

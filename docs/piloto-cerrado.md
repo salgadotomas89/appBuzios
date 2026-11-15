@@ -9,12 +9,13 @@ real en un iPhone o Android. Reservas comerciales y pagos reales siguen apagados
 | Comprobación | Resultado |
 | --- | --- |
 | Proyecto | buziosflow, `ykfv5j3m.us-east.insforge.app`, vinculado con el CLI; la app apunta a él |
-| Respaldo previo | `pre-reservas` (`f374147d-…`), verificado y restaurado en local |
-| Migraciones | 15 aplicadas; verificación (14/14), conciliación (0 filas) e inventario (257 líneas) sin diferencias |
+| Respaldo | plataforma: `post-migraciones-15` (`e134bb27-…`, sustituye a `pre-reservas`); local: volcado completo tras la migración 17, restaurado y comparado sin diferencias (`npm run backup:verified`) |
+| Migraciones | 17 de 18 aplicadas (retención del registro del barrido e índices el 15-11 por la tarde); verificación y conciliación correctas. La 18, reglas del bucket de fotos, no se puede aplicar con el CLI en InsForge 2.3.5 (ver runbook) |
 | App con clave anónima | catálogo, inventario y fotos legibles; RPC privadas rechazadas |
 | Barrido de retenciones | schedule `connectical-hold-sweep` cada 2 minutos, primera ejecución 200 y `succeeded` |
 | Datos | ninguno: 0 usuarios, 0 ofertas |
-| Correo | SMTP propio desactivado con verificación por código obligatoria: **sin comprobar** |
+| Correo | SMTP propio desactivado: envía el proveedor gestionado de InsForge con su plantilla en inglés. Entrega **sin comprobar**; plantillas en portugués preparadas para cuando haya SMTP |
+| Fotos | **sin bucket**: las reglas que lo protegen no están aplicadas |
 
 El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md).
 
@@ -22,8 +23,10 @@ El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforg
 
 1. ~~Respaldo, quince migraciones, verificación, conciliación e inventario~~: hecho el 15-11-2026.
 2. Registrarse con un correo del equipo y comprobar que llega el código: `node scripts/verify-email-delivery.mjs
-   correo@equipo.com` lo hace como la app y distingue «no generado» de «no entregado». Si no llega, configurar SMTP
-   (`[auth.smtp]` con `npx -y @insforge/cli config apply`), lo que requiere una cuenta de correo del equipo.
+   correo@equipo.com` lo hace como la app y distingue «no generado» de «no entregado». El correo llega en inglés
+   («Verify your email») y la app lo avisa. Si no llega, configurar SMTP (`[auth.smtp]` con
+   `npx -y @insforge/cli config apply`, ver runbook), lo que requiere una cuenta de correo del equipo, y cargar las
+   plantillas de `config/email-templates/pt-BR/`. Probar también «¿Olvidaste tu contraseña?» con esa cuenta.
 3. Configuración preparada para el piloto (**no aplicada en ningún entorno real**):
 
    ```sql

@@ -2,7 +2,8 @@
 
 Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
-Actualización 15-11-2026: las 15 migraciones están aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos).
+Actualización 15-11-2026: 17 de 18 migraciones aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos); la de
+reglas del bucket de fotos no se puede aplicar con el CLI en InsForge 2.3.5.
 
 Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SIMULADO** (funciona sin efectos reales) ·
 **BLOQUEADO** (depende de algo externo) · **NO IMPLEMENTADO**.
@@ -11,7 +12,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | --- | --- | --- | --- |
 | Inventario por noche y concurrencia | COMPLETO | Migraciones 0001/202611140001; carreras de 8 sesiones, varias habitaciones, cancelación concurrente, Año Nuevo; conciliación global | P0 hecho |
 | Retenciones de 10 min y expiración diferida | COMPLETO | Se liberan al listar o reservar; pruebas de retención vencida | P0 hecho |
-| Barrido programado de retenciones | COMPLETO | Función con registro, sin solapes y aislamiento por oferta (0006), probada; schedule `connectical-hold-sweep` cada 2 minutos en buziosflow, ejecutando con éxito (15-11-2026); retención del registro preparada (migración 20261116000001, sin aplicar) | P0 hecho |
+| Barrido programado de retenciones | COMPLETO | Función con registro, sin solapes y aislamiento por oferta (0006), probada; schedule `connectical-hold-sweep` cada 2 minutos en buziosflow, ejecutando con éxito (15-11-2026); retención del registro aplicada (20261116000001) y comprobada en una pasada real | P0 hecho |
 | Idempotencia de reservas | COMPLETO | Doble envío simultáneo, reintento tras vencer la cotización | P0 hecho |
 | Pagos simulados (tarjeta, Pix) | SIMULADO | `simulate_payment`: aprobado, rechazado, pendiente, reintentos; interruptor en la base de datos (0010), que hay que apagar antes de una pasarela real | — |
 | Webhooks de pasarela | PARCIAL | Ingesta idempotente con revisión de doble cobro (0008), probada; **falta el manejador firmado** y una pasarela contratada | P1 |
@@ -26,10 +27,10 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |
 | Portal proveedor: descripción, ubicación, horario, límites por reserva, ingresos | COMPLETO | Migración 0009 y resumen de ingresos | — |
-| Fotos de ofertas | PARCIAL | Política de imágenes, metadatos en SQL (202611150003), galería y adaptador real de InsForge Storage probado con el SDK; reglas del bucket `offer-media` preparadas (20261116000002, sin aplicar) porque las políticas por defecto dejan subir a cualquier usuario autenticado; **sin bucket** y sin selector de fotos en el teléfono | P1 |
+| Fotos de ofertas | PARCIAL | Política de imágenes, metadatos en SQL (202611150003), galería y adaptador real de InsForge Storage probado con el SDK; reglas del bucket `offer-media` preparadas (20261116000003) porque las políticas por defecto dejan subir a cualquier usuario autenticado, pero **InsForge 2.3.5 no deja aplicarlas** (`storage.objects` es de `postgres`); **sin bucket** y sin selector de fotos en el teléfono | Bloqueado (InsForge) |
 | Políticas propias del proveedor | NO IMPLEMENTADO | Esperan la política comercial | Decisión comercial |
 | Registro de proveedores | COMPLETO | Solicitud del turista, revisión admin con comisión explícita, estado visible para el solicitante | — |
-| Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN). **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`) | P1 |
+| Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN); recuperación de contraseña por código. **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`); el correo llega en inglés sin SMTP propio | P1 |
 | OAuth | BLOQUEADO | No configurado; contrato PKCE y URI de retorno propuestos en [autenticacion-oauth.md](autenticacion-oauth.md) | Decisión humana |
 | Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado en `main`); lectura sin sesión comprobada contra buziosflow con el SDK (catálogo, inventario y fotos) | Recorrido en dispositivo |
 | Categorías | COMPLETO | Pousadas, barcos, noche/discotecas, buggy y experiencias VIP (0007) | — |
@@ -43,4 +44,4 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | iOS | PARCIAL | Compila y **arranca en un iPhone 17 Pro simulado** sin errores en los logs; bundle de producción en CI. Falta el recorrido manual y un iPhone real | P1 |
 | Android | BLOQUEADO | Sin JDK 17 ni Android SDK; `scripts/setup-android-env.sh` lo instala con aprobación. El release ya no firma con la clave debug (cambio de Gradle sin compilar aquí) | Bloqueado (equipo) |
 | CI | COMPLETO | Jest, tsc, ESLint, integración PostgreSQL y ensayo de actualización en cada push | — |
-| Despliegue InsForge | COMPLETO | buziosflow: respaldo previo, 15 migraciones, verificación, conciliación e inventario sin diferencias (15-11-2026). Falta comprobar los códigos de correo (SMTP propio desactivado) | P0 hecho |
+| Despliegue InsForge | PARCIAL | buziosflow: 17 de 18 migraciones con verificación y conciliación; respaldo de plataforma `post-migraciones-15` y volcado local con recuperación comprobada (`npm run backup:verified`). Falta la migración de storage (InsForge) y comprobar los códigos de correo | P0 |
