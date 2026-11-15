@@ -25,7 +25,8 @@ create role authenticated nologin;
 create role integration_session login;
 grant authenticated to integration_session;
 create schema auth;
-create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb not null default '{}'::jsonb);
+-- Columnas de auth.users en InsForge (leídas de buziosflow).
+create table auth.users (id uuid primary key, email text, password text, email_verified boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), profile jsonb, metadata jsonb, is_project_admin boolean not null default false, is_anonymous boolean not null default false);
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant usage on schema auth to authenticated;
@@ -42,6 +43,14 @@ SQL
 insert into auth.users (id) values
   ('10000000-0000-4000-8000-000000000001'), ('10000000-0000-4000-8000-000000000002'),
   ('20000000-0000-4000-8000-000000000001'), ('30000000-0000-4000-8000-000000000001');
+-- Como hace la app tras iniciar sesión: cada usuario crea su perfil de turista.
+set session authorization integration_session;
+set role authenticated;
+select set_config('request.jwt.claim.sub', id, false), public.connectical_ensure_profile()
+from (values ('10000000-0000-4000-8000-000000000001'), ('10000000-0000-4000-8000-000000000002'),
+             ('20000000-0000-4000-8000-000000000001'), ('30000000-0000-4000-8000-000000000001')) as u(id);
+reset role;
+reset session authorization;
 update public.connectical_profiles set role = 'provider' where user_id = '20000000-0000-4000-8000-000000000001';
 update public.connectical_profiles set role = 'admin' where user_id = '30000000-0000-4000-8000-000000000001';
 insert into public.connectical_providers (id, owner_user_id, name, country_code, commission_rate_bps)

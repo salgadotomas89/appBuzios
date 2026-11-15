@@ -22,8 +22,9 @@ select
   exists (select 1 from pg_namespace where nspname = 'auth') as has_auth_schema,
   exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'auth' and p.proname = 'uid') as has_auth_uid,
+  -- InsForge guarda el nombre del usuario en auth.users.profile (jsonb).
   exists (select 1 from information_schema.columns where table_schema = 'auth'
-          and table_name = 'users' and column_name = 'raw_user_meta_data') as has_user_metadata,
+          and table_name = 'users' and column_name = 'profile') as has_user_profile,
   exists (select 1 from information_schema.columns where table_schema = 'auth'
           and table_name = 'users' and column_name = 'email') as has_user_email,
   (select count(*) from pg_roles where rolname in ('anon', 'authenticated')) = 2 as has_app_roles;

@@ -240,19 +240,15 @@ export function isSharedSessionPersisted(): boolean {
 }
 
 export async function getSharedRole(): Promise<SharedRole | null> {
-  const client = await freshClient();
+  getClient();
   // En el flujo móvil getCurrentUser del SDK no conoce al usuario: lo aporta el gestor de sesión.
   const state = sessionManager?.getState();
-  const userId = state?.status === 'signed_in' ? state.userId : null;
-  if (!userId) return null;
-
-  const { data, error } = await client.database
-    .from('connectical_profiles')
-    .select('role')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw new Error(`InsForge perfil: ${error.message}`);
-  const role = (data as { role?: string } | null)?.role;
+  if (state?.status !== 'signed_in') return null;
+  // InsForge no permite triggers sobre auth.users: el primer inicio de sesión crea aquí el perfil de turista
+  // (con el nombre de auth.users.profile) y siempre devuelve el rol actual.
+  const role = await callRpc<string | null>('connectical_ensure_profile', {}).catch(error => {
+    throw error instanceof ReservationError ? error : new Error(`InsForge perfil: ${error instanceof Error ? error.message : String(error)}`);
+  });
   return role === 'traveler' || role === 'provider' || role === 'admin' ? role : null;
 }
 

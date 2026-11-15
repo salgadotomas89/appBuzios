@@ -4,6 +4,32 @@ Para la persona que aplique las migraciones. No contiene secretos. Cada paso tie
 si no coincide, **detenerse** y no seguir improvisando. Nada de esto debe ejecutarse en producción ni en
 proyectos de Connectical.
 
+## Procedimiento con el CLI de InsForge (proyecto buziosflow, 14-11-2026)
+
+El directorio está vinculado al proyecto **buziosflow** (`ykfv5j3m.us-east.insforge.app`) y el `.env` de la app ya
+apunta a él (la configuración anterior de OfertasApp quedó en `.env.ofertasapp.local`, ignorado por git).
+Estado leído en solo lectura: PostgreSQL 15.18, versión de plataforma 1.0.0, base vacía (sin tablas en `public`,
+0 usuarios, 0 migraciones, 0 backups), verificación de correo por código obligatoria y **SMTP sin configurar**.
+Las ramas de backend no están disponibles (requieren 2.x y cada una tiene coste propio).
+
+Requiere **autorización específica** porque buziosflow es el proyecto principal:
+
+```sh
+npx -y @insforge/cli current                                   # debe decir buziosflow
+npx -y @insforge/cli backups create --name pre-reservas --wait  # respaldo antes de aplicar
+npm run check:insforge-migrations                              # migrations/ = supabase/migrations
+npx -y @insforge/cli db migrations up --all                    # aplica las 15 en orden, una transacción cada una
+npx -y @insforge/cli db migrations list                        # deben aparecer las 15
+```
+
+Después, los pasos 3 (verificación, conciliación e inventario) de este runbook con `npx -y @insforge/cli db query`.
+`npm run test:insforge-compat` ensaya exactamente esta aplicación en local (PostgreSQL 15, `auth.users` de InsForge,
+migraciones como `project_admin` sin superusuario) y corre en CI.
+
+Barrido de retenciones: `project_admin` no tiene acceso a `cron`, así que se programa con
+`npx -y @insforge/cli schedules create` llamando por HTTP a `connectical_system_run_hold_sweep`; antes hay que
+confirmar en el tenant con qué rol ejecuta esa llamada la clave de API (no debe ser `anon` ni `authenticated`).
+
 ## 0. Antes de empezar
 
 - [ ] En el panel de InsForge, confirmar que el proyecto es **OfertasApp** con host `8ntv6m27.us-east.insforge.app`,

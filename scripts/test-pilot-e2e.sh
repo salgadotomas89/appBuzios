@@ -24,7 +24,8 @@ create role authenticated nologin;
 create role pilot_session login;
 grant authenticated to pilot_session;
 create schema auth;
-create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb not null default '{}'::jsonb);
+-- Columnas de auth.users en InsForge (leídas de buziosflow).
+create table auth.users (id uuid primary key, email text, password text, email_verified boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), profile jsonb, metadata jsonb, is_project_admin boolean not null default false, is_anonymous boolean not null default false);
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant usage on schema auth to authenticated;
@@ -49,18 +50,25 @@ bruno='c0000000-0000-4000-8000-000000000002'
 
 # 0. Cuentas sintéticas (en el tenant las crea el registro con verificación de correo) y el admin por SQL.
 sql >/dev/null <<SQL
-insert into auth.users (id, email, raw_user_meta_data) values
-  ('$admin', 'admin@pilot.test', '{"name":"Admin piloto","country":"BR"}'),
-  ('$owner', 'pousada@pilot.test', '{"name":"Dona Marta","country":"BR"}'),
-  ('$ana', 'ana@pilot.test', '{"name":"Ana","country":"CL"}'),
-  ('$bruno', 'bruno@pilot.test', '{"name":"Bruno","country":"AR"}');
+insert into auth.users (id, email, email_verified, profile) values
+  ('$admin', 'admin@pilot.test', true, '{"name":"Admin piloto","country":"BR"}'),
+  ('$owner', 'pousada@pilot.test', true, '{"name":"Dona Marta","country":"BR"}'),
+  ('$ana', 'ana@pilot.test', true, '{"name":"Ana","country":"CL"}'),
+  ('$bruno', 'bruno@pilot.test', true, '{"name":"Bruno","country":"AR"}');
+-- Cada cuenta crea su perfil al iniciar sesión, como la app; el rol de admin se asigna por SQL.
+set session authorization pilot_session;
+set role authenticated;
+select set_config('request.jwt.claim.sub', id::text, false), public.connectical_ensure_profile()
+from (values ('$admin'::uuid), ('$owner'::uuid), ('$ana'::uuid), ('$bruno'::uuid)) as u(id);
+reset role;
+reset session authorization;
 update public.connectical_profiles set role = 'admin' where user_id = '$admin';
 -- Configuración preparada para el piloto: cada oferta nueva espera aprobación.
 update public.connectical_settings set value = 'true' where key = 'offer_moderation_required';
 insert into public.connectical_settings (key, value) values ('media_public_base_url', '"https://media.pilot.test/"');
 SQL
-expect "$(sql -c "select count(*) from public.connectical_profiles where role = 'traveler';")" '3' 'Signup profiles'
-echo "PASS 0. synthetic accounts: three travelers by signup, one admin by SQL"
+expect "$(sql -c "select string_agg(display_name || ':' || role, ',' order by display_name) from public.connectical_profiles;")" 'Admin piloto:admin,Ana:traveler,Bruno:traveler,Dona Marta:traveler' 'Profiles from sign-in'
+echo "PASS 0. synthetic accounts: profiles created on sign-in from auth.users.profile, one admin by SQL"
 
 # 1. Alta de proveedor.
 app=$(as_user "$owner" "select public.connectical_submit_provider_application('Pousada Maré Alta', 'pousadas', 'Marta Lima', '+55 22 98888-1111', 'pousada@pilot.test', 'Geribá', 'Cinco quartos a 100 m da praia');")

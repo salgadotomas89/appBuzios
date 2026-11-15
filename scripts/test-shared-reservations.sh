@@ -46,11 +46,8 @@ create role authenticated nologin;
 create role integration_session login;
 grant authenticated to integration_session;
 create schema auth;
-create table auth.users (
-  id uuid primary key,
-  email text,
-  raw_user_meta_data jsonb not null default '{}'::jsonb
-);
+-- Columnas de auth.users en InsForge (leídas de buziosflow).
+create table auth.users (id uuid primary key, email text, password text, email_verified boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), profile jsonb, metadata jsonb, is_project_admin boolean not null default false, is_anonymous boolean not null default false);
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
@@ -68,17 +65,24 @@ for migration_file in $(docker exec "$container" sh -c 'ls /tmp/connectical-migr
 done
 
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
-insert into auth.users (id, raw_user_meta_data) values
-  ('10000000-0000-4000-8000-000000000001', '{"name":"Traveler A","country":"CL"}'),
-  ('10000000-0000-4000-8000-000000000002', '{"name":"Traveler B","country":"BR"}'),
-  ('20000000-0000-4000-8000-000000000001', '{"name":"Lab Provider","country":"BR"}'),
-  ('30000000-0000-4000-8000-000000000001', '{"name":"Lab Admin","country":"CL"}');
+insert into auth.users (id, email_verified, profile) values
+  ('10000000-0000-4000-8000-000000000001', true, '{"name":"Traveler A","country":"CL"}'),
+  ('10000000-0000-4000-8000-000000000002', true, '{"name":"Traveler B","country":"BR"}'),
+  ('20000000-0000-4000-8000-000000000001', true, '{"name":"Lab Provider","country":"BR"}'),
+  ('30000000-0000-4000-8000-000000000001', true, '{"name":"Lab Admin","country":"CL"}');
 SQL
 
+# Sin trigger en auth.users (InsForge no lo permite): cada usuario crea su perfil al iniciar sesión.
+for signed_in in 10000000-0000-4000-8000-000000000001 10000000-0000-4000-8000-000000000002 \
+  20000000-0000-4000-8000-000000000001 30000000-0000-4000-8000-000000000001; do
+  docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$signed_in',false);" \
+    -c "select public.connectical_ensure_profile();" >/dev/null
+done
 traveler_profiles=$(docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
   -c "select count(*) from public.connectical_profiles where role='traveler';" | tail -1)
 [ "$traveler_profiles" = '4' ] || { echo "New Auth users were not provisioned as travelers" >&2; exit 1; }
-echo "PASS Auth signup trigger creates traveler-only profiles"
+echo "PASS ensure_profile creates traveler-only profiles named from auth.users.profile"
 
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 update public.connectical_profiles set role = 'provider'
@@ -1015,6 +1019,7 @@ echo "PASS travelers never receive commissions, providers never traveler ids, an
 # Provider onboarding: an application grants nothing until an admin approves it with an explicit rate.
 applicant='13000000-0000-4000-8000-000000000001'
 docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "insert into auth.users (id) values ('$applicant');"
+as_user "$applicant" "select public.connectical_ensure_profile();" >/dev/null
 apply_sql="select public.connectical_submit_provider_application('Pousada Solicitante', 'pousadas', 'Ana Souza', '+55 22 99999-0000', 'ana@example.com', 'Geribá', 'Seis quartos com vista')"
 for bad in "'P', 'pousadas', 'Ana', '+55 22 99999-0000', 'ana@example.com', 'Geribá', ''" \
   "'Pousada', 'hotel', 'Ana', '+55 22 99999-0000', 'ana@example.com', 'Geribá', ''" \
@@ -1054,6 +1059,7 @@ new_offer=$(as_user "$applicant" "select (public.connectical_provider_upsert_off
 [ -n "$new_offer" ] || { echo "Approved provider could not publish" >&2; exit 1; }
 rejected_user='13000000-0000-4000-8000-000000000002'
 docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "insert into auth.users (id) values ('$rejected_user');"
+as_user "$rejected_user" "select public.connectical_ensure_profile();" >/dev/null
 second_app=$(as_user "$rejected_user" "$apply_sql;")
 if as_user "$admin_user" "select public.connectical_admin_review_provider_application('$second_app', 'rejected', '  ', null);" >/dev/null 2>&1; then
   echo "Rejection without a reason was accepted" >&2; exit 1
