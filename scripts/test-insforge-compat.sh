@@ -37,6 +37,7 @@ create function auth.uid() returns uuid language sql stable as $$
 grant usage on schema auth to project_admin, anon, authenticated;
 grant select, insert, update, delete, references, trigger on auth.users to project_admin;
 grant execute on function auth.uid() to project_admin, anon, authenticated;
+\i /sb/harness/insforge_storage.sql
 grant create, usage on schema public to project_admin;
 SQL
 version=$(su -c 'show server_version')
@@ -44,8 +45,12 @@ echo "PostgreSQL $version, migrations run as project_admin (not superuser, not o
 
 failures=0
 for file in $(docker exec "$container" sh -c 'ls /sb/migrations/*.sql' | sort); do
-  if docker exec -e PGPASSWORD=local "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U project_admin -d postgres -f "$file" >/dev/null 2>/tmp/connectical-compat-$$.err; then
-    echo "OK    $(basename "$file")"
+  # storage.objects es de postgres también en buziosflow: sus políticas dependen del soporte de InsForge para
+  # RLS gestionado de storage en migraciones (documentado, sin comprobar en el tenant), así que aquí van como postgres.
+  migration_user=project_admin; migration_password=local
+  grep -q 'on storage.objects' "$PWD/supabase/migrations/$(basename "$file")" && { migration_user=postgres; migration_password=connectical_local_test_only; }
+  if docker exec -e PGPASSWORD="$migration_password" "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$migration_user" -d postgres -f "$file" >/dev/null 2>/tmp/connectical-compat-$$.err; then
+    echo "OK    $(basename "$file")$( [ "$migration_user" = postgres ] && echo ' (as postgres: managed storage RLS)')"
   else
     echo "FAIL  $(basename "$file"): $(grep -m1 ERROR /tmp/connectical-compat-$$.err)"
     failures=$((failures + 1))
@@ -113,3 +118,42 @@ audit=$(su -c "select string_agg(coalesce(actor_user_id::text, 'sql') || ':' || 
 [ "$audit" = 'sql:role_changed:admin,sql:role_changed:admin' ] || { echo "Admin promotion not audited: $audit" >&2; exit 1; }
 if sh scripts/promote-admin.sh "x'or'1'='1@a.com" --print-sql >/dev/null 2>&1; then echo "promote-admin accepted a quote" >&2; exit 1; fi
 echo "PASS promote-admin.sh only promotes verified travelers that signed in, refuses a second admin without --additional and is audited"
+
+# Bucket de fotos: las políticas RESTRICTIVE de offer-media se suman a las de InsForge sin tocar otros buckets.
+owner_id='d0000000-0000-4000-8000-000000000010'
+own_offer='e0000000-0000-4000-8000-000000000001'
+other_offer='e0000000-0000-4000-8000-000000000002'
+su >/dev/null <<SQL
+insert into auth.users (id, email, email_verified, profile) values ('$owner_id', 'pousada@compat.test', true, '{"name":"Pousada"}');
+insert into public.connectical_profiles (user_id, display_name, country_code, role) values ('$owner_id', 'Pousada', 'BR', 'provider');
+insert into public.connectical_providers (id, owner_user_id, name, country_code, commission_rate_bps, active) values
+  ('f0000000-0000-4000-8000-000000000001', '$owner_id', 'Pousada', 'BR', 1000, true),
+  ('f0000000-0000-4000-8000-000000000002', 'd0000000-0000-4000-8000-000000000005', 'Otra', 'BR', 1000, true);
+insert into public.connectical_offers (id, provider_id, category, title, base_price_cents, price_mode, published) values
+  ('$own_offer', 'f0000000-0000-4000-8000-000000000001', 'pousadas', 'Quarto', 30000, 'night', true),
+  ('$other_offer', 'f0000000-0000-4000-8000-000000000002', 'pousadas', 'Outro quarto', 30000, 'night', true);
+insert into storage.buckets (name, public) values ('offer-media', true), ('avatars', false);
+SQL
+# d…001 es admin desde el bloque anterior; d…002 sigue siendo turista.
+traveler_id='d0000000-0000-4000-8000-000000000002'
+photo() { printf "offers/%s/%s.%s" "$1" "$(su -c 'select gen_random_uuid();')" "${2:-jpg}"; }
+put() { as_user "$1" "insert into storage.objects (bucket, key, size, mime_type, uploaded_by) values ('$2', '$3', ${5:-350000}, '${4:-image/jpeg}', '$1') returning key;"; }
+denied() { if put "$@" >/dev/null 2>&1; then echo "Storage write should be denied: $*" >&2; exit 1; fi; }
+own_key=$(photo "$own_offer")
+[ "$(put "$owner_id" offer-media "$own_key")" = "$own_key" ] || { echo "Provider could not upload its own offer photo" >&2; exit 1; }
+denied "$traveler_id" offer-media "$(photo "$own_offer")"
+denied "$owner_id" offer-media "$(photo "$other_offer")"
+denied "$owner_id" offer-media "offers/$own_offer/foto.jpg"
+denied "$owner_id" offer-media "$(photo "$own_offer" gif)" image/gif
+denied "$owner_id" offer-media "$(photo "$own_offer")" image/jpeg 5242881
+denied "$owner_id" offer-media "$(photo "$own_offer")" text/html
+[ -n "$(put "$traveler_id" avatars "$traveler_id/avatar.png" image/png)" ] || { echo "Other buckets changed behavior" >&2; exit 1; }
+[ "$(as_user "$traveler_id" "with d as (delete from storage.objects where key = '$own_key' returning 1) select count(*) from d;")" = 0 ] || { echo "Traveler deleted a provider photo" >&2; exit 1; }
+su -c "update public.connectical_providers set active = false where owner_user_id = '$owner_id';"
+denied "$owner_id" offer-media "$(photo "$own_offer")"
+su -c "update public.connectical_providers set active = true where owner_user_id = '$owner_id';"
+[ "$(as_user "$owner_id" "with d as (delete from storage.objects where key = '$own_key' returning 1) select count(*) from d;")" = 1 ] || { echo "Provider could not delete its photo" >&2; exit 1; }
+if su -c "set role anon; insert into storage.objects (bucket, key, size, mime_type) values ('offer-media', 'x', 1, 'image/jpeg');" >/dev/null 2>&1; then
+  echo "anon could write to storage" >&2; exit 1
+fi
+echo "PASS offer-media accepts only image uploads by the active owner of the offer in the key; other buckets unchanged"

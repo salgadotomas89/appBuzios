@@ -56,6 +56,13 @@ with checks(name, ok) as (
           'connectical_report_incident', 'connectical_admin_update_incident', 'connectical_admin_list_users',
           'connectical_admin_kpis', 'connectical_admin_save_campaign', 'connectical_admin_list_audit_log',
           'connectical_add_offer_media', 'connectical_remove_offer_media'))),
+    ('offer-media storage rules restrictive, helper for authenticated only',
+      (select coalesce(bool_and(not has_function_privilege('anon', p.oid, 'execute')
+                                and has_function_privilege('authenticated', p.oid, 'execute')
+                                and (select count(*) = 3 from pg_policies where schemaname = 'storage' and tablename = 'objects'
+                                       and policyname like 'connectical\_offer\_media\_%' and permissive = 'RESTRICTIVE')), true)
+        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'connectical_can_write_offer_media_object')),
     ('SECURITY DEFINER functions pin search_path',
       (select bool_and(p.proconfig is not null and exists (
           select 1 from unnest(p.proconfig) cfg where cfg like 'search_path=%'))

@@ -31,6 +31,7 @@ create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
+\i /sb/harness/insforge_storage.sql
 SQL
   migrations=$(docker exec "$container" sh -c 'ls /sb/migrations/*.sql' | sort)
   total=$(printf '%s\n' "$migrations" | wc -l | tr -d ' ')

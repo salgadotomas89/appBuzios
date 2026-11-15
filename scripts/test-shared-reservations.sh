@@ -54,6 +54,7 @@ $$;
 grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
 SQL
+docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/harness/insforge_storage.sql" >/dev/null
 
 # Apply every migration in filename order, exactly as an operator would.
 for migration_file in $(docker exec "$container" sh -c 'ls /tmp/connectical-migrations/*.sql' | sort); do

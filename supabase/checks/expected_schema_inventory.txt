@@ -195,6 +195,7 @@ function connectical_admin_update_incident(p_incident_id uuid, p_status text, p_
 function connectical_audit_change() definer=true md5=042fbc0ce4217cbfb2934064ca35ac9a
 function connectical_can_manage_offer(p_offer_id uuid) definer=true md5=855e389e2440928be4b81e37b61c1f2c
 function connectical_can_read_reservation(p_reservation_id uuid) definer=true md5=9226af62acbcf28ff72a7b050fdc03a1
+function connectical_can_write_offer_media_object(p_bucket text, p_key text, p_mime_type text, p_size integer) definer=true md5=2fb5bfa9522431105bc519c65c91d223
 function connectical_cancel_reservation(p_reservation_id uuid, p_reason text) definer=true md5=1e876b456145d8196cd847076de11de9
 function connectical_create_quote(p_offer_id uuid, p_service_date date, p_quantity integer, p_nights integer, p_service_fee_rate_bps integer) definer=true md5=5479affd847a3248446ab1998561f2bb
 function connectical_create_reservation_hold(p_quote_id uuid, p_idempotency_key uuid) definer=true md5=10f9f99e57e4940d024494542a467d76
@@ -233,6 +234,9 @@ policy connectical_quotes.connectical_quotes_read SELECT authenticated
 policy connectical_refunds.connectical_refunds_read SELECT authenticated
 policy connectical_reservation_events.connectical_events_read SELECT authenticated
 policy connectical_reservations.connectical_reservations_read SELECT authenticated
+policy storage.objects.connectical_offer_media_delete DELETE RESTRICTIVE authenticated
+policy storage.objects.connectical_offer_media_insert INSERT RESTRICTIVE authenticated
+policy storage.objects.connectical_offer_media_update UPDATE RESTRICTIVE authenticated
 table connectical_admin_audit_log rls=true
 table connectical_campaigns rls=true
 table connectical_commission_references rls=true

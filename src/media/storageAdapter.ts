@@ -14,7 +14,7 @@ export interface MediaStorage {
 }
 
 export class MediaUploadError extends Error {
-  constructor(readonly code: ImageCheckError | 'storage_not_configured' | 'upload_failed') {
+  constructor(readonly code: ImageCheckError | 'storage_not_configured' | 'upload_failed' | 'remove_failed') {
     super(code);
     this.name = 'MediaUploadError';
   }
@@ -41,6 +41,49 @@ export function createMemoryMediaStorage(baseUrl = 'memory://offer-media'): Medi
     },
     async remove(key) {
       objects.delete(key);
+    },
+  };
+}
+
+// Bucket de InsForge para las fotos de ofertas; sus reglas de escritura están en
+// supabase/migrations/202611160002_offer_media_storage.sql (preparada, sin aplicar todavía en buziosflow).
+export const OFFER_MEDIA_BUCKET = 'offer-media';
+
+type StorageResult<T> = { data: T | null; error: { message: string } | null };
+export type InsforgeStorageLike = {
+  from(bucket: string): {
+    upload(key: string, file: Blob): Promise<StorageResult<{ key?: string; url?: string }>>;
+    remove(key: string): Promise<StorageResult<unknown>>;
+  };
+};
+
+// Adaptador real sobre el SDK. Recibe una función que devuelve el almacenamiento de un cliente con la sesión
+// vigente (freshClient), porque las reglas del bucket dependen de quién sube. Si InsForge guarda el objeto con
+// otra clave, se borra y se rechaza: la base solo registra claves con la forma offers/<oferta>/<uuid>.<ext>.
+// Nota: React Native no construye Blob desde bytes; el selector de fotos, cuando exista, tendrá que entregar
+// el archivo de otra forma. Hoy ninguna pantalla sube fotos.
+export function createInsforgeMediaStorage(
+  getStorage: () => Promise<InsforgeStorageLike>,
+  bucket: string = OFFER_MEDIA_BUCKET,
+): MediaStorage {
+  return {
+    configured: true,
+    async upload(key, bytes, contentType) {
+      const storage = (await getStorage()).from(bucket);
+      // Los tipos de React Native solo admiten string o Blob como partes (ver la nota anterior); en Node y en
+      // navegadores el constructor acepta los bytes.
+      const file = new Blob([bytes as unknown as Blob], { type: contentType, lastModified: Date.now() });
+      const { data, error } = await storage.upload(key, file);
+      if (error || !data?.url) throw new MediaUploadError('upload_failed');
+      if (data.key !== undefined && data.key !== key) {
+        await storage.remove(data.key).catch(() => undefined);
+        throw new MediaUploadError('upload_failed');
+      }
+      return { url: data.url, key };
+    },
+    async remove(key) {
+      const { error } = await (await getStorage()).from(bucket).remove(key);
+      if (error) throw new MediaUploadError('remove_failed');
     },
   };
 }
