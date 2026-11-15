@@ -11,7 +11,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | --- | --- | --- | --- |
 | Inventario por noche y concurrencia | COMPLETO | Migraciones 0001/202611140001; carreras de 8 sesiones, varias habitaciones, cancelación concurrente, Año Nuevo; conciliación global | P0 hecho |
 | Retenciones de 10 min y expiración diferida | COMPLETO | Se liberan al listar o reservar; pruebas de retención vencida | P0 hecho |
-| Barrido programado de retenciones | PARCIAL | Función con registro, sin solapes y aislamiento por oferta (0006), probada; schedule `connectical-hold-sweep` cada 2 minutos en buziosflow, ejecutando con éxito (15-11-2026) | P0 hecho |
+| Barrido programado de retenciones | COMPLETO | Función con registro, sin solapes y aislamiento por oferta (0006), probada; schedule `connectical-hold-sweep` cada 2 minutos en buziosflow, ejecutando con éxito (15-11-2026); retención del registro preparada (migración 20261116000001, sin aplicar) | P0 hecho |
 | Idempotencia de reservas | COMPLETO | Doble envío simultáneo, reintento tras vencer la cotización | P0 hecho |
 | Pagos simulados (tarjeta, Pix) | SIMULADO | `simulate_payment`: aprobado, rechazado, pendiente, reintentos; interruptor en la base de datos (0010), que hay que apagar antes de una pasarela real | — |
 | Webhooks de pasarela | PARCIAL | Ingesta idempotente con revisión de doble cobro (0008), probada; **falta el manejador firmado** y una pasarela contratada | P1 |
@@ -26,12 +26,12 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |
 | Portal proveedor: descripción, ubicación, horario, límites por reserva, ingresos | COMPLETO | Migración 0009 y resumen de ingresos | — |
-| Fotos de ofertas | PARCIAL | Política de imágenes, adaptador de almacenamiento, metadatos en SQL (202611150003) y galería; **sin bucket confirmado** (adaptador desactivado) y sin selector de fotos en el teléfono (requiere otra dependencia nativa) | P1, bloqueado por tenant |
+| Fotos de ofertas | PARCIAL | Política de imágenes, metadatos en SQL (202611150003), galería y adaptador real de InsForge Storage probado con el SDK; reglas del bucket `offer-media` preparadas (20261116000002, sin aplicar) porque las políticas por defecto dejan subir a cualquier usuario autenticado; **sin bucket** y sin selector de fotos en el teléfono | P1 |
 | Políticas propias del proveedor | NO IMPLEMENTADO | Esperan la política comercial | Decisión comercial |
 | Registro de proveedores | COMPLETO | Solicitud del turista, revisión admin con comisión explícita, estado visible para el solicitante | — |
-| Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); probada con dobles y compilada en iOS; **no probada en dispositivo ni contra el tenant** ([autenticacion-oauth.md](autenticacion-oauth.md)) | P1 |
+| Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN). **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`) | P1 |
 | OAuth | BLOQUEADO | No configurado; contrato PKCE y URI de retorno propuestos en [autenticacion-oauth.md](autenticacion-oauth.md) | Decisión humana |
-| Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado); legible sin sesión desde 202611150004 (antes fallaba para visitantes) | Bloqueado por tenant |
+| Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado en `main`); lectura sin sesión comprobada contra buziosflow con el SDK (catálogo, inventario y fotos) | Recorrido en dispositivo |
 | Categorías | COMPLETO | Pousadas, barcos, noche/discotecas, buggy y experiencias VIP (0007) | — |
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
 | Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |

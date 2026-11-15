@@ -64,6 +64,56 @@ Pendiente: SMTP sigue desactivado (`[auth.smtp] enabled = false`) con verificaci
 documentación no aclara si InsForge envía los códigos sin SMTP propio; hay que comprobarlo con un registro real
 desde la app usando un correo del equipo. No se crearon usuarios ni datos de prueba en el tenant.
 
+### Integración operativa (15-11-2026): preparado, sin aplicar
+
+Comprobación de solo lectura en cualquier momento: `npm run check:remote-schema` (migraciones aplicadas frente a
+`migrations/`, verificación, conciliación e inventario, que ahora incluye índices y las políticas `connectical_*` de
+`storage.objects`). Con migraciones pendientes muestra la diferencia esperada sin fallar.
+
+**Migraciones preparadas, pendientes de autorización específica** (probadas en los cinco harnesses y en CI):
+
+| Versión | Qué hace | Riesgo |
+| --- | --- | --- |
+| `20261116000001_sweep-runs-retention` | El barrido borra su propio registro: ejecuciones sin efecto a los 30 días, con efecto o `partial` a los 180, como mucho 1000 por pasada. Hoy crece ~720 filas/día | Bajo: reemplaza la función del barrido; si la limpieza falla, la pasada queda `partial` |
+| `20261116000002_offer-media-storage` | Políticas RESTRICTIVE en `storage.objects` para el bucket `offer-media`: solo imágenes (JPEG/PNG/WebP, ≤ 5 MB) con clave `offers/<oferta>/<uuid>.<ext>`, subidas o borradas por quien gestiona esa oferta. Otros buckets sin cambios | Medio: `storage.objects` pertenece a `postgres` y `project_admin` no es miembro; la documentación de InsForge dice que estas políticas se gestionan con migraciones, pero no está comprobado. Si falla, la transacción no deja nada |
+| `20261116000003_foreign-key-indexes` | Seis índices de claves foráneas señalados por el advisor | Bajo: tablas vacías |
+
+Aplicación propuesta (cuando se autorice): `backups` (la cuota manual del plan es 1 y la ocupa `pre-reservas`: hay
+que decidir si se reemplaza; su volcado está en `~/RespaldosBuziosFlow/`), `npx -y @insforge/cli db migrations up
+--all`, `npm run check:remote-schema` sin diferencias y `schedules logs` con ejecuciones correctas.
+
+**Primer administrador** (`scripts/promote-admin.sh`): solo promueve una cuenta existente, con el correo verificado,
+no anónima, que ya inició sesión en la app y es `traveler`; sin `--additional` se niega si ya hay un admin. Por
+defecto solo informa (`would_promote`); `--apply` promueve y el trigger registra `role_changed` con actor nulo.
+
+```sh
+sh scripts/promote-admin.sh correo@equipo.com           # comprobar
+sh scripts/promote-admin.sh correo@equipo.com --apply   # promover
+```
+
+**Códigos de verificación** (`node scripts/verify-email-delivery.mjs correo@equipo.com`, lo ejecuta una persona):
+registra la cuenta como la app, mira en `auth.email_otps` si el servidor generó el código (solo recuentos y fechas;
+los códigos se guardan con hash), pide el código recibido y verifica. Concluye entre «entregado y verificado»,
+«generado pero no entregado» (configurar SMTP o revisar spam) y «no generado». Las plantillas de correo del tenant
+están en inglés (`email.templates`); traducirlas es un cambio de configuración pendiente de decisión.
+
+**Fotos, orden para activarlas**: aplicar `20261116000002`; crear el bucket público
+(`npx -y @insforge/cli storage create-bucket offer-media`); fijar `media_public_base_url` a
+`https://ykfv5j3m.us-east.insforge.app/api/storage/buckets/offer-media/objects/`; con la cuenta del equipo, comprobar
+que un turista no puede subir a `offer-media` y que el dueño sí. El servidor trata igual la clave con barras literales
+(como la construye la base) y codificadas (como el SDK); falta confirmarlo con un objeto real. El adaptador
+`createInsforgeMediaStorage` está probado con el SDK y no lo usa ninguna pantalla (falta el selector de fotos).
+
+**Advisor de InsForge** (escaneo del 15-11-2026: 51 críticos, 23 avisos, 9 informativos). Los críticos son del diseño:
+43 `dangerous-function` son las RPC `SECURITY DEFINER` que comprueban `auth.uid()` y el rol por dentro (las pruebas
+cubren sus rechazos); las que puede llamar `anon` (`is_admin`, `owns_offer`, `active_campaigns`) solo responden sobre
+el propio llamante o campañas públicas. 8 `rls-no-policy` son tablas a las que solo se llega por RPC. Avisos: índices
+de claves foráneas (migración 3 de arriba) y cinco políticas que conviene reescribir con `(select auth.uid())` cuando
+haya volumen. No se suprimió ningún hallazgo.
+
+**Contrato app ↔ tenant**: las 70 combinaciones de columna y rol que la app selecciona tienen permiso; el inicio de
+sesión móvil responde `401 AUTH_UNAUTHORIZED` ante credenciales inválidas, y la app ahora lo muestra traducido.
+
 ## 0. Antes de empezar
 
 - [ ] En el panel de InsForge, confirmar que el proyecto es **OfertasApp** con host `8ntv6m27.us-east.insforge.app`,
