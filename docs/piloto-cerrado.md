@@ -34,8 +34,8 @@ El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforg
    update public.connectical_settings set value = 'true', updated_at = now() where key = 'offer_moderation_required';
    -- Pagos simulados encendidos solo en ensayo (apagarlos antes de cualquier pasarela real).
    select value from public.connectical_settings where key = 'simulated_payments_enabled';  -- true
-   -- URL pública del bucket, cuando esté confirmado (sin ella no se registran fotos).
-   insert into public.connectical_settings (key, value) values ('media_public_base_url', '"https://<bucket>/"')
+   -- URL de la función offer-media, cuando esté desplegada (sin ella no se registran fotos; ver runbook).
+   insert into public.connectical_settings (key, value) values ('media_public_base_url', '"https://ykfv5j3m.function2.insforge.app/offer-media"')
    on conflict (key) do update set value = excluded.value, updated_at = now();
    ```
 

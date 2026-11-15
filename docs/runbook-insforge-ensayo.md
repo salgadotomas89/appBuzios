@@ -124,17 +124,45 @@ policies on storage.objects although the storage RLS docs say to put them in a c
 DatabaseMigrationService runs migrations under SET LOCAL ROLE project_admin, storage.objects is owned by postgres,
 so CREATE/DROP POLICY fails with "must be owner of table objects". Reproduced on an exact restore of the project.»
 
-**Fotos: sin bucket.** Mientras no existan esas políticas, cualquier usuario autenticado puede subir a cualquier
-bucket (políticas por defecto `storage_objects_owner_*`), y un bucket público sirve sus objetos sin pasar por RLS.
-Hoy no hay buckets, así que no hay exposición. Orden para activarlas cuando la migración esté aplicada: crear el
-bucket (`npx -y @insforge/cli storage create-bucket offer-media`), fijar `media_public_base_url` a
-`https://ykfv5j3m.us-east.insforge.app/api/storage/buckets/offer-media/objects/` y comprobar con cuentas reales que
-un turista no puede subir, que un proveedor no puede escribir en ofertas de otro, que el dueño sí, y que no se
-puede sobrescribir ni borrar lo ajeno. El contenido se valida en la app por la firma del archivo (JPEG, PNG o WebP,
-no por la extensión); el servidor solo puede comprobar tipo declarado, tamaño y forma de la clave. En un bucket
-público, las fotos de una oferta aún no aprobada son accesibles para quien conozca su clave aleatoria.
-Alternativa sin políticas de storage: bucket privado y una función que sirva solo las fotos aprobadas; las subidas
-ajenas quedarían visibles únicamente para quien las subió. Requiere decisión y desplegar una función.
+**Vía oficial para las políticas de storage (investigado el 15-11-2026).** No hay ninguna en 2.3.5 que un proyecto
+pueda usar por sí mismo: la documentación pública (`core-concepts/storage`) solo dice que storage usa RLS; la skill
+de InsForge indica una migración propia, que falla; el editor SQL del panel también ejecuta como `project_admin`
+(`/api/database/advance/rawsql`, auditado con `executionRole: 'project_admin'`); no hay issues ni PR que lo
+resuelvan (los de storage RLS tratan de `anon` y de buckets públicos). Queda pedírselo a InsForge (soporte o
+`feedback`, con el texto de arriba).
+
+**Fotos: alternativa con backend autorizado (preparada, sin desplegar).** Mientras tanto, la función
+[`functions/offer-media.ts`](../functions/offer-media.ts) es el único camino a un bucket **privado** `offer-media`:
+
+| Ruta | Quién | Qué hace |
+| --- | --- | --- |
+| `POST /offer-media/offers/<oferta>` | usuario con sesión | Lee tipo y medidas de los bytes (firma y cabecera de JPEG, PNG o WebP; 600–6000 px; ≤ 5 MB; texto alternativo obligatorio), sube con la clave de API y registra con `connectical_add_offer_media` **como el usuario**: la base decide si gestiona la oferta. Si la base rechaza, borra el archivo |
+| `GET /offer-media/offers/<oferta>/<id>.<ext>` | cualquiera | Sirve la foto solo si el llamante la ve por RLS en `connectical_offer_media` (publicada y aprobada; dueño y admin también las suyas). Sin sesión, caché pública de 5 minutos; con sesión, `no-store` |
+| `DELETE /offer-media/media/<id>` | usuario con sesión | `connectical_remove_offer_media` como el usuario y después borra el archivo |
+| `POST /offer-media/maintenance/cleanup` | solo la clave de API | Borra archivos sin foto registrada con más de una hora |
+
+Riesgo que queda: con las políticas por defecto, un usuario con sesión puede subir archivos propios al bucket
+privado por la API de storage; nadie más los ve (el bucket no es público y la función solo sirve fotos registradas)
+y la limpieza horaria los borra. Si InsForge permite después aplicar `20261116000003`, ambas capas se suman.
+Probado en Jest con almacén y base simulados (`__tests__/offerMediaFunction.test.ts`, con mutaciones que
+confirman que las pruebas detectan un fallo de visibilidad o de limpieza); la app tiene su cliente en
+`src/media/offerMediaGateway.ts`. **No probado contra InsForge**: el despliegue es un cambio en producción y requiere
+autorización. Pasos, en orden, cada uno verificable:
+
+```sh
+npx -y @insforge/cli storage create-bucket offer-media --private        # nunca --public
+npx -y @insforge/cli functions deploy offer-media --file functions/offer-media.ts --name "Fotos de ofertas"
+npx -y @insforge/cli db query "insert into public.connectical_settings (key, value) values ('media_public_base_url', '\"https://ykfv5j3m.function2.insforge.app/offer-media\"') on conflict (key) do update set value = excluded.value, updated_at = now()"
+npx -y @insforge/cli schedules create --name offer-media-cleanup --cron "17 * * * *" \
+  --url "https://ykfv5j3m.function2.insforge.app/offer-media/maintenance/cleanup" \
+  --method POST --headers '{"Authorization":"Bearer ${{secrets.API_KEY}}"}' --body '{}'
+```
+
+Comprobación con cuentas reales del equipo (sin datos ficticios de clientes): un turista recibe 403 al subir; un
+proveedor no puede subir ni borrar en ofertas de otro; el dueño sube y ve su foto; sin sesión, 404 hasta que la
+oferta esté publicada y aprobada y 200 después; un archivo `.jpg` que no es imagen da 422; subir directamente al
+bucket con la API de storage no hace visible nada y la limpieza lo borra. Retirada: `functions delete offer-media`
+y borrar el bucket.
 
 **Primer administrador** (`scripts/promote-admin.sh`): solo promueve una cuenta existente, con el correo verificado,
 no anónima, que ya inició sesión en la app y es `traveler`; sin `--additional` se niega si ya hay un admin. Por
