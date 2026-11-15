@@ -54,3 +54,15 @@ jobs:
       - run: npm run test:insforge-compat
       # migrations/ (formato del CLI de InsForge) debe ser una copia exacta de supabase/migrations.
       - run: npm run check:insforge-migrations
+
+  offer-media-deno:
+    name: Función offer-media en Deno
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.8
+      # El mismo `deno check` que InsForge ejecuta antes de desplegar, y el manejador en el runtime de Deno.
+      - run: sh scripts/lab/deno-check.sh

@@ -241,12 +241,19 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
     } catch {
       return json(502, { error: 'upload_failed' });
     }
-    const { data, error } = await caller.rpc('connectical_add_offer_media', {
-      p_offer_id: offerId, p_storage_key: key, p_content_type: type, p_byte_size: bytes.length,
-      p_width: size.width, p_height: size.height, p_alt_text: altText,
-    });
+    // Si la base rechaza o no responde, el archivo se borra en el acto; si borrar falla, la limpieza lo recoge.
+    let result: CallerResult;
+    try {
+      result = await caller.rpc('connectical_add_offer_media', {
+        p_offer_id: offerId, p_storage_key: key, p_content_type: type, p_byte_size: bytes.length,
+        p_width: size.width, p_height: size.height, p_alt_text: altText,
+      });
+    } catch {
+      result = { data: null, error: { message: 'database_error' } };
+    }
+    const { data, error } = result;
     if (error) {
-      await deps.admin.remove([key]).catch(() => undefined); // si falla, la limpieza lo recoge
+      await deps.admin.remove([key]).catch(() => undefined);
       return rpcFailure(error);
     }
     return json(201, { id: data, key, url: `${base}/${key}`, contentType: type, width: size.width, height: size.height });
@@ -262,7 +269,8 @@ export function createOfferMediaHandler(deps: OfferMediaDeps): (req: Request) =>
     if (!bytes || bytes.length > MAX_IMAGE_BYTES || validImage(bytes)?.type !== row.content_type) {
       return json(404, { error: 'media_not_found' });
     }
-    return new Response(bytes, {
+    // Copia con ArrayBuffer propio: `deno check` (TypeScript 6) no acepta un Uint8Array<ArrayBufferLike> como cuerpo.
+    return new Response(new Uint8Array(bytes), {
       status: 200,
       headers: {
         ...CORS,
@@ -336,7 +344,6 @@ type SdkClient = {
     } };
   };
 };
-const SDK_MODULE = 'npm:@insforge/sdk@1.5.2';
 let deployedHandler: ((req: Request) => Promise<Response>) | null = null;
 
 // https://<app>.<región>.insforge.app → https://<app>.function2.insforge.app/offer-media (como el SDK).
@@ -376,8 +383,9 @@ export function sdkDeps(createClient: CreateClient, { baseUrl, apiKey, anonKey, 
       };
     },
     admin: {
+      // `as never`: los tipos de React Native exigen lastModified en Blob y los de Deno lo rechazan.
       async put(key, bytes, contentType) {
-        const { data, error } = await bucket.upload(key, new Blob([bytes as unknown as Blob], { type: contentType, lastModified: Date.now() }));
+        const { data, error } = await bucket.upload(key, new Blob([bytes as unknown as Blob], { type: contentType } as never));
         if (error) throw new Error(error.message);
         if (data?.key && data.key !== key) {
           await bucket.remove([data.key]);
@@ -414,7 +422,9 @@ export function sdkDeps(createClient: CreateClient, { baseUrl, apiKey, anonKey, 
 }
 
 async function deployedDeps(): Promise<OfferMediaDeps> {
-  const { createClient } = (await import(SDK_MODULE)) as { createClient: CreateClient };
+  // Especificador literal: Deno Deploy solo incluye los módulos que puede analizar sin ejecutar. Jest y el laboratorio
+  // no llegan aquí; para tsc del proyecto está declarado en src/types/deno-modules.d.ts.
+  const { createClient } = (await import('npm:@insforge/sdk@1.5.2')) as unknown as { createClient: CreateClient };
   const baseUrl = Deno.env.get('INSFORGE_BASE_URL') ?? '';
   return sdkDeps(createClient, {
     baseUrl,

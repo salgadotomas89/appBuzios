@@ -14,3 +14,10 @@ jest.mock('react-native-keychain', () => {
     resetGenericPassword: jest.fn(async (options = {}) => entries.delete(options.service)),
   };
 });
+
+// react-native-image-picker abre la galería o la cámara nativas. En Jest no hay ninguna: por defecto responde como
+// si se hubiera cancelado; las pruebas del selector pasan sus propios lanzadores.
+jest.mock('react-native-image-picker', () => ({
+  launchCamera: jest.fn(async () => ({ didCancel: true })),
+  launchImageLibrary: jest.fn(async () => ({ didCancel: true })),
+}));

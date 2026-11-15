@@ -56,12 +56,12 @@ it('uploads valid images and keeps both url and key', async () => {
 });
 
 it('adds and removes photos only through the offer-media function, never registering by RPC from the app', async () => {
-  const fetch = jest.fn(async (_url: string, init: { method: string }) =>
-    ({ status: init.method === 'POST' ? 201 : 200, json: async () => ({ id: 'media-1' }) }));
-  const gateway = createOfferMediaGateway({ functionUrl: 'https://app.function2.insforge.app/offer-media', getAccessToken: async () => 'jwt', fetch });
+  const transport = jest.fn(async (request: { method: string; url: string }) =>
+    ({ status: request.method === 'POST' ? 201 : 200, json: async () => ({ id: 'media-1' }) }));
+  const gateway = createOfferMediaGateway({ functionUrl: 'https://app.function2.insforge.app/offer-media', getAccessToken: async () => 'jwt', transport });
   await expect(addOfferPhoto(gateway, OFFER, { bytes: JPEG, width: 1200, height: 900, altText: 'Quarto' })).resolves.toBe('media-1');
   await removeOfferPhoto(gateway, 'media-1');
-  expect(fetch.mock.calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+  expect(transport.mock.calls.map(([request]) => `${request.method} ${request.url}`)).toEqual([
     `POST https://app.function2.insforge.app/offer-media/offers/${OFFER}`,
     'DELETE https://app.function2.insforge.app/offer-media/media/media-1',
   ]);

@@ -171,7 +171,7 @@ column connectical_sweep_runs.id bigint null=NO
 column connectical_sweep_runs.started_at timestamp with time zone null=NO
 column connectical_sweep_runs.status text null=NO
 function connectical_active_campaigns() definer=true md5=0abf11159e46fdb22afcf40862c646ff
-function connectical_add_offer_media(p_offer_id uuid, p_storage_key text, p_content_type text, p_byte_size integer, p_width integer, p_height integer, p_alt_text text) definer=true md5=27fb60d1a91eb03d43e90f330ee6aa19
+function connectical_add_offer_media(p_offer_id uuid, p_storage_key text, p_content_type text, p_byte_size integer, p_width integer, p_height integer, p_alt_text text) definer=true md5=cb7afb9808f6e08a07fd4e97ab0f2e57
 function connectical_adjust_stay_inventory(p_offer_id uuid, p_service_date date, p_nights integer, p_held_delta integer, p_sold_delta integer) definer=true md5=034afe718fcfda2f9621b6f6f0b358e3
 function connectical_admin_kpis(p_from date, p_to date) definer=true md5=2f61119ca3e4bc0ef39b912595edd49f
 function connectical_admin_list_audit_log(p_limit integer) definer=true md5=b9dd9c85be11e9f32b93411b16601c51

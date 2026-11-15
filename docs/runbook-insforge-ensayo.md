@@ -175,27 +175,10 @@ camino al bucket **privado** `offer-media`:
 | `DELETE /offer-media/media/<id>` | usuario con sesión | `connectical_remove_offer_media` como el usuario y después borra el archivo |
 | `POST /offer-media/maintenance/cleanup` | solo la clave de API | Borra archivos sin foto registrada con más de una hora |
 
-Pasos, en orden, cada uno verificable (antes, `npm run backup:verified`):
-
-```sh
-npx -y @insforge/cli db migrations up --all     # 20261116000003 y 20261116000004, como project_admin
-npm run check:remote-schema                     # 19 de 19, verificación y conciliación correctas
-npx -y @insforge/cli storage create-bucket offer-media --private        # nunca --public
-npx -y @insforge/cli functions deploy offer-media --file functions/offer-media.ts --name "Fotos de ofertas"
-npx -y @insforge/cli db query "insert into public.connectical_settings (key, value) values ('media_public_base_url', '\"https://ykfv5j3m.function2.insforge.app/offer-media\"') on conflict (key) do update set value = excluded.value, updated_at = now()"
-npx -y @insforge/cli schedules create --name offer-media-cleanup --cron "17 * * * *" \
-  --url "https://ykfv5j3m.function2.insforge.app/offer-media/maintenance/cleanup" \
-  --method POST --headers '{"Authorization":"Bearer ${{secrets.API_KEY}}"}' --body '{}'
-```
-
-Opcional: `[storage] max_file_size_mb = 5` en `insforge.toml` y `config apply`.
-
-Comprobación con cuentas reales del equipo (sin datos ficticios de clientes): un turista recibe 403 al subir por la
-función; un proveedor no puede subir ni borrar en ofertas de otro; el dueño sube y ve su foto; sin sesión, 404 hasta
-que la oferta esté publicada y aprobada y 200 después; un `.jpg` que no es imagen da 422; subir directamente al
-bucket con la API de storage da error (políticas de `…0004`). Retirada: `functions delete offer-media`, borrar el
-bucket y, si hiciera falta, `drop policy connectical_offer_media_{select,insert,update,delete} on storage.objects`
-en una migración nueva.
+Procedimiento completo, con lo que debe salir en cada paso, comprobaciones con cuentas de prueba y recuperación:
+[`docs/despliegue-fotos.md`](despliegue-fotos.md). Antes de desplegar, `npm run check:deno` reproduce el `deno check`
+con el que InsForge acepta o rechaza la función (lo ejecuta también CI); con él se detectaron y corrigieron dos errores
+de tipos que habrían impedido el despliegue.
 
 **Primer administrador** (`scripts/promote-admin.sh`): solo promueve una cuenta existente, con el correo verificado,
 no anónima, que ya inició sesión en la app y es `traveler`; sin `--additional` se niega si ya hay un admin. Por

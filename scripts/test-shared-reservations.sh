@@ -1245,12 +1245,25 @@ if as_user "$provider_user" "select public.connectical_remove_offer_media('$medi
 fi
 removed_key=$(as_user "$applicant" "select public.connectical_remove_offer_media('$media_id');")
 [ "$removed_key" = "$media_key" ] || { echo "Removal did not return the storage key: $removed_key" >&2; exit 1; }
-# 30 fotos por usuario y hora: tiene 9 en esta oferta; con 21 más en otra llega al límite y la siguiente se rechaza.
-docker exec "$container" psql -q -U postgres -d postgres -c "insert into public.connectical_offer_media (offer_id, storage_key, url, content_type, byte_size, width, height, alt_text, created_by) select '$range_offer', 'offers/$range_offer/' || gen_random_uuid() || '.png', 'https://cdn.example/x', 'image/png', 3000, 1000, 1000, 'Lote', '$applicant' from generate_series(1, 21);"
-k="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
-gateway_put "$k" image/png 3000
-limited=$(as_user "$applicant" "select public.connectical_add_offer_media('$mod_offer', '$k', 'image/png', 3000, 1000, 1000, 'Foto 31');" 2>&1 || true)
-case "$limited" in *media_rate_limited*) ;; *) echo "Thirty-first photo in an hour was not rate limited: $limited" >&2; exit 1 ;; esac
+# 30 fotos por usuario y hora: tiene 9 en esta oferta; con 20 más en otra llega a 29. Dos registros simultáneos en
+# ofertas distintas (la primera transacción sigue abierta cuando llega la segunda): solo entra uno.
+docker exec "$container" psql -q -U postgres -d postgres -c "insert into public.connectical_offer_media (offer_id, storage_key, url, content_type, byte_size, width, height, alt_text, created_by) select '$range_offer', 'offers/$range_offer/' || gen_random_uuid() || '.png', 'https://cdn.example/x', 'image/png', 3000, 1000, 1000, 'Lote', '$applicant' from generate_series(1, 20);"
+second_offer=$(as_user "$applicant" "select (public.connectical_provider_upsert_offer(null, 'pousadas', 'Segundo quarto', 30000, 'night', true)).id;")
+k1="offers/$mod_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+k2="offers/$second_offer/$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select gen_random_uuid();" | tail -1).png"
+gateway_put "$k1" image/png 3000
+gateway_put "$k2" image/png 3000
+docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "set session authorization integration_session; set role authenticated; select set_config('request.jwt.claim.sub','$applicant',false);" \
+  -c "begin; select public.connectical_add_offer_media('$mod_offer', '$k1', 'image/png', 3000, 1000, 1000, 'Foto 30'); select pg_sleep(2); commit;" \
+  >"$workdir/media-race-a" 2>&1 &
+race_a=$!
+sleep 0.7
+race_b=$(as_user "$applicant" "select public.connectical_add_offer_media('$second_offer', '$k2', 'image/png', 3000, 1000, 1000, 'Foto 31');" 2>&1 || true)
+wait "$race_a" || { echo "First concurrent photo failed: $(cat "$workdir/media-race-a")" >&2; exit 1; }
+case "$race_b" in *media_rate_limited*) ;; *) echo "Concurrent photo got past the hourly limit: $race_b" >&2; exit 1 ;; esac
+[ "$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_offer_media where created_by = '$applicant';" | tail -1)" = 30 ] || {
+  echo "Hourly photo limit exceeded under concurrency" >&2; exit 1; }
 echo "PASS offer photos: owner-only metadata, only files written by the gateway, key bound to the offer, limits, visibility and removal key"
 
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.

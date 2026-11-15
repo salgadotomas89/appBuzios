@@ -253,3 +253,23 @@ it('starts and stores a session from an email verification code', async () => {
   await expect(other.verifyEmail('new@b.c', '000000')).rejects.toMatchObject({ code: 'sign_in_failed' });
   expect(other.getState().status).toBe('signed_out');
 });
+
+it('hands out the current access token from memory, refreshed when close to expiry, and forgets it on sign-out', async () => {
+  let now = NOW;
+  const store = memoryStore();
+  const first = jwt(inMinutes(15));
+  const second = jwt(inMinutes(40));
+  const auth = fakeAuth({
+    signInWithPassword: jest.fn(async () => ({ data: { accessToken: first, refreshToken: 'refresh-1', user: { id: 'u1' } }, error: null })),
+    refreshSession: jest.fn(async () => ({ data: { accessToken: second, refreshToken: 'refresh-2', user: { id: 'u1' } }, error: null })),
+  });
+  const manager = createSessionManager({ auth, store, now: () => now });
+  await expect(manager.currentAccessToken()).resolves.toBeNull();
+  await manager.signIn('a@b.c', 'secret123');
+  await expect(manager.currentAccessToken()).resolves.toBe(first);
+  now = NOW + 14 * 60_000;
+  await expect(manager.currentAccessToken()).resolves.toBe(second);
+  expect(JSON.stringify(store.value())).not.toContain('eyJ');
+  await manager.signOut();
+  await expect(manager.currentAccessToken()).resolves.toBeNull();
+});

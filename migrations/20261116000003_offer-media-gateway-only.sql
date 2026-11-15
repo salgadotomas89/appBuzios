@@ -9,7 +9,7 @@
 --     (uploaded_by nulo: InsForge solo pone el usuario cuando sube un JWT de usuario) y coinciden el tamaño y el tipo
 --     que InsForge guardó. La clave de API solo la tiene la función (y la administración del proyecto).
 --   * Como mucho 30 fotos registradas por usuario en una hora, para acotar el consumo aunque se borren y se suban
---     de nuevo.
+--     de nuevo. El recuento se hace bajo un bloqueo por usuario, así que subidas simultáneas no lo eluden.
 --
 -- La función es SECURITY DEFINER de project_admin, que en buziosflow tiene BYPASSRLS y SELECT en storage.objects
 -- (leído el 15-11-2026); no se toca el esquema storage. Firma, permisos y errores existentes no cambian.
@@ -48,6 +48,9 @@ begin
   ) then
     raise exception 'invalid_media' using errcode = '22023';
   end if;
+  -- Un registro por usuario a la vez: sin este bloqueo, dos subidas simultáneas a ofertas distintas contarían las
+  -- mismas fotos y podrían pasar las dos del límite.
+  perform pg_advisory_xact_lock(hashtextextended('connectical_offer_media:' || auth.uid()::text, 0));
   if (select count(*) from public.connectical_offer_media
       where created_by = auth.uid() and created_at > now() - interval '1 hour') >= 30 then
     raise exception 'media_rate_limited' using errcode = 'P0001';

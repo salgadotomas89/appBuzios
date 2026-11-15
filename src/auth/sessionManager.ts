@@ -92,6 +92,8 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
   let state: SessionState = { status: 'signed_out', reason: 'none' };
   let refreshToken: string | null = null;
   let expiresAt: number | null = null;
+  // Solo en memoria: firma las llamadas que no pasan por el SDK (función offer-media). Nunca se guarda.
+  let accessToken: string | null = null;
   let refreshing: Promise<void> | null = null;
   let restoring: Promise<RestoreResult> | null = null;
   // Cambia en cada inicio o cierre de sesión. Una respuesta que llega con otra época pertenece a una
@@ -127,6 +129,7 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     state = { status: 'signed_out', reason };
     refreshToken = null;
     expiresAt = null;
+    accessToken = null;
     // El SDK borra su token de acceso en signOut aunque la red falle.
     await deps.auth.signOut().catch(() => undefined);
     return wipeStore();
@@ -148,6 +151,7 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     const userId = payload?.user?.id ?? fallbackUserId;
     if (!payload?.accessToken || !userId) return null;
     expiresAt = accessTokenExpiry(payload.accessToken);
+    accessToken = payload.accessToken;
     if (payload.refreshToken) refreshToken = payload.refreshToken;
     const persisted = refreshToken ? await persist(userId, refreshToken) : false;
     state = { status: 'signed_in', userId, persisted };
@@ -178,6 +182,15 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     }
   }
 
+  async function ensureFresh(): Promise<void> {
+    if (state.status !== 'signed_in' || expiresAt === null) return;
+    if (expiresAt - now() > REFRESH_LEEWAY_MS) return;
+    refreshing ??= refreshNow().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  }
+
   // Inicio de sesión por contraseña o por código: invalida lo anterior, espera lo pendiente y descarta
   // la respuesta si otra operación cambió la sesión mientras tanto.
   async function startSession(
@@ -199,6 +212,12 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
   }
 
   return {
+    // Token de acceso vigente (renovado si hacía falta) o null sin sesión.
+    async currentAccessToken(): Promise<string | null> {
+      await ensureFresh();
+      return state.status === 'signed_in' ? accessToken : null;
+    },
+
     getState(): SessionState {
       return state;
     },
@@ -252,14 +271,7 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     },
 
     // Llamar antes de cada petición autenticada.
-    async ensureFresh(): Promise<void> {
-      if (state.status !== 'signed_in' || expiresAt === null) return;
-      if (expiresAt - now() > REFRESH_LEEWAY_MS) return;
-      refreshing ??= refreshNow().finally(() => {
-        refreshing = null;
-      });
-      return refreshing;
-    },
+    ensureFresh,
 
     // El token local se borra aunque el servidor no responda. Si el dispositivo no dejó borrar ni
     // marcar la sesión, avisa: al reabrir la app podría seguir iniciada.

@@ -293,3 +293,79 @@ it('does not serve files uploaded straight to the bucket even if someone registe
     expect((await w.handle(request('GET', key, null))).status).toBe(404);
   }
 });
+
+it('cannot be pushed past the per-user limits by firing requests at the same time', async () => {
+  const w = world();
+  // 25 subidas a la vez: como mucho 2 en curso; el resto recibe 429 y no escribe nada.
+  const pending: (() => void)[] = [];
+  (w.deps.admin.put as jest.Mock).mockImplementation(() => new Promise<void>(resolve => pending.push(() => resolve())));
+  const burst = Array.from({ length: 25 }, () => w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner')));
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 0));
+  expect(pending).toHaveLength(2);
+  pending.forEach(resolve => resolve());
+  const statuses = (await Promise.all(burst)).map(response => response.status);
+  expect(statuses.filter(status => status === 201)).toHaveLength(2);
+  expect(statuses.filter(status => status === 429)).toHaveLength(23);
+  expect(w.media).toHaveLength(2);
+
+  // Con subidas que terminan enseguida, el tope de la ventana (20) tampoco se supera en ráfagas sucesivas.
+  (w.deps.admin.put as jest.Mock).mockImplementation(async (key: string, bytes: Uint8Array) => { w.files.set(key, { bytes, uploadedAt: '' }); });
+  const accepted: number[] = [];
+  for (let round = 0; round < 15; round += 1) {
+    const pair = await Promise.all([w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner')), w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))]);
+    accepted.push(...pair.map(response => response.status).filter(status => status === 201));
+  }
+  expect(accepted.length + 2).toBe(20);
+});
+
+it('leaves no file behind when the database rejects, fails or cannot be reached', async () => {
+  for (const failure of ['reject', 'throw'] as const) {
+    const w = world();
+    if (failure === 'reject') w.rpc.mockResolvedValueOnce({ data: null, error: { message: 'media_limit_reached' } });
+    else w.rpc.mockRejectedValueOnce(new Error('connection reset'));
+    const response = await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+    expect([failure, response.status]).toEqual([failure, failure === 'reject' ? 409 : 502]);
+    expect(w.files.size).toBe(0);
+    expect(w.media).toHaveLength(0);
+  }
+  // Si además borrar falla, el archivo queda solo hasta la limpieza, que lo retira pasada una hora.
+  const w = world();
+  w.rpc.mockRejectedValueOnce(new Error('connection reset'));
+  (w.deps.admin.remove as jest.Mock).mockRejectedValueOnce(new Error('storage down'));
+  await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'));
+  expect(w.files.size).toBe(1);
+  w.advance(61 * 60 * 1000);
+  expect(await (await w.handle(request('POST', 'maintenance/cleanup', API_KEY))).json()).toEqual({ checked: 1, removed: 1 });
+  expect(w.files.size).toBe(0);
+  // Si falla la subida al bucket, no se registra nada.
+  (w.deps.admin.put as jest.Mock).mockRejectedValueOnce(new Error('storage down'));
+  expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).status).toBe(502);
+  expect(w.rpc).toHaveBeenCalledTimes(1);
+});
+
+it('never deletes registered photos in cleanup, however old, nor uploads still in progress', async () => {
+  const w = world();
+  const keys: string[] = [];
+  for (let i = 0; i < 3; i += 1) keys.push((await (await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).json()).key);
+  w.advance(30 * 24 * 60 * 60 * 1000);
+  // Un archivo recién escrito todavía sin registrar (la función está a mitad de la subida) también se respeta.
+  w.files.set(`offers/${OFFER}/12121212-1212-4212-8212-121212121212.png`, { bytes: png(800, 800), uploadedAt: new Date(Date.parse('2026-11-16T12:00:00Z') + 30 * 24 * 60 * 60 * 1000 - 60 * 1000).toISOString() });
+  expect(await (await w.handle(request('POST', 'maintenance/cleanup', API_KEY))).json()).toEqual({ checked: 3, removed: 0 });
+  expect([...w.files.keys()].sort()).toEqual([...keys, `offers/${OFFER}/12121212-1212-4212-8212-121212121212.png`].sort());
+});
+
+it('does not let a traveler or another provider touch photos of an offer they do not manage', async () => {
+  const w = world();
+  w.approved.add(OFFER);
+  const { id, key } = await (await w.handle(post(`offers/${OFFER}`, png(1200, 800), 'owner'))).json();
+  const mediaId = '00000000-0000-4000-8000-000000000001';
+  w.media.find(row => row.id === id)!.id = mediaId;
+  for (const intruder of ['traveler', 'other']) {
+    expect((await w.handle(request('DELETE', `media/${mediaId}`, intruder))).status).toBe(403);
+    expect((await w.handle(post(`offers/${OFFER}`, png(1200, 800), intruder))).status).toBe(403);
+  }
+  // Ni siquiera con la clave de API como token de usuario: las rutas de usuario la rechazan.
+  expect((await w.handle(request('DELETE', `media/${mediaId}`, API_KEY))).status).toBe(401);
+  expect(w.files.has(key)).toBe(true);
+  expect(w.media).toHaveLength(1);
+});

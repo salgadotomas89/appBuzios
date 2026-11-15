@@ -172,3 +172,13 @@ if register "$(photo "$own_offer")" >/dev/null 2>&1; then echo "A photo without 
 [ "$(su -c "select pg_get_userbyid(proowner) from pg_proc where proname = 'connectical_add_offer_media';")" = project_admin ] || {
   echo "connectical_add_offer_media is not owned by project_admin" >&2; exit 1; }
 echo "PASS only photos written by the offer-media function (API key) are registered, with the function owned by project_admin"
+
+# Vuelta atrás preparada (docs/rollback/offer-media-photos.sql): se aplica sobre lo anterior, quita las cuatro
+# políticas y devuelve el registro de fotos a 202611150003 (ya no exige el archivo de la función).
+docker exec -i -e PGPASSWORD=connectical_local_test_only "$container" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres \
+  < "$PWD/docs/rollback/offer-media-photos.sql" >/dev/null
+[ "$(su -c "select count(*) from pg_policies where schemaname = 'storage' and policyname like 'connectical\_offer\_media\_%';")" = 0 ] || {
+  echo "Rollback left offer-media storage policies" >&2; exit 1; }
+[ -n "$(register "$(photo "$own_offer")")" ] || { echo "Rollback did not restore the previous registration rules" >&2; exit 1; }
+[ -n "$(put "$traveler_id" offer-media "notes/after-rollback.txt" text/plain)" ] || { echo "Rollback did not reopen offer-media to default rules" >&2; exit 1; }
+echo "PASS the prepared rollback removes the offer-media policies and restores the previous photo registration"

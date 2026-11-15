@@ -7,6 +7,11 @@
 // allowUndefined: false y una variable nueva rompería cualquier .env local existente.
 export const SHARED_CATALOG_ENABLED = false;
 
+// OFFER_PHOTOS_ENABLED muestra a los proveedores el gestor de fotos (src/components/OfferPhotoManager.tsx), que sube
+// por la función offer-media. Queda apagado hasta desplegar en buziosflow las migraciones 202611160003/0004, el bucket
+// privado, la función y su URL (docs/despliegue-fotos.md); sin eso la función no existe y cada subida fallaría.
+export const OFFER_PHOTOS_ENABLED = false;
+
 // CANCELLATION_POLICY_ENABLED permitiría mostrar la propuesta de src/utils/cancellationPolicy.ts.
 // No existe una política comercial aprobada, así que no hay ninguna política cargada y ningún flujo
 // lo consulta todavía. No cambiarlo sin una política aprobada por escrito.

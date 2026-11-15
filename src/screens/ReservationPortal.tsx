@@ -90,6 +90,11 @@ import {
   portalStyles,
 } from '../components/PortalControls';
 import { colors } from '../theme';
+import { OfferPhotoManager } from '../components/OfferPhotoManager';
+import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
+import { listOfferMedia } from '../lib/platformService';
+import { offerPhotoGateway } from '../media/offerPhotos';
+import { sessionManager } from '../lib/insforge';
 import { AdminConsole } from './AdminConsole';
 import { TravelerServices } from './TravelerServices';
 
@@ -116,12 +121,18 @@ type CancelReason = 'traveler_request' | 'provider_cancelled' | 'admin_review';
 // Se lanza para mostrar un mensaje ya traducido sin pasar por el mapa de errores.
 class InputValidationError extends Error {}
 
+const loadOfferMedia = (offerId: string) => listOfferMedia([offerId]);
+const currentAccessToken = async () => (await sessionManager?.currentAccessToken()) ?? null;
+
 export function ReservationPortal({
   onClose,
   language = 'es',
+  photosEnabled = OFFER_PHOTOS_ENABLED,
 }: {
   onClose: () => void;
   language?: Language;
+  // Solo para pruebas: el gestor de fotos depende del despliegue de offer-media (OFFER_PHOTOS_ENABLED).
+  photosEnabled?: boolean;
 }) {
   const words = portalCopy[language];
   const [email, setEmail] = useState('');
@@ -777,6 +788,15 @@ export function ReservationPortal({
               <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
               <Text style={styles.helper}>{words.publishNightsHint}</Text>
               <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
+              {photosEnabled && offerPhotoGateway ? (
+                <OfferPhotoManager
+                  offerId={selectedProviderOfferId}
+                  language={language}
+                  gateway={offerPhotoGateway}
+                  loadMedia={loadOfferMedia}
+                  getAccessToken={currentAccessToken}
+                />
+              ) : null}
               <Text style={styles.sectionTitle}>{words.myInventory}</Text>
               {providerInventory.length ? providerInventory.map(item => (
                 <View key={`${item.offer_id}:${item.service_date}`} style={styles.row}>
