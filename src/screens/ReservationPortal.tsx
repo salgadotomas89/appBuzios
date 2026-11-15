@@ -49,6 +49,7 @@ import {
   type SharedReservationEvent,
   type SharedRole,
 } from '../lib/reservationService';
+import { AuthFlowError } from '../auth/authErrors';
 import type { Language } from '../data/homeMock';
 import {
   inputErrorText,
@@ -176,6 +177,9 @@ export function ReservationPortal({
 
   function describeError(error: unknown): string {
     if (error instanceof ReservationError && error.code) return words.errors[error.code];
+    if (error instanceof AuthFlowError) {
+      return error.kind === 'unknown' ? `${words.authErrors.unknown} (${error.serverMessage})` : words.authErrors[error.kind];
+    }
     if (error instanceof Error) return error.message;
     return words.genericError;
   }

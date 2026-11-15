@@ -30,6 +30,7 @@ create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
+\i /sb/harness/insforge_storage.sql
 SQL
 for file in $(docker exec "$container" sh -c 'ls /sb/migrations/*.sql' | sort); do
   sql -f "$file" >/dev/null 2>"$workdir/migration.err" || { cat "$workdir/migration.err" >&2; echo "Migration failed: $file" >&2; exit 1; }

@@ -21,7 +21,8 @@ El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforg
 ## Antes del piloto (intervención humana)
 
 1. ~~Respaldo, quince migraciones, verificación, conciliación e inventario~~: hecho el 15-11-2026.
-2. Registrarse desde la app con un correo del equipo y comprobar que llega el código. Si no llega, configurar SMTP
+2. Registrarse con un correo del equipo y comprobar que llega el código: `node scripts/verify-email-delivery.mjs
+   correo@equipo.com` lo hace como la app y distingue «no generado» de «no entregado». Si no llega, configurar SMTP
    (`[auth.smtp]` con `npx -y @insforge/cli config apply`), lo que requiere una cuenta de correo del equipo.
 3. Configuración preparada para el piloto (**no aplicada en ningún entorno real**):
 
@@ -35,7 +36,8 @@ El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforg
    on conflict (key) do update set value = excluded.value, updated_at = now();
    ```
 
-4. Asignar el rol de administración a una cuenta controlada por el equipo (PROVISIONING). Las demás cuentas se
+4. Asignar el rol de administración a una cuenta del equipo ya verificada y que haya iniciado sesión una vez:
+   `sh scripts/promote-admin.sh correo@equipo.com --apply` (rechaza cuentas sin verificar). Las demás cuentas se
    registran desde la app y verifican el correo con el código.
 5. Compilar un build de ensayo con `SHARED_CATALOG_ENABLED = true` en una rama aparte (no en `main`).
 6. Entorno de dispositivos: [entorno-movil.md](entorno-movil.md) (CoreSimulator y Android requieren administrador).

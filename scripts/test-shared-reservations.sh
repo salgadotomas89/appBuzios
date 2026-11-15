@@ -54,6 +54,7 @@ $$;
 grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
 SQL
+docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/harness/insforge_storage.sql" >/dev/null
 
 # Apply every migration in filename order, exactly as an operator would.
 for migration_file in $(docker exec "$container" sh -c 'ls /tmp/connectical-migrations/*.sql' | sort); do
@@ -840,6 +841,26 @@ fi
 sweep_reconcile=$(docker exec -i "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres < "$PWD/supabase/checks/reconcile_inventory.sql")
 [ -z "$sweep_reconcile" ] || { echo "Inventory does not reconcile after sweeps: $sweep_reconcile" >&2; exit 1; }
 echo "PASS scheduled sweep skips overlaps, isolates failing offers, recovers and reports health to admins only"
+
+# Retention of the sweep log: idle runs after 30 days, productive or partial runs after 180 days.
+docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+insert into public.connectical_sweep_runs (started_at, finished_at, status, expired_count) values
+  (now() - interval '31 days', now() - interval '31 days', 'succeeded', 0),
+  (now() - interval '31 days', now() - interval '31 days', 'skipped', 0),
+  (now() - interval '29 days', now() - interval '29 days', 'succeeded', 0),
+  (now() - interval '90 days', now() - interval '90 days', 'succeeded', 3),
+  (now() - interval '90 days', now() - interval '90 days', 'partial', 0),
+  (now() - interval '181 days', now() - interval '181 days', 'partial', 2);"
+retention_run=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select r.status from public.connectical_system_run_hold_sweep() r;" | tail -1)
+kept=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "
+  select string_agg(extract(day from now() - started_at)::int || ':' || status || ':' || expired_count, ',' order by started_at)
+  from public.connectical_sweep_runs where started_at < now() - interval '1 day';" | tail -1)
+[ "$retention_run" = 'succeeded' ] && [ "$kept" = '90:succeeded:3,90:partial:0,29:succeeded:0' ] || {
+  echo "Sweep log retention mismatch: $retention_run $kept" >&2; exit 1; }
+if as_user "$admin_user" "select public.connectical_prune_sweep_runs();" >/dev/null 2>&1; then
+  echo "App role could prune the sweep log" >&2; exit 1
+fi
+echo "PASS sweep log keeps idle runs 30 days and productive or partial runs 180 days, pruned by the sweep itself"
 
 # Commercial terms: experiences category, admin-only product commission, frozen quotes, B2B privacy.
 vip_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'experiencias', 'Private lab tour', 50000, 'group', true)).id;")

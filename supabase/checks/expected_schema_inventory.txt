@@ -195,6 +195,7 @@ function connectical_admin_update_incident(p_incident_id uuid, p_status text, p_
 function connectical_audit_change() definer=true md5=042fbc0ce4217cbfb2934064ca35ac9a
 function connectical_can_manage_offer(p_offer_id uuid) definer=true md5=855e389e2440928be4b81e37b61c1f2c
 function connectical_can_read_reservation(p_reservation_id uuid) definer=true md5=9226af62acbcf28ff72a7b050fdc03a1
+function connectical_can_write_offer_media_object(p_bucket text, p_key text, p_mime_type text, p_size integer) definer=true md5=2fb5bfa9522431105bc519c65c91d223
 function connectical_cancel_reservation(p_reservation_id uuid, p_reason text) definer=true md5=1e876b456145d8196cd847076de11de9
 function connectical_create_quote(p_offer_id uuid, p_service_date date, p_quantity integer, p_nights integer, p_service_fee_rate_bps integer) definer=true md5=5479affd847a3248446ab1998561f2bb
 function connectical_create_reservation_hold(p_quote_id uuid, p_idempotency_key uuid) definer=true md5=10f9f99e57e4940d024494542a467d76
@@ -213,6 +214,7 @@ function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date 
 function connectical_provider_publish_inventory_range(p_offer_id uuid, p_from_date date, p_nights integer, p_total_units integer) definer=true md5=45c6eba21cc037eca0487f24a565fdda
 function connectical_provider_set_offer_details(p_offer_id uuid, p_description text, p_location text, p_meeting_point text, p_schedule text, p_min_quantity integer, p_max_quantity integer) definer=true md5=c08a029448466d147ca74d60409f3d97
 function connectical_provider_upsert_offer(p_offer_id uuid, p_category text, p_title text, p_base_price_cents integer, p_price_mode text, p_published boolean) definer=true md5=47234fe9d4367ccc46dfe24275d32998
+function connectical_prune_sweep_runs() definer=true md5=50148376a5eba44e6ac78d7906d35d93
 function connectical_redact_reservation(p_reservation connectical_reservations) definer=true md5=3c67e0870807c35327bd864578b42796
 function connectical_remove_offer_media(p_media_id uuid) definer=true md5=1352f72016699ce882cc6fce1ea306e3
 function connectical_report_incident(p_reservation_id uuid, p_category text, p_description text) definer=true md5=383f082fcbef78694a029aaaf2b73f70
@@ -220,8 +222,49 @@ function connectical_simulate_payment(p_reservation_id uuid, p_outcome text, p_m
 function connectical_submit_provider_application(p_business_name text, p_category text, p_contact_name text, p_contact_phone text, p_contact_email text, p_location text, p_description text) definer=true md5=9f89cf60e81cab764872b03571018cf2
 function connectical_system_expire_holds() definer=true md5=afbf55b0016e4b818707a268fcce2fbb
 function connectical_system_ingest_payment_event(p_gateway text, p_event_id text, p_reservation_id uuid, p_kind text, p_amount_cents integer, p_currency text, p_method text, p_gateway_reference text) definer=true md5=0ef61a23142068ffc5fc3d33c43ef267
-function connectical_system_run_hold_sweep() definer=true md5=d29a0922239e82ab6a95f5760fffcb8f
+function connectical_system_run_hold_sweep() definer=true md5=9a5fe44761b729f734bfb0e4d5e4f989
 function connectical_today() definer=false md5=5e07a408e84061be4d746e1a64430c7e
+index connectical_admin_audit_log.connectical_admin_audit_log_created_idx USING btree (created_at DESC)
+index connectical_admin_audit_log.connectical_admin_audit_log_pkey USING btree (id)
+index connectical_campaigns.connectical_campaigns_pkey USING btree (id)
+index connectical_commission_references.connectical_commission_references_pkey USING btree (category)
+index connectical_incidents.connectical_incidents_pkey USING btree (id)
+index connectical_incidents.connectical_incidents_reporter_idx USING btree (reporter_user_id, created_at DESC)
+index connectical_incidents.connectical_incidents_reservation_idx USING btree (reservation_id)
+index connectical_incidents.connectical_incidents_status_idx USING btree (status, created_at DESC)
+index connectical_inventory.connectical_inventory_pkey USING btree (offer_id, service_date)
+index connectical_offer_media.connectical_offer_media_offer_idx USING btree (offer_id, "position")
+index connectical_offer_media.connectical_offer_media_pkey USING btree (id)
+index connectical_offer_media.connectical_offer_media_storage_key_key USING btree (storage_key)
+index connectical_offers.connectical_offers_pkey USING btree (id)
+index connectical_offers.connectical_offers_provider_idx USING btree (provider_id)
+index connectical_payment_events.connectical_payment_events_gateway_event_id_key USING btree (gateway, event_id)
+index connectical_payment_events.connectical_payment_events_pkey USING btree (id)
+index connectical_payment_events.connectical_payment_events_reservation_idx USING btree (reservation_id)
+index connectical_payment_events.connectical_payment_events_review_idx USING btree (received_at DESC) WHERE needs_review
+index connectical_profiles.connectical_profiles_pkey USING btree (user_id)
+index connectical_provider_applications.connectical_provider_applications_one_pending USING btree (applicant_user_id) WHERE (status = 'pending'::text)
+index connectical_provider_applications.connectical_provider_applications_pkey USING btree (id)
+index connectical_provider_applications.connectical_provider_applications_status_idx USING btree (status, created_at DESC)
+index connectical_providers.connectical_providers_owner_user_id_key USING btree (owner_user_id)
+index connectical_providers.connectical_providers_pkey USING btree (id)
+index connectical_quotes.connectical_quotes_offer_idx USING btree (offer_id)
+index connectical_quotes.connectical_quotes_pkey USING btree (id)
+index connectical_quotes.connectical_quotes_traveler_idx USING btree (traveler_user_id)
+index connectical_refunds.connectical_refunds_pkey USING btree (id)
+index connectical_refunds.connectical_refunds_reservation_id_idempotency_key_key USING btree (reservation_id, idempotency_key)
+index connectical_refunds.connectical_refunds_reservation_idx USING btree (reservation_id, created_at)
+index connectical_reservation_events.connectical_reservation_events_pkey USING btree (id)
+index connectical_reservation_events.connectical_reservation_events_reservation_idx USING btree (reservation_id, created_at DESC)
+index connectical_reservations.connectical_reservations_expiry_idx USING btree (offer_id, service_date, hold_expires_at) WHERE (status = ANY (ARRAY['held'::text, 'pending_payment'::text]))
+index connectical_reservations.connectical_reservations_pkey USING btree (id)
+index connectical_reservations.connectical_reservations_provider_idx USING btree (provider_id, created_at DESC)
+index connectical_reservations.connectical_reservations_quote_id_key USING btree (quote_id)
+index connectical_reservations.connectical_reservations_traveler_idx USING btree (traveler_user_id, created_at DESC)
+index connectical_reservations.connectical_reservations_traveler_user_id_idempotency_key_key USING btree (traveler_user_id, idempotency_key)
+index connectical_settings.connectical_settings_pkey USING btree (key)
+index connectical_sweep_runs.connectical_sweep_runs_pkey USING btree (id)
+index connectical_sweep_runs.connectical_sweep_runs_started_idx USING btree (started_at DESC)
 policy connectical_inventory.connectical_inventory_read SELECT anon,authenticated
 policy connectical_offer_media.connectical_offer_media_read SELECT anon,authenticated
 policy connectical_offers.connectical_offers_read SELECT anon,authenticated
@@ -232,6 +275,9 @@ policy connectical_quotes.connectical_quotes_read SELECT authenticated
 policy connectical_refunds.connectical_refunds_read SELECT authenticated
 policy connectical_reservation_events.connectical_events_read SELECT authenticated
 policy connectical_reservations.connectical_reservations_read SELECT authenticated
+policy storage.objects.connectical_offer_media_delete DELETE RESTRICTIVE authenticated
+policy storage.objects.connectical_offer_media_insert INSERT RESTRICTIVE authenticated
+policy storage.objects.connectical_offer_media_update UPDATE RESTRICTIVE authenticated
 table connectical_admin_audit_log rls=true
 table connectical_campaigns rls=true
 table connectical_commission_references rls=true

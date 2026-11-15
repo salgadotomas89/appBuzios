@@ -5,6 +5,7 @@ import {
   type ReservationErrorCode,
   type ReservationStatus,
 } from '../i18n/portalCopy';
+import { toAuthFlowError } from '../auth/authErrors';
 import { SessionError } from '../auth/sessionManager';
 import { insforge, sessionManager } from './insforge';
 
@@ -258,6 +259,7 @@ export async function signInSharedAccount(email: string, password: string): Prom
   try {
     await sessionManager.signIn(email, password);
   } catch (error) {
+    if (error instanceof SessionError && error.status !== undefined) throw toAuthFlowError('sign_in', { message: error.message, statusCode: error.status });
     throw new Error(`No se pudo iniciar sesión: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -272,7 +274,7 @@ export async function signUpTravelerAccount(input: {
     password: input.password,
     name: input.name,
   });
-  if (error) throw new Error(`No se pudo crear la cuenta: ${error.message}`);
+  if (error) throw toAuthFlowError('sign_up', error);
   if (!data) throw new Error('InsForge no devolvio una respuesta de registro.');
   // Si el registro devolvió una sesión, el SDK la dejó activa sin pasar por el gestor: se descarta
   // para que la persistencia empiece en un inicio de sesión explícito.
@@ -287,13 +289,14 @@ export async function verifyTravelerEmail(email: string, code: string): Promise<
   try {
     await sessionManager.verifyEmail(email, code);
   } catch (error) {
+    if (error instanceof SessionError && error.status !== undefined) throw toAuthFlowError('verify', { message: error.message, statusCode: error.status });
     throw new Error(`No se pudo verificar el correo: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 export async function resendVerificationCode(email: string): Promise<void> {
   const { error } = await getClient().auth.resendVerificationEmail({ email });
-  if (error) throw new Error(`No se pudo reenviar el código: ${error.message}`);
+  if (error) throw toAuthFlowError('resend', error);
 }
 
 // Borra la sesión del dispositivo aunque el servidor no responda.

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, TextInput } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
+import { AuthFlowError } from '../src/auth/authErrors';
 import { ReservationPortal } from '../src/screens/ReservationPortal';
 import * as service from '../src/lib/reservationService';
 import type { SharedOffer, SharedReservation } from '../src/lib/reservationService';
@@ -675,4 +676,28 @@ it('asks for the emailed code after sign-up, validates it and signs the traveler
   await press(root, 'Verificar correo');
   expect(mocked.verifyTravelerEmail).toHaveBeenCalledWith('ana@example.com', '123456');
   expect(hasText(root, 'Mis reservas')).toBe(true);
+});
+
+it('shows sign-in and verification rejections in the chosen language', async () => {
+  mocked.getSharedRole.mockResolvedValue(null);
+  mocked.signInSharedAccount.mockRejectedValueOnce(new AuthFlowError('invalid_credentials', 'Invalid credentials'));
+  let root = await render('pt');
+  await type(root, 'E-mail', 'ana@example.com');
+  await type(root, 'Senha', 'errada1');
+  await press(root, 'Entrar');
+  expect(hasText(root, 'E-mail ou senha incorretos.')).toBe(true);
+
+  mocked.signUpTravelerAccount.mockResolvedValue(undefined);
+  mocked.verifyTravelerEmail.mockRejectedValueOnce(new AuthFlowError('invalid_code', 'Invalid or expired code'));
+  mocked.verifyTravelerEmail.mockRejectedValueOnce(new AuthFlowError('unknown', 'Email service unavailable'));
+  root = await render();
+  await type(root, 'Nombre', 'Ana');
+  await type(root, 'Correo', 'ana@example.com');
+  await type(root, 'Contraseña', 'secret123');
+  await press(root, 'Crear cuenta de turista');
+  await type(root, 'Código de verificación (6 dígitos)', '123456');
+  await press(root, 'Verificar correo');
+  expect(hasText(root, 'El código no es válido o ya venció.')).toBe(true);
+  await press(root, 'Verificar correo');
+  expect(hasText(root, 'No se pudo completar el acceso (Email service unavailable)')).toBe(true);
 });

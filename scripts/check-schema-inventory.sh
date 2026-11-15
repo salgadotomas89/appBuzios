@@ -26,6 +26,7 @@ create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant usage on schema auth to authenticated;
 grant execute on function auth.uid() to anon, authenticated;
+\i /sb/harness/insforge_storage.sql
 SQL
 for file in $(docker exec "$container" sh -c 'ls /sb/migrations/*.sql' | sort); do
   docker exec "$container" psql -q -v ON_ERROR_STOP=1 -U postgres -f "$file" >/dev/null 2>&1 || {

@@ -20,6 +20,12 @@ select line from (
   select 'policy ' || tablename || '.' || policyname || ' ' || cmd || ' ' || array_to_string(roles, ',')
   from pg_policies where schemaname = 'public' and tablename like 'connectical\_%'
   union all
+  select 'policy storage.' || tablename || '.' || policyname || ' ' || cmd || ' ' || permissive || ' ' || array_to_string(roles, ',')
+  from pg_policies where schemaname = 'storage' and policyname like 'connectical\_%'
+  union all
+  select 'index ' || tablename || '.' || indexname || ' ' || regexp_replace(indexdef, '^.* USING ', 'USING ')
+  from pg_indexes where schemaname = 'public' and tablename like 'connectical\_%'
+  union all
   select 'trigger ' || c.relname || '.' || t.tgname
   from pg_trigger t join pg_class c on c.oid = t.tgrelid
   where t.tgname like 'connectical\_%' and not t.tgisinternal
