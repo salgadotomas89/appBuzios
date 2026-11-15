@@ -30,3 +30,19 @@ Merge a `main`: `793512e` (CI de `main` run 43656694925 en verde).
   corregidas (`667f0bb`, `89e2d96`) y Jest corre ahora también con `TZ=Asia/Tokyo`.
 - Quince migraciones: base vacía, actualización desde etapas 1 y 4 y doble aplicación correctas.
 - Jest 195/195 · PostgreSQL 50.
+
+## Checkpoint final (21:45, unos 84 min de reloj desde el inicio a las 20:21)
+
+Merges a `main`: `793512e` y `674e247` (CI de `main` run 43659640118 en verde, incluidos Jest en dos zonas
+horarias, integración PostgreSQL, ensayo de actualización desde las etapas 1, 4 y 11 e inventario de esquema).
+
+- Después del checkpoint 1: favoritos y filtros (`32a6cb7`), inglés con aviso de revisión pendiente (`a72d584`),
+  firma de Android y script de entorno (`a223940`), inventario de esquema (`08a14d0`), documentación.
+- Revisión independiente del diff de la jornada: dos hallazgos medios y cinco menores, corregidos en `d0aba22`:
+  cerrar sesión durante una renovación en curso resucitaba la sesión (ahora con época y espera de operaciones
+  pendientes, tres pruebas de carrera que fallan con el código anterior); la URL de las fotos la elegía el cliente
+  (ahora la construye el servidor desde un bucket https configurado); una cotización anterior a una suspensión
+  permitía retener; filtro de personas en ofertas por grupo; retirada de fotos; renovación de sesión al leer fotos.
+- Resultados: Jest 210/210 (inicio 161), PostgreSQL 50 verificaciones (inicio 46), quince migraciones.
+- Nada remoto: ni InsForge, ni OAuth, ni pagos. iOS compila con RNKeychain sin ejecutarse; Android sin JDK.
+- No se trabajaron 7 horas: unos 84 minutos de reloj.
