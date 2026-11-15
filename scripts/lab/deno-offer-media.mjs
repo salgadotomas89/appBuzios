@@ -13,12 +13,17 @@ function assertEquals(actual, expected, label) {
   if (a !== e) throw new Error(`${label}: expected ${e}, got ${a}`);
 }
 
+// PNG con estructura válida (IHDR, IDAT de `extra` bytes, IEND; CRC sin calcular: la función no los comprueba).
 function png(width, height, extra = 0) {
-  const bytes = new Uint8Array(33 + extra);
+  const bytes = new Uint8Array(33 + 12 + extra + 12);
+  const view = new DataView(bytes.buffer);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
-  new DataView(bytes.buffer).setUint32(16, width);
-  new DataView(bytes.buffer).setUint32(20, height);
-  for (let i = 33; i < bytes.length; i += 1) bytes[i] = i % 251;
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  view.setUint32(33, extra);
+  bytes.set([0x49, 0x44, 0x41, 0x54], 37);
+  for (let i = 0; i < extra; i += 1) bytes[41 + i] = i % 251;
+  bytes.set([0x49, 0x45, 0x4e, 0x44], 33 + 12 + extra + 4);
   return bytes;
 }
 
