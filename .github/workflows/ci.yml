@@ -52,3 +52,5 @@ jobs:
       - run: npm run test:pilot-e2e
       # Como buziosflow: PostgreSQL 15, auth.users de InsForge y migraciones como project_admin sin superusuario.
       - run: npm run test:insforge-compat
+      # migrations/ (formato del CLI de InsForge) debe ser una copia exacta de supabase/migrations.
+      - run: npm run check:insforge-migrations

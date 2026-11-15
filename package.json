@@ -12,7 +12,8 @@
     "test:migration-upgrade": "sh scripts/test-migration-upgrade.sh",
     "test:schema-inventory": "sh scripts/check-schema-inventory.sh",
     "test:pilot-e2e": "sh scripts/test-pilot-e2e.sh",
-    "test:insforge-compat": "sh scripts/test-insforge-compat.sh"
+    "test:insforge-compat": "sh scripts/test-insforge-compat.sh",
+    "check:insforge-migrations": "sh scripts/sync-insforge-migrations.sh --check"
   },
   "dependencies": {
     "@insforge/sdk": "1.5.2",
