@@ -156,3 +156,82 @@ it('rejects failed or incomplete sign-ins without storing anything', async () =>
   await expect(partial.signIn('a@b.c', 'secret123')).rejects.toMatchObject({ code: 'sign_in_failed' });
   expect(store.save).not.toHaveBeenCalled();
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it('does not bring the session back when signing out during an in-flight refresh', async () => {
+  let clock = NOW;
+  const store = memoryStore();
+  const pending = deferred<{ data: { accessToken: string; refreshToken: string; user: { id: string } }; error: null }>();
+  const auth = fakeAuth({ refreshSession: jest.fn(() => pending.promise) });
+  const manager = createSessionManager({ auth, store, now: () => clock });
+  await manager.signIn('a@b.c', 'secret123');
+  clock = NOW + 14.5 * 60_000;
+  const refresh = manager.ensureFresh().catch(error => error);
+  const signOut = manager.signOut();
+  // La renovación lenta termina después de pedir el cierre de sesión.
+  pending.resolve({ data: { accessToken: jwt(inMinutes(30)), refreshToken: 'resurrected', user: { id: 'u1' } }, error: null });
+  await signOut;
+  await refresh;
+  expect(manager.getState()).toEqual({ status: 'signed_out', reason: 'signed_out' });
+  expect(store.value()).toBeNull();
+  // El token que el SDK volvió a poner se quita con un signOut posterior a la respuesta tardía.
+  expect(auth.signOut.mock.calls.length).toBeGreaterThanOrEqual(1);
+  await manager.ensureFresh();
+  expect(auth.refreshSession).toHaveBeenCalledTimes(1);
+});
+
+it('signing in as someone else waits for the previous restore and keeps the new user', async () => {
+  const store = memoryStore({ userId: 'old-user', refreshToken: 'old-refresh' });
+  const pending = deferred<{ data: { accessToken: string; refreshToken: string; user: { id: string } }; error: null }>();
+  const auth = fakeAuth({
+    refreshSession: jest.fn(() => pending.promise),
+    signInWithPassword: jest.fn(async () => ({
+      data: { accessToken: jwt(inMinutes(15)), refreshToken: 'new-refresh', user: { id: 'new-user' } },
+      error: null,
+    })),
+  });
+  const manager = createSessionManager({ auth, store, now: () => NOW });
+  const restore = manager.restore();
+  const signIn = manager.signIn('b@c.d', 'secret123');
+  pending.resolve({ data: { accessToken: jwt(inMinutes(15)), refreshToken: 'old-rotated', user: { id: 'old-user' } }, error: null });
+  await expect(restore).resolves.toBe('none');
+  await expect(signIn).resolves.toEqual({ status: 'signed_in', userId: 'new-user', persisted: true });
+  expect(store.value()).toEqual({ userId: 'new-user', refreshToken: 'new-refresh' });
+  // La respuesta de la restauración llegó antes de que empezara el nuevo inicio de sesión.
+  expect(auth.signInWithPassword).toHaveBeenCalledTimes(1);
+});
+
+it('marks the device as signed out when the keychain refuses to clear, and warns if even that fails', async () => {
+  const store = memoryStore();
+  const auth = fakeAuth();
+  const manager = createSessionManager({ auth, store, now: () => NOW });
+  await manager.signIn('a@b.c', 'secret123');
+  store.clear = jest.fn(async () => {
+    throw new Error('keychain locked');
+  });
+  await manager.signOut();
+  expect(store.value()).toEqual({ userId: 'signed-out', refreshToken: 'signed-out' });
+  // Al reabrir, la marca no se restaura como sesión.
+  const reopened = createSessionManager({ auth, store, now: () => NOW });
+  await expect(reopened.restore()).resolves.toBe('none');
+  expect(auth.refreshSession).not.toHaveBeenCalled();
+
+  const broken = memoryStore();
+  const third = createSessionManager({ auth, store: broken, now: () => NOW });
+  await third.signIn('a@b.c', 'secret123');
+  broken.clear = jest.fn(async () => {
+    throw new Error('locked');
+  });
+  broken.save = jest.fn(async () => {
+    throw new Error('locked');
+  });
+  await expect(third.signOut()).rejects.toMatchObject({ code: 'sign_out_incomplete' });
+  expect(third.getState()).toEqual({ status: 'signed_out', reason: 'signed_out' });
+});

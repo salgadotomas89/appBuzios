@@ -100,6 +100,11 @@ describe('filterOffers', () => {
     expect(ids(filterOffers([room, boat], { ...none, date: '2099-01-01' }))).toEqual(['shared:room', 'shared:boat']);
   });
 
+  it('does not filter group offers by people, since their quantity counts groups', () => {
+    const privateBoat = sharedOfferToOffer({ ...shared, id: 'private', price_mode: 'group', min_quantity: 1, max_quantity: 1 }, null);
+    expect(ids(filterOffers([privateBoat], { ...none, people: 6 }))).toEqual(['shared:private']);
+  });
+
   it('respects per-booking limits for people but not for rooms', () => {
     expect(ids(filterOffers([room, boat], { ...none, people: 1 }))).toEqual(['shared:room']);
     expect(ids(filterOffers([room, boat], { ...none, people: 7 }))).toEqual(['shared:room']);

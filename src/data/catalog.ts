@@ -132,14 +132,15 @@ export type CatalogFilter = { date: string | null; people: number | null; favori
 // Filtros del explorador. Fecha: una oferta compartida necesita cupo libre publicado ese día (si su
 // inventario no se pudo leer, no se descarta: el portal lo confirma). Las de ejemplo no tienen
 // calendario y no se filtran por fecha. Personas: se respetan los límites por reserva cuando existen;
-// en alojamientos la cantidad son habitaciones, así que el número de personas no las descarta.
+// en alojamientos la cantidad son habitaciones y en ofertas por grupo son grupos, así que el número de
+// personas no las descarta.
 export function filterOffers(offers: Offer[], filter: CatalogFilter): Offer[] {
   return offers.filter(offer => {
     if (filter.favoritesOnly && !filter.favorites.has(offer.id)) return false;
     if (filter.date && offer.source === 'shared' && offer.freeUnitsByDate) {
       if ((offer.freeUnitsByDate[filter.date] ?? 0) < 1) return false;
     }
-    if (filter.people && offer.priceMode !== 'night' && offer.quantityLimits) {
+    if (filter.people && (offer.priceMode === 'person' || offer.priceMode === 'ticket') && offer.quantityLimits) {
       const { min, max } = offer.quantityLimits;
       if (filter.people < min || (max !== null && filter.people > max)) return false;
     }

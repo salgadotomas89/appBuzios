@@ -30,7 +30,10 @@ export type SessionState =
   | { status: 'signed_in'; userId: string; persisted: boolean };
 
 export class SessionError extends Error {
-  constructor(readonly code: 'sign_in_failed' | 'session_expired' | 'session_unavailable' | 'not_signed_in', message: string) {
+  constructor(
+    readonly code: 'sign_in_failed' | 'session_expired' | 'session_unavailable' | 'not_signed_in' | 'sign_out_incomplete',
+    message: string,
+  ) {
     super(message);
     this.name = 'SessionError';
   }
@@ -76,6 +79,10 @@ function isRejection(error: NonNullable<SdkError>): boolean {
   return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
+// Si el almacén no deja borrar al cerrar sesión, se sobrescribe con esta marca para que el siguiente
+// arranque no restaure la sesión anterior.
+const SIGNED_OUT_MARKER = 'signed-out';
+
 export function createSessionManager(deps: { auth: MobileAuthApi; store: SessionStore; now?: () => number }) {
   const now = deps.now ?? Date.now;
   let state: SessionState = { status: 'signed_out', reason: 'none' };
@@ -83,6 +90,9 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
   let expiresAt: number | null = null;
   let refreshing: Promise<void> | null = null;
   let restoring: Promise<RestoreResult> | null = null;
+  // Cambia en cada inicio o cierre de sesión. Una respuesta que llega con otra época pertenece a una
+  // sesión anterior y se descarta, aunque el SDK ya haya puesto su token en el cliente HTTP.
+  let epoch = 0;
 
   async function persist(userId: string, token: string): Promise<boolean> {
     try {
@@ -93,19 +103,40 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     }
   }
 
-  async function forget(reason: 'expired' | 'signed_out') {
-    if (reason === 'expired') {
-      // El SDK borra su token de acceso en signOut aunque la red falle.
-      await deps.auth.signOut().catch(() => undefined);
+  // Devuelve false si la sesión pudo quedar guardada en el dispositivo.
+  async function wipeStore(): Promise<boolean> {
+    try {
+      await deps.store.clear();
+      return true;
+    } catch {
+      try {
+        await deps.store.save({ userId: SIGNED_OUT_MARKER, refreshToken: SIGNED_OUT_MARKER });
+        return true;
+      } catch {
+        return false;
+      }
     }
+  }
+
+  async function forget(reason: 'expired' | 'signed_out'): Promise<boolean> {
+    epoch += 1;
     state = { status: 'signed_out', reason };
     refreshToken = null;
     expiresAt = null;
-    try {
-      await deps.store.clear();
-    } catch {
-      // El token en memoria ya se descartó; el siguiente arranque volverá a intentar borrarlo.
-    }
+    // El SDK borra su token de acceso en signOut aunque la red falle.
+    await deps.auth.signOut().catch(() => undefined);
+    return wipeStore();
+  }
+
+  // Una respuesta de una época anterior: el SDK ya puso ese token en el cliente HTTP, así que se quita.
+  async function discardStale(): Promise<void> {
+    if (state.status !== 'signed_in') await deps.auth.signOut().catch(() => undefined);
+  }
+
+  // Espera a que terminen renovaciones o restauraciones en curso antes de cambiar de sesión, para que
+  // ninguna respuesta tardía de la sesión anterior pise a la nueva.
+  async function settlePending(): Promise<void> {
+    await Promise.allSettled([refreshing, restoring].filter((pending): pending is Promise<never> => pending !== null));
   }
 
   // Aplica una respuesta de inicio de sesión o renovación; devuelve el usuario o null si viene incompleta.
@@ -123,8 +154,13 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     if (!refreshToken || state.status !== 'signed_in') {
       throw new SessionError('not_signed_in', 'No hay una sesión para renovar.');
     }
+    const startedIn = epoch;
     const userId = state.userId;
     const { data, error } = await deps.auth.refreshSession({ refreshToken });
+    if (startedIn !== epoch) {
+      await discardStale();
+      throw new SessionError('not_signed_in', 'La sesión cambió durante la renovación.');
+    }
     if (error) {
       if (isRejection(error)) {
         await forget('expired');
@@ -144,7 +180,15 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     },
 
     async signIn(email: string, password: string): Promise<SessionState> {
+      epoch += 1;
+      state = { status: 'signed_out', reason: 'none' };
+      await settlePending();
+      const startedIn = epoch;
       const { data, error } = await deps.auth.signInWithPassword({ email, password });
+      if (startedIn !== epoch) {
+        await discardStale();
+        throw new SessionError('sign_in_failed', 'La sesión cambió durante el inicio de sesión.');
+      }
       if (error) throw new SessionError('sign_in_failed', error.message);
       refreshToken = null;
       if (!(await apply(data))) throw new SessionError('sign_in_failed', 'Respuesta de inicio de sesión incompleta.');
@@ -155,14 +199,22 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     restore(): Promise<RestoreResult> {
       if (state.status === 'signed_in') return Promise.resolve('restored');
       restoring ??= (async (): Promise<RestoreResult> => {
+        const startedIn = epoch;
         let stored;
         try {
           stored = await deps.store.load();
         } catch {
           return 'unavailable';
         }
-        if (!stored) return 'none';
+        if (!stored || stored.refreshToken === SIGNED_OUT_MARKER) {
+          if (stored) await deps.store.clear().catch(() => undefined);
+          return 'none';
+        }
         const { data, error } = await deps.auth.refreshSession({ refreshToken: stored.refreshToken });
+        if (startedIn !== epoch) {
+          await discardStale();
+          return 'none';
+        }
         if (error) {
           if (isRejection(error)) {
             await forget('expired');
@@ -192,22 +244,15 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
       return refreshing;
     },
 
-    // Tras un 401 del servidor: renovar una vez (compartida) para reintentar la petición.
-    async refreshAfterUnauthorized(): Promise<void> {
-      refreshing ??= refreshNow().finally(() => {
-        refreshing = null;
-      });
-      return refreshing;
-    },
-
-    // El token local se borra aunque el servidor no responda.
+    // El token local se borra aunque el servidor no responda. Si el dispositivo no dejó borrar ni
+    // marcar la sesión, avisa: al reabrir la app podría seguir iniciada.
     async signOut(): Promise<void> {
-      try {
-        await deps.auth.signOut();
-      } catch {
-        // Cierre remoto best-effort.
+      epoch += 1;
+      state = { status: 'signed_out', reason: 'signed_out' };
+      await settlePending();
+      if (!(await forget('signed_out'))) {
+        throw new SessionError('sign_out_incomplete', 'No se pudo borrar la sesión del dispositivo.');
       }
-      await forget('signed_out');
     },
   };
 }

@@ -2,10 +2,11 @@
 # Ensayo de actualización: aplica las primeras N migraciones, crea reservas con los RPC de esa
 # etapa, aplica el resto y comprueba que los datos siguen intactos, que el inventario concilia y
 # que supabase/checks/verify_migrations.sql pasa. Uso: sh scripts/test-migration-upgrade.sh [N...]
-# Sin argumentos ensaya desde N=1 (solo el esquema base) y N=4 (hasta el registro de reembolsos).
+# Sin argumentos ensaya desde N=1 (solo el esquema base), N=4 (hasta el registro de reembolsos) y N=11
+# (el estado de main antes de las migraciones del 15-11).
 set -eu
 
-stages="${*:-1 4}"
+stages="${*:-1 4 11}"
 supabase_dir="$PWD/supabase"
 for stage in $stages; do
   container="connectical-upgrade-it-$$-$stage"

@@ -84,6 +84,17 @@ resto se procesa y la ejecución queda como `partial`.
 - Comprobación: en el portal, como admin, la sección "Barrido de retenciones vencidas" debe mostrar una última
   ejecución correcta reciente y 0 retenciones vencidas en espera.
 
+## 5b. Fotos (cuando el bucket esté confirmado)
+
+Las fotos no se pueden registrar hasta configurar la URL pública del bucket (solo `https`). La base de datos construye
+cada URL como base + clave, así que ningún cliente puede apuntar una foto a otro servidor:
+
+```sql
+insert into public.connectical_settings (key, value)
+values ('media_public_base_url', '"https://<host-del-bucket>/<ruta>/"')
+on conflict (key) do update set value = excluded.value, updated_at = now();
+```
+
 ## 6. Activar el catálogo compartido en un build de ensayo
 
 Solo después de los pasos 1–4: cambiar `SHARED_CATALOG_ENABLED` a `true` en `src/config/featureFlags.ts` en una

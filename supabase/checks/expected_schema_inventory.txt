@@ -171,7 +171,7 @@ column connectical_sweep_runs.id bigint null=NO
 column connectical_sweep_runs.started_at timestamp with time zone null=NO
 column connectical_sweep_runs.status text null=NO
 function connectical_active_campaigns() definer=true md5=0abf11159e46fdb22afcf40862c646ff
-function connectical_add_offer_media(p_offer_id uuid, p_storage_key text, p_url text, p_content_type text, p_byte_size integer, p_width integer, p_height integer, p_alt_text text) definer=true md5=5cb5b9d6a4962034880bc2b3909c4b05
+function connectical_add_offer_media(p_offer_id uuid, p_storage_key text, p_content_type text, p_byte_size integer, p_width integer, p_height integer, p_alt_text text) definer=true md5=851a27e0cf7c46077a5bcb22d150bdc0
 function connectical_adjust_stay_inventory(p_offer_id uuid, p_service_date date, p_nights integer, p_held_delta integer, p_sold_delta integer) definer=true md5=034afe718fcfda2f9621b6f6f0b358e3
 function connectical_admin_kpis(p_from date, p_to date) definer=true md5=2f61119ca3e4bc0ef39b912595edd49f
 function connectical_admin_list_audit_log(p_limit integer) definer=true md5=b9dd9c85be11e9f32b93411b16601c51
@@ -197,7 +197,7 @@ function connectical_can_manage_offer(p_offer_id uuid) definer=true md5=855e389e
 function connectical_can_read_reservation(p_reservation_id uuid) definer=true md5=9226af62acbcf28ff72a7b050fdc03a1
 function connectical_cancel_reservation(p_reservation_id uuid, p_reason text) definer=true md5=1e876b456145d8196cd847076de11de9
 function connectical_create_quote(p_offer_id uuid, p_service_date date, p_quantity integer, p_nights integer, p_service_fee_rate_bps integer) definer=true md5=5479affd847a3248446ab1998561f2bb
-function connectical_create_reservation_hold(p_quote_id uuid, p_idempotency_key uuid) definer=true md5=79ef6812114cb6c42c9d952403ff347a
+function connectical_create_reservation_hold(p_quote_id uuid, p_idempotency_key uuid) definer=true md5=10f9f99e57e4940d024494542a467d76
 function connectical_create_traveler_profile() definer=true md5=7618dbf663ce652a2c995929a9c76ae8
 function connectical_expire_holds() definer=true md5=6d0d6f87ec295badee5e054a74373773
 function connectical_expire_offer_holds(p_offer_id uuid) definer=true md5=4ead1325995c9522ecf4122e06d0d972

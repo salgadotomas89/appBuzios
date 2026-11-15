@@ -282,6 +282,8 @@ const es = {
     invalid_media: 'La foto no es válida: JPEG, PNG o WebP de hasta 5 MB, entre 600 y 6000 px por lado y con texto alternativo.',
     media_limit_reached: 'La oferta ya tiene el máximo de 10 fotos.',
     media_not_found: 'No encontramos la foto.',
+    sign_out_incomplete: 'Cerraste sesión, pero el dispositivo no permitió borrarla: al reabrir la app podría seguir iniciada. Vuelve a cerrar sesión.',
+    media_storage_not_configured: 'El almacenamiento de fotos todavía no está configurado en este entorno.',
     permission_denied: 'No tienes permiso para esta operación.',
   },
 };
@@ -532,6 +534,8 @@ const pt: PortalCopy = {
     invalid_media: 'A foto não é válida: JPEG, PNG ou WebP de até 5 MB, entre 600 e 6000 px por lado e com texto alternativo.',
     media_limit_reached: 'A oferta já tem o máximo de 10 fotos.',
     media_not_found: 'Não encontramos a foto.',
+    sign_out_incomplete: 'Você saiu, mas o dispositivo não permitiu apagar a sessão: ao reabrir o app ela pode continuar ativa. Saia novamente.',
+    media_storage_not_configured: 'O armazenamento de fotos ainda não está configurado neste ambiente.',
     permission_denied: 'Você não tem permissão para esta operação.',
   },
 };
@@ -788,6 +792,8 @@ const en: PortalCopy = {
     invalid_media: 'Invalid photo: JPEG, PNG or WebP up to 5 MB, 600 to 6000 px per side, with alt text.',
     media_limit_reached: 'The offer already has the maximum of 10 photos.',
     media_not_found: 'Photo not found.',
+    sign_out_incomplete: 'You signed out, but the device did not allow the session to be erased: it may still be active after reopening the app. Sign out again.',
+    media_storage_not_configured: 'Photo storage is not configured in this environment yet.',
     permission_denied: 'You do not have permission for this operation.',
   },
 };
