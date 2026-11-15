@@ -235,3 +235,21 @@ it('marks the device as signed out when the keychain refuses to clear, and warns
   await expect(third.signOut()).rejects.toMatchObject({ code: 'sign_out_incomplete' });
   expect(third.getState()).toEqual({ status: 'signed_out', reason: 'signed_out' });
 });
+
+it('starts and stores a session from an email verification code', async () => {
+  const store = memoryStore();
+  const auth = fakeAuth();
+  auth.verifyEmail = jest.fn(async (_request: { email: string; otp: string }) => ({
+    data: { accessToken: jwt(inMinutes(15)), refreshToken: 'verified-refresh', user: { id: 'u-new' } },
+    error: null,
+  }));
+  const manager = createSessionManager({ auth, store, now: () => NOW });
+  await expect(manager.verifyEmail('new@b.c', '123456')).resolves.toEqual({ status: 'signed_in', userId: 'u-new', persisted: true });
+  expect(auth.verifyEmail).toHaveBeenCalledWith({ email: 'new@b.c', otp: '123456' });
+  expect(store.value()).toEqual({ userId: 'u-new', refreshToken: 'verified-refresh' });
+
+  auth.verifyEmail = jest.fn(async (_request: { email: string; otp: string }) => ({ data: null, error: { message: 'Invalid code', statusCode: 400 } }));
+  const other = createSessionManager({ auth, store: memoryStore(), now: () => NOW });
+  await expect(other.verifyEmail('new@b.c', '000000')).rejects.toMatchObject({ code: 'sign_in_failed' });
+  expect(other.getState().status).toBe('signed_out');
+});

@@ -20,6 +20,8 @@ export type SessionPayload = {
 };
 export interface MobileAuthApi {
   signInWithPassword(request: { email: string; password: string }): Promise<{ data: SessionPayload | null; error: SdkError }>;
+  // Verificación de correo por código (tenant con verifyEmailMethod = code); en el flujo móvil devuelve sesión.
+  verifyEmail(request: { email: string; otp: string }): Promise<{ data: SessionPayload | null; error: SdkError }>;
   refreshSession(options: { refreshToken: string }): Promise<{ data: SessionPayload | null; error: SdkError }>;
   signOut(): Promise<{ error: SdkError }>;
 }
@@ -174,25 +176,38 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
     }
   }
 
+  // Inicio de sesión por contraseña o por código: invalida lo anterior, espera lo pendiente y descarta
+  // la respuesta si otra operación cambió la sesión mientras tanto.
+  async function startSession(
+    request: () => Promise<{ data: SessionPayload | null; error: SdkError }>,
+  ): Promise<SessionState> {
+    epoch += 1;
+    state = { status: 'signed_out', reason: 'none' };
+    await settlePending();
+    const startedIn = epoch;
+    const { data, error } = await request();
+    if (startedIn !== epoch) {
+      await discardStale();
+      throw new SessionError('sign_in_failed', 'La sesión cambió durante el inicio de sesión.');
+    }
+    if (error) throw new SessionError('sign_in_failed', error.message);
+    refreshToken = null;
+    if (!(await apply(data))) throw new SessionError('sign_in_failed', 'Respuesta de inicio de sesión incompleta.');
+    return state;
+  }
+
   return {
     getState(): SessionState {
       return state;
     },
 
-    async signIn(email: string, password: string): Promise<SessionState> {
-      epoch += 1;
-      state = { status: 'signed_out', reason: 'none' };
-      await settlePending();
-      const startedIn = epoch;
-      const { data, error } = await deps.auth.signInWithPassword({ email, password });
-      if (startedIn !== epoch) {
-        await discardStale();
-        throw new SessionError('sign_in_failed', 'La sesión cambió durante el inicio de sesión.');
-      }
-      if (error) throw new SessionError('sign_in_failed', error.message);
-      refreshToken = null;
-      if (!(await apply(data))) throw new SessionError('sign_in_failed', 'Respuesta de inicio de sesión incompleta.');
-      return state;
+    signIn(email: string, password: string): Promise<SessionState> {
+      return startSession(() => deps.auth.signInWithPassword({ email, password }));
+    },
+
+    // Tras registrarse, el código del correo inicia la sesión igual que una contraseña.
+    verifyEmail(email: string, code: string): Promise<SessionState> {
+      return startSession(() => deps.auth.verifyEmail({ email, otp: code }));
     },
 
     // Una sola restauración aunque varias pantallas la pidan a la vez.

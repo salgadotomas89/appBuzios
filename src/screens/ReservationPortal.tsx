@@ -27,6 +27,8 @@ import {
   upsertProviderOffer,
   publishProviderInventory,
   restoreSharedSession,
+  verifyTravelerEmail,
+  resendVerificationCode,
   isSharedSessionPersisted,
   publishProviderInventoryRange,
   setProviderOfferDetails,
@@ -121,6 +123,9 @@ export function ReservationPortal({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  // Correo pendiente de verificar tras registrarse; muestra el campo del código.
+  const [pendingVerification, setPendingVerification] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState('');
   const [role, setRole] = useState<SharedRole | null>(null);
   const [offers, setOffers] = useState<SharedOffer[]>([]);
   const [providers, setProviders] = useState<SharedProvider[]>([]);
@@ -273,7 +278,32 @@ export function ReservationPortal({
     run(async () => {
       await signUpTravelerAccount({ email: email.trim(), password, name: name.trim() });
       setPassword('');
+      setPendingVerification(email.trim());
       return words.signUpDone;
+    });
+  }
+
+  function verify() {
+    if (!pendingVerification) return;
+    run(async () => {
+      const code = verificationCode.trim();
+      if (!/^\d{6}$/.test(code)) throw new InputValidationError(words.codeFormat);
+      await verifyTravelerEmail(pendingVerification, code);
+      const currentRole = await getSharedRole();
+      setRole(currentRole);
+      if (!currentRole) throw new InputValidationError(words.noProfile);
+      setPendingVerification(null);
+      setVerificationCode('');
+      await loadForRole(currentRole);
+      if (!isSharedSessionPersisted()) return words.sessionNotPersisted;
+    });
+  }
+
+  function resend() {
+    if (!pendingVerification) return;
+    run(async () => {
+      await resendVerificationCode(pendingVerification);
+      return words.codeResent;
     });
   }
 
@@ -524,6 +554,14 @@ export function ReservationPortal({
           <ActionButton title={words.signIn} onPress={signIn} disabled={busy || !email.trim() || !password} />
           <ActionButton title={words.signUp} onPress={signUp} disabled={busy || !name.trim() || !email.trim() || password.length < 8} secondary />
           {password && password.length < 8 ? <Text style={styles.helper}>{words.passwordHint}</Text> : null}
+          {pendingVerification ? (
+            <View style={styles.quote}>
+              <Text style={styles.helper}>{pendingVerification}</Text>
+              <TextInput value={verificationCode} onChangeText={setVerificationCode} keyboardType="number-pad" maxLength={6} autoComplete="one-time-code" placeholder={words.verificationCode} accessibilityLabel={words.verificationCode} placeholderTextColor={colors.muted} style={styles.input} />
+              <ActionButton title={words.verifyEmail} onPress={verify} disabled={busy} />
+              <ActionButton title={words.resendCode} onPress={resend} disabled={busy} secondary />
+            </View>
+          ) : null}
           <Text style={styles.helper}>{words.rolesHint}</Text>
         </View>
       ) : (
