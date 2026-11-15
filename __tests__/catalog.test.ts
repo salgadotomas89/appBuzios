@@ -29,7 +29,7 @@ it('maps a shared offer without inventing details', () => {
   const offer = sharedOfferToOffer(shared, [inventory('o-1', 3, 1, 1), inventory('other', 9)]);
   expect(offer).toMatchObject({
     id: 'shared:o-1', source: 'shared', category: 'barcos', icon: 'boat', price: 125.5,
-    priceMode: 'person', availability: 'available', title: { es: 'Escuna real', pt: 'Escuna real' },
+    priceMode: 'person', availability: 'available', title: { es: 'Escuna real', pt: 'Escuna real', en: 'Escuna real' },
   });
   expect(offer.originalPrice).toBeUndefined();
   expect(offer.includes.es).toEqual([]);
@@ -59,7 +59,8 @@ it('uses the provider details when present and only lists what is still missing'
     ...shared, description: ' Escuna com parada para mergulho. ', location: 'Praia dos Ossos',
     meeting_point: 'Cais', schedule: 'Saída 10:00', min_quantity: 2, max_quantity: 12,
   }, null);
-  expect(offer.description).toEqual({ es: 'Escuna com parada para mergulho.', pt: 'Escuna com parada para mergulho.' });
+  // El proveedor escribe en un idioma: se muestra igual en los tres.
+  expect(offer.description).toEqual({ es: 'Escuna com parada para mergulho.', pt: 'Escuna com parada para mergulho.', en: 'Escuna com parada para mergulho.' });
   expect(offer.location.pt).toBe('Praia dos Ossos');
   expect(offer.meetingPoint?.es).toBe('Cais');
   expect(offer.schedule?.es).toBe('Saída 10:00');

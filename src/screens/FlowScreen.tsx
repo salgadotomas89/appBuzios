@@ -140,6 +140,7 @@ const copy = {
     unitRooms: 'habitaciones',
     stayDate: 'Fecha de entrada',
     commissionLabel: 'Comisión de proveedor ref.',
+    translationNotice: '',
     days: ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'],
     months: [
       'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -245,13 +246,128 @@ const copy = {
     unitRooms: 'quartos',
     stayDate: 'Data de entrada',
     commissionLabel: 'Comissão do parceiro ref.',
+    translationNotice: '',
     days: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'],
     months: [
       'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
       'jul', 'ago', 'set', 'out', 'nov', 'dez',
     ],
   },
+  en: {
+    title: 'Your trip to Búzios',
+    location: 'Búzios, Brazil · plan before you arrive',
+    offerSummary: 'experiences to discover',
+    savings: 'Up to',
+    categories: 'Choose your plan',
+    featured: 'Ideas for your trip',
+    explore: 'Explore offers',
+    all: 'All',
+    search: 'Search by name or place',
+    results: 'sample offers',
+    sharedResults: 'offers',
+    noResults: 'No offers match that search.',
+    noCategory: 'No offers in this category yet.',
+    example: 'SAMPLE · NOT A REAL BOOKING',
+    sharedExample: 'PUBLISHED OFFER · BOOKED IN THE PORTAL WITH SIMULATED PAYMENT',
+    sharedAvailable: 'Availability published by the provider',
+    sharedUnavailable: 'No availability published',
+    sharedUnknown: 'Availability to be confirmed in the portal',
+    bookInPortal: 'Book in the portal',
+    catalogFallback: 'Published offers could not be loaded; showing the sample catalog only.',
+    catalogLoading: 'Loading published offers…',
+    available: 'Available in demo',
+    limited: 'Limited spots · demo',
+    unavailable: 'Not available',
+    incomplete: 'Incomplete details',
+    about: 'About this experience',
+    includes: "What's included",
+    conditions: 'Cancellation and terms',
+    meeting: 'Meeting point',
+    schedule: 'Schedule',
+    duration: 'Duration',
+    route: 'Route',
+    ticket: 'Ticket type',
+    date: 'Date',
+    quantity: 'Quantity',
+    rooms: 'Rooms',
+    nights: 'Nights',
+    addTrip: 'Add to My trip',
+    favorites: 'Favorites',
+    addFavorite: 'Save to favorites',
+    removeFavorite: 'Remove from favorites',
+    anyDate: 'Any date',
+    chooseDate: 'Choose date',
+    anyPeople: 'Any number',
+    choosePeople: 'People',
+    filterHint: 'The date filter only applies to offers with published availability; samples have no calendar.',
+    pastDate: 'This date has already passed in Búzios. Choose another one to confirm.',
+    operations: 'Shared reservations · operations access',
+    previousDay: 'Previous day',
+    nextDay: 'Next day',
+    decreaseQuantity: 'Decrease quantity',
+    increaseQuantity: 'Increase quantity',
+    decreaseNights: 'Remove one night',
+    increaseNights: 'Add one night',
+    missing: 'Information missing before booking',
+    trip: 'My trip',
+    emptyTrip: 'Your trip starts here',
+    emptyTripNote: 'Explore sample offers and add them to your itinerary.',
+    subtotal: 'Subtotal',
+    serviceFee: 'Service fee · demo',
+    pricingLab: 'Internal pricing rehearsal',
+    baseCase: 'Base',
+    internalOnly: 'Internal only · not charged to the traveler',
+    grossIncome: 'Gross income',
+    gatewayCost: 'Gateway cost · assumption',
+    conversionCost: 'Conversion cost · assumption',
+    operatingReserve: 'Operating reserve · assumption',
+    contributionMargin: 'Contribution margin',
+    commissionRates: 'Reference provider commissions',
+    commissionSummary: 'Guesthouses 10% · Boats 18% · Nightlife 15% · VIP 18–20%',
+    buggyCommission: 'Buggy: pending',
+    pending: 'Pending',
+    total: 'Estimated total',
+    providerFee: 'Partner commission (internal reference)',
+    notIncluded: "Not added to the traveler's total",
+    providerPending: 'Buggy commission not yet defined',
+    remove: 'Remove',
+    confirm: 'Confirm demo booking',
+    bookingHistory: 'Demo bookings',
+    noBookings: 'You have no confirmed bookings yet.',
+    confirmation: 'Plan confirmed!',
+    demoConfirmed: 'Demo booking · no real payment or availability',
+    bookingCode: 'Demo code',
+    simulatedPayment: 'Simulated payment',
+    brlOperation: 'Charged in BRL',
+    splitAuthorized: 'authorized split',
+    b2bConciliation: 'B2B reconciliation',
+    demoFx: 'USD conversion with a fixed demo rate, not a current quote',
+    backTrip: 'Back to My trip',
+    backHome: 'Keep exploring',
+    home: 'Home',
+    tripTab: 'My trip',
+    unitPeople: 'people',
+    unitTickets: 'tickets',
+    unitGroups: 'groups',
+    unitRooms: 'rooms',
+    stayDate: 'Check-in date',
+    commissionLabel: 'Provider commission ref.',
+    translationNotice: 'English translation pending professional review. Prices are charged in BRL; terms in Spanish or Portuguese prevail.',
+    days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    months: [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ],
+  },
 } satisfies Record<Language, Record<string, string | string[]>>;
+
+// Cada idioma se anuncia en su propio idioma para los lectores de pantalla.
+const LANGUAGE_NAMES: Record<Language, string> = { es: 'Español', pt: 'Português', en: 'English' };
+
+// Reservas demo guardadas antes de añadir inglés solo traen es y pt: se muestra el español.
+function snapshotText(text: Partial<Record<Language, string>>, language: Language): string {
+  return text[language] ?? text.es ?? '';
+}
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -274,6 +390,10 @@ const PAYMENT_STATE_LABELS: Record<Language, Record<PaymentStatus, string>> = {
   pt: {
     pending: 'pendente', approved: 'aprovado', rejected: 'recusado', requires_action: 'requer ação',
     expired: 'expirado', refunded: 'reembolsado', partially_refunded: 'reembolso parcial', cancelled: 'cancelado',
+  },
+  en: {
+    pending: 'pending', approved: 'approved', rejected: 'declined', requires_action: 'action required',
+    expired: 'expired', refunded: 'refunded', partially_refunded: 'partially refunded', cancelled: 'cancelled',
   },
 };
 
@@ -640,11 +760,12 @@ function Header({
       </View>
       {onLanguage ? (
         <View style={styles.languageToggle}>
-          {(['es', 'pt'] as const).map(option => (
+          {(['es', 'pt', 'en'] as const).map(option => (
             <Pressable
               key={option}
               accessibilityRole="button"
               accessibilityState={{ selected: language === option }}
+              accessibilityLabel={LANGUAGE_NAMES[option]}
               onPress={() => onLanguage(option)}
               style={[styles.languageButton, language === option && styles.languageButtonActive]}
             >
@@ -687,6 +808,7 @@ function HomeView({
   return (
     <>
       <Header language={language} words={words} onLanguage={onLanguage} />
+      {words.translationNotice ? <Text style={styles.exampleCaption}>{words.translationNotice}</Text> : null}
       <View style={styles.hero}>
         <Text style={styles.heroKicker}>BÚZIOS · BRASIL</Text>
         <Text style={styles.heroTitle}>{words.title}</Text>
@@ -1150,10 +1272,10 @@ function ConfirmationView({
         {booking.lines.map(line => (
           <View key={line.item.id} style={styles.confirmItem}>
             <Text style={styles.tripCategory}>{formatDate(line.item.date, language)} · {categoryName(line.category, language)}</Text>
-            <Text style={styles.tripTitle}>{line.title[language]}</Text>
+            <Text style={styles.tripTitle}>{snapshotText(line.title, language)}</Text>
             <Text style={styles.tripSubtitle}>
               {quantityDescription(line.item, line.priceMode, words)} · {brlFromCents(line.subtotalCents)}
-              {line.priceUnit ? ` · ${line.priceUnit[language]}` : ''}
+              {line.priceUnit ? ` · ${snapshotText(line.priceUnit, language)}` : ''}
             </Text>
           </View>
         ))}
