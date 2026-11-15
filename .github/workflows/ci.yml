@@ -30,6 +30,9 @@ jobs:
         env:
           TZ: Asia/Tokyo
       # Bundle de producción con Metro: detecta dependencias que Jest resuelve distinto (shared-schemas es ESM).
+      # react-native-dotenv (allowUndefined: false) rechaza la clave vacía de .env.example: valores de relleno,
+      # que no son ninguna clave ni apuntan a ningún tenant.
+      - run: printf 'INSFORGE_URL=https://ci.invalid\nINSFORGE_ANON_KEY=ci-placeholder-not-a-key\n' > .env
       - run: npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/ios.jsbundle" --assets-dest "$RUNNER_TEMP/ios-assets"
       - run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output "$RUNNER_TEMP/android.jsbundle" --assets-dest "$RUNNER_TEMP/android-assets"
 
