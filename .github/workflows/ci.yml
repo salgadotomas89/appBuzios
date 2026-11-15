@@ -45,3 +45,5 @@ jobs:
       - run: npm run test:migration-upgrade
       # El inventario que el operador compara con el tenant debe seguir a las migraciones.
       - run: npm run test:schema-inventory
+      # Recorrido completo del piloto con datos sintéticos y la moderación previa activada.
+      - run: npm run test:pilot-e2e
