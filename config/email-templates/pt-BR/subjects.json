@@ -1,0 +1,7 @@
+{
+  "email-verification-code": "Confirme seu e-mail no Búzios Flow",
+  "email-verification-link": "Confirme seu e-mail no Búzios Flow",
+  "request-otp": "{{ token }} é seu código do Búzios Flow",
+  "reset-password-code": "Redefina sua senha do Búzios Flow",
+  "reset-password-link": "Redefina sua senha do Búzios Flow"
+}
