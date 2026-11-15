@@ -316,11 +316,11 @@ fi
 grep -q 'inventory_not_found' "$workdir/gap.err" || { echo "Unexpected error for unpublished nights" >&2; cat "$workdir/gap.err" >&2; exit 1; }
 echo "PASS stay with unpublished nights is rejected"
 
-if as_user "$traveler_a" "select public.connectical_create_quote('$pousada', current_date - 2, 1, 1, 600);" >/dev/null 2>&1; then
+if as_user "$traveler_a" "select public.connectical_create_quote('$pousada', public.connectical_today() - 1, 1, 1, 600);" >/dev/null 2>&1; then
   echo "Quote for a past service date was not rejected" >&2
   exit 1
 fi
-if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', current_date - 2, 3);" >/dev/null 2>&1; then
+if as_user '20000000-0000-4000-8000-000000000001' "select public.connectical_provider_publish_inventory('$pousada', public.connectical_today() - 1, 3);" >/dev/null 2>&1; then
   echo "Inventory for a past service date was not rejected" >&2
   exit 1
 fi
@@ -613,7 +613,7 @@ if as_user "$provider_user" "select public.connectical_provider_publish_inventor
 fi
 partial_rows=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_inventory where offer_id = '$pay_offer' and service_date in (current_date + 78, current_date + 79);" | tail -1)
 [ "$partial_rows" = '0' ] || { echo "Failed range publish left $partial_rows partial rows" >&2; exit 1; }
-for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', current_date - 1, 3, 1"; do
+for bad in "'$range_offer', current_date + 90, 91, 1" "'$range_offer', current_date + 90, 0, 1" "'$range_offer', public.connectical_today() - 1, 3, 1"; do
   if as_user "$provider_user" "select public.connectical_provider_publish_inventory_range($bad);" >/dev/null 2>&1; then
     echo "Invalid range publish was accepted: $bad" >&2; exit 1
   fi
