@@ -5,8 +5,9 @@
 // Pide la contraseña sin mostrarla ni guardarla, registra la cuenta como lo hace la app (SDK y clave anónima de
 // .env), comprueba con el CLI si el servidor generó un código (solo recuentos y fechas de auth.email_otps, nunca
 // el hash) y pide el código recibido. Con el código, verifica el correo y cierra la sesión. Sin código, permite un
-// reenvío y concluye si el fallo es de generación o de entrega. La cuenta queda creada como traveler: es la que
-// después se puede promover con scripts/promote-admin.sh.
+// reenvío y concluye si el fallo es de generación o de entrega. Después inicia sesión con la misma contraseña y
+// crea el perfil de turista: la cuenta queda lista para scripts/promote-admin.sh. Procedimiento completo en
+// docs/alta-primer-usuario.md.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import readline from 'node:readline';
@@ -101,4 +102,20 @@ if (verified.error) {
 }
 console.log(`RESULT delivered and verified; emailVerified=${verified.data?.user?.emailVerified}`);
 await client.auth.signOut();
-console.log('Signed out. Sign in once from the app so the profile exists before promote-admin.sh.');
+
+// Inicio de sesión con la contraseña elegida, como la app: crea el perfil de turista (connectical_ensure_profile),
+// que es lo que exige promote-admin.sh. No se imprime ningún token.
+const signIn = await client.auth.signInWithPassword({ email, password });
+if (signIn.error || !signIn.data?.accessToken) {
+  console.log(`RESULT verified but sign-in failed: ${signIn.error?.message ?? 'no session returned'}`);
+  process.exit(1);
+}
+const session = createClient({ baseUrl: env.INSFORGE_URL, anonKey: env.INSFORGE_ANON_KEY, isServerMode: true, accessToken: signIn.data.accessToken });
+const profile = await session.database.rpc('connectical_ensure_profile', {});
+if (profile.error) {
+  console.log(`RESULT signed in but the profile could not be created: ${profile.error.message}`);
+  process.exit(1);
+}
+console.log(`RESULT sign-in works; profile role=${profile.data}`);
+await session.auth.signOut();
+console.log(`Signed out. Next: sh scripts/promote-admin.sh ${email}   (dry run, then --apply after confirming identity)`);

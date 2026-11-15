@@ -22,7 +22,7 @@ El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforg
 ## Antes del piloto (intervención humana)
 
 1. ~~Respaldo, quince migraciones, verificación, conciliación e inventario~~: hecho el 15-11-2026.
-2. Registrarse con un correo del equipo y comprobar que llega el código: `node scripts/verify-email-delivery.mjs
+2. Registrarse con un correo del equipo siguiendo [alta-primer-usuario.md](alta-primer-usuario.md) y comprobar que llega el código: `node scripts/verify-email-delivery.mjs
    correo@equipo.com` lo hace como la app y distingue «no generado» de «no entregado». El correo llega en inglés
    («Verify your email») y la app lo avisa. Si no llega, configurar SMTP (`[auth.smtp]` con
    `npx -y @insforge/cli config apply`, ver runbook), lo que requiere una cuenta de correo del equipo, y cargar las
