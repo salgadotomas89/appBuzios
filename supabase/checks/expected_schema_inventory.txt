@@ -198,7 +198,8 @@ function connectical_can_read_reservation(p_reservation_id uuid) definer=true md
 function connectical_cancel_reservation(p_reservation_id uuid, p_reason text) definer=true md5=1e876b456145d8196cd847076de11de9
 function connectical_create_quote(p_offer_id uuid, p_service_date date, p_quantity integer, p_nights integer, p_service_fee_rate_bps integer) definer=true md5=5479affd847a3248446ab1998561f2bb
 function connectical_create_reservation_hold(p_quote_id uuid, p_idempotency_key uuid) definer=true md5=10f9f99e57e4940d024494542a467d76
-function connectical_create_traveler_profile() definer=true md5=7618dbf663ce652a2c995929a9c76ae8
+function connectical_create_traveler_profile() definer=true md5=45ed282f43e75143847762c488aa5e5d
+function connectical_ensure_profile() definer=true md5=2db8cfc413db859179cb95ee171f3fa7
 function connectical_expire_holds() definer=true md5=6d0d6f87ec295badee5e054a74373773
 function connectical_expire_offer_holds(p_offer_id uuid) definer=true md5=4ead1325995c9522ecf4122e06d0d972
 function connectical_is_admin() definer=true md5=9f8e09ad68c6a55eb1e12b7ffa94e899
@@ -254,4 +255,3 @@ trigger connectical_profiles.connectical_audit_profiles
 trigger connectical_provider_applications.connectical_audit_applications
 trigger connectical_providers.connectical_audit_providers
 trigger connectical_refunds.connectical_audit_refunds
-trigger users.connectical_auth_user_profile

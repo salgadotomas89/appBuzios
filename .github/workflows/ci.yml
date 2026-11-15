@@ -50,3 +50,5 @@ jobs:
       - run: npm run test:schema-inventory
       # Recorrido completo del piloto con datos sintéticos y la moderación previa activada.
       - run: npm run test:pilot-e2e
+      # Como buziosflow: PostgreSQL 15, auth.users de InsForge y migraciones como project_admin sin superusuario.
+      - run: npm run test:insforge-compat

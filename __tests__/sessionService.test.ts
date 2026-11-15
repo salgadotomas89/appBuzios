@@ -33,15 +33,6 @@ beforeEach(() => {
   mockManager.ensureFresh.mockResolvedValue(undefined);
 });
 
-type ProfileQuery = { select: jest.Mock; eq: jest.Mock; maybeSingle: jest.Mock };
-function profileQuery(role: string | null): ProfileQuery {
-  const query: ProfileQuery = {
-    select: jest.fn((): ProfileQuery => query),
-    eq: jest.fn((): ProfileQuery => query),
-    maybeSingle: jest.fn(async () => ({ data: role ? { role } : null, error: null })),
-  };
-  return query;
-}
 
 it('maps restore results to notices for the portal', async () => {
   mockManager.restore.mockResolvedValueOnce('expired');
@@ -53,16 +44,21 @@ it('maps restore results to notices for the portal', async () => {
   await expect(restoreSharedSession()).resolves.toBe('not_persisted');
 });
 
-it('reads the role of the user the session manager knows, after refreshing the token', async () => {
+it('gets the role through ensure_profile for the signed-in user, after refreshing the token', async () => {
   mockManager.getState.mockReturnValue({ status: 'signed_in', userId: 'u1', persisted: true });
-  const query = profileQuery('provider');
-  mockFrom.mockReturnValue(query);
+  mockRpc.mockResolvedValueOnce({ data: 'provider', error: null });
   await expect(getSharedRole()).resolves.toBe('provider');
   expect(mockManager.ensureFresh).toHaveBeenCalled();
-  expect(query.eq).toHaveBeenCalledWith('user_id', 'u1');
+  expect(mockRpc).toHaveBeenCalledWith('connectical_ensure_profile', {});
+
+  // Primer inicio de sesión: la función crea el perfil y devuelve 'traveler'.
+  mockRpc.mockResolvedValueOnce({ data: 'traveler', error: null });
+  await expect(getSharedRole()).resolves.toBe('traveler');
 
   mockManager.getState.mockReturnValue({ status: 'signed_out', reason: 'none' });
+  mockRpc.mockClear();
   await expect(getSharedRole()).resolves.toBeNull();
+  expect(mockRpc).not.toHaveBeenCalled();
 });
 
 it('turns an expired session into a sign-in-again error before calling the database', async () => {

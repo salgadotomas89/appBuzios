@@ -123,27 +123,45 @@ as $$
   );
 $$;
 
+-- InsForge gestiona auth.users: no se le cuelgan triggers (y no tiene raw_user_meta_data; el nombre vive en
+-- auth.users.profile). El perfil de turista se crea al iniciar sesión con connectical_ensure_profile(), que
+-- llama a este helper interno. Nunca concede otro rol que 'traveler'.
 create or replace function public.connectical_create_traveler_profile()
-returns trigger
+returns void
 language plpgsql security definer
 set search_path = public, auth
 as $$
 begin
+  if auth.uid() is null then return; end if;
   insert into public.connectical_profiles (user_id, display_name, country_code, role)
-  values (
-    new.id,
-    coalesce(nullif(new.raw_user_meta_data ->> 'name', ''), 'Traveler'),
-    coalesce(nullif(new.raw_user_meta_data ->> 'country', ''), 'CL'),
-    'traveler'
-  ) on conflict (user_id) do nothing;
-  return new;
+  select u.id,
+         left(coalesce(nullif(btrim(u.profile ->> 'name'), ''), 'Traveler'), 120),
+         coalesce(nullif(upper(btrim(u.profile ->> 'country')), ''), 'CL'),
+         'traveler'
+  from auth.users u
+  where u.id = auth.uid()
+  on conflict (user_id) do nothing;
 end;
 $$;
 
-drop trigger if exists connectical_auth_user_profile on auth.users;
-create trigger connectical_auth_user_profile
-  after insert on auth.users
-  for each row execute function public.connectical_create_traveler_profile();
+-- Llamada por la app tras iniciar sesión o verificar el correo: crea el perfil si falta y devuelve el rol.
+create or replace function public.connectical_ensure_profile()
+returns text
+language plpgsql security definer
+set search_path = public, auth
+as $$
+declare
+  v_role text;
+begin
+  if auth.uid() is null then raise exception 'authentication_required' using errcode = '28000'; end if;
+  perform public.connectical_create_traveler_profile();
+  select role into v_role from public.connectical_profiles where user_id = auth.uid();
+  return v_role;
+end;
+$$;
+
+revoke all on function public.connectical_ensure_profile() from public, anon;
+grant execute on function public.connectical_ensure_profile() to authenticated;
 
 create or replace function public.connectical_create_quote(
   p_offer_id uuid,
