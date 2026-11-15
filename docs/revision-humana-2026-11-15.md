@@ -82,12 +82,8 @@ contra InsForge: la compatibilidad de `auth.uid()`, de los roles `anon` y `authe
 
 ## 7. Dispositivos
 
-- Build iOS y Android: no se ejecutaron esta noche. El sábado por la mañana se intentó un build para simulador:
-  - Xcode 27.2 rechazaba el target de recursos de AsyncStorage (iOS 13.0, mínimo admitido 15.0); el Podfile ahora
-    eleva esos targets al mínimo de React Native. Resultado del build: ver la bitácora de la continuación.
-  - `CoreSimulator is out of date (1174.9.2 < 1174.21.0)`: hay que abrir Xcode o ejecutar `xcodebuild -runFirstLaunch`
-    para instalar los componentes del sistema (requiere aprobación del administrador del equipo). Sin eso no hay
-    dispositivos simulados y `xcrun simctl` se cuelga.
+- **iOS:** CoreSimulator ya está actualizado (1174.21) y la app arranca en un iPhone 17 Pro simulado (14-11, 22:00).
+  Falta recorrerla a mano y probarla en un iPhone real.
   - Android: no hay Java ni Android SDK en el equipo.
 
 ## 8. Riesgos conocidos
