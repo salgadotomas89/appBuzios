@@ -1,3 +1,4 @@
+import type { AuthFailureKind } from '../auth/authErrors';
 import type { Language } from '../data/homeMock';
 import type { InputError } from '../utils/portalInput';
 import type { ReservationInconsistency } from '../utils/reservationTotals';
@@ -42,6 +43,14 @@ const es = {
   codeResent: 'Te enviamos un código nuevo.',
   codeFormat: 'El código tiene 6 dígitos.',
   noProfile: 'La cuenta no tiene un perfil Connectical asignado.',
+  authErrors: {
+    invalid_credentials: 'Correo o contraseña incorrectos.',
+    invalid_code: 'El código no es válido o ya venció. Revisa el último correo o pide uno nuevo.',
+    email_in_use: 'Ya existe una cuenta con este correo. Inicia sesión o verifica el correo pendiente.',
+    rate_limited: 'Demasiados intentos. Espera un minuto y vuelve a probar.',
+    network: 'Sin conexión con el servidor. Revisa tu conexión y vuelve a intentarlo.',
+    unknown: 'No se pudo completar el acceso',
+  } satisfies Record<AuthFailureKind, string>,
   roles: { traveler: 'turista', provider: 'proveedor', admin: 'administración' },
   publishedOffers: 'Ofertas publicadas',
   noOffers: 'Todavía no hay ofertas publicadas.',
@@ -319,6 +328,14 @@ const pt: PortalCopy = {
   codeResent: 'Enviamos um novo código.',
   codeFormat: 'O código tem 6 dígitos.',
   noProfile: 'A conta não tem um perfil Connectical atribuído.',
+  authErrors: {
+    invalid_credentials: 'E-mail ou senha incorretos.',
+    invalid_code: 'O código não é válido ou expirou. Confira o último e-mail ou peça um novo.',
+    email_in_use: 'Já existe uma conta com este e-mail. Entre ou verifique o e-mail pendente.',
+    rate_limited: 'Muitas tentativas. Espere um minuto e tente de novo.',
+    network: 'Sem conexão com o servidor. Verifique sua conexão e tente de novo.',
+    unknown: 'Não foi possível concluir o acesso',
+  },
   roles: { traveler: 'turista', provider: 'fornecedor', admin: 'administração' },
   publishedOffers: 'Ofertas publicadas',
   noOffers: 'Ainda não há ofertas publicadas.',
@@ -576,6 +593,14 @@ const en: PortalCopy = {
   codeResent: 'We sent you a new code.',
   codeFormat: 'The code has 6 digits.',
   noProfile: 'This account has no Connectical profile assigned.',
+  authErrors: {
+    invalid_credentials: 'Incorrect email or password.',
+    invalid_code: 'The code is invalid or has expired. Check the latest email or request a new one.',
+    email_in_use: 'An account with this email already exists. Sign in or verify the pending email.',
+    rate_limited: 'Too many attempts. Wait a minute and try again.',
+    network: 'No connection to the server. Check your connection and try again.',
+    unknown: 'Sign-in could not be completed',
+  },
   roles: { traveler: 'traveler', provider: 'provider', admin: 'administration' },
   publishedOffers: 'Published offers',
   noOffers: 'No published offers yet.',

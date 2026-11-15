@@ -21,10 +21,12 @@ jest.mock('../src/lib/insforge', () => ({
 }));
 
 import { SessionError } from '../src/auth/sessionManager';
+import { AuthFlowError } from '../src/auth/authErrors';
 import {
   createSharedQuote,
   getSharedRole,
   restoreSharedSession,
+  signInSharedAccount,
   signOutSharedAccount,
 } from '../src/lib/reservationService';
 
@@ -75,4 +77,14 @@ it('turns an expired session into a sign-in-again error before calling the datab
 it('signs out through the session manager', async () => {
   await signOutSharedAccount();
   expect(mockManager.signOut).toHaveBeenCalled();
+});
+
+it('turns InsForge sign-in rejections into classified errors and keeps other failures as they were', async () => {
+  mockManager.signIn.mockRejectedValueOnce(new SessionError('sign_in_failed', 'Invalid credentials', 401));
+  await expect(signInSharedAccount('ana@example.com', 'wrong')).rejects.toEqual(new AuthFlowError('invalid_credentials', 'Invalid credentials'));
+  mockManager.signIn.mockRejectedValueOnce(new SessionError('sign_in_failed', 'Network request failed: offline', 0));
+  await expect(signInSharedAccount('ana@example.com', 'secret123')).rejects.toMatchObject({ kind: 'network' });
+  mockManager.signIn.mockRejectedValueOnce(new SessionError('sign_in_failed', 'La sesión cambió durante el inicio de sesión.'));
+  await expect(signInSharedAccount('ana@example.com', 'secret123')).rejects.toThrow(
+    'No se pudo iniciar sesión: La sesión cambió durante el inicio de sesión.');
 });

@@ -35,6 +35,8 @@ export class SessionError extends Error {
   constructor(
     readonly code: 'sign_in_failed' | 'session_expired' | 'session_unavailable' | 'not_signed_in' | 'sign_out_incomplete',
     message: string,
+    // Estado HTTP del rechazo de InsForge, cuando lo hubo (0 = sin conexión).
+    readonly status?: number,
   ) {
     super(message);
     this.name = 'SessionError';
@@ -190,7 +192,7 @@ export function createSessionManager(deps: { auth: MobileAuthApi; store: Session
       await discardStale();
       throw new SessionError('sign_in_failed', 'La sesión cambió durante el inicio de sesión.');
     }
-    if (error) throw new SessionError('sign_in_failed', error.message);
+    if (error) throw new SessionError('sign_in_failed', error.message, error.statusCode);
     refreshToken = null;
     if (!(await apply(data))) throw new SessionError('sign_in_failed', 'Respuesta de inicio de sesión incompleta.');
     return state;
