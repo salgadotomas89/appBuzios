@@ -199,6 +199,20 @@ Del cambio menos invasivo al más invasivo. Anotar qué paso falló y su salida.
 
 ## 11. Activar `OFFER_PHOTOS_ENABLED` (otra entrega)
 
+Qué está comprobado sin teléfonos (código, configuración y pruebas automáticas) y qué no:
+
+| Tema | Comprobado sin teléfono | Pendiente en teléfono real |
+| --- | --- | --- |
+| Permisos iOS | `NSCameraUsageDescription` y `NSPhotoLibraryUsageDescription` en `Info.plist`; la galería usa el selector del sistema | Diálogo de permiso, denegar y reactivar |
+| Permisos Android | No hacen falta: la app no declara `CAMERA`, la librería usa la cámara del sistema y comprueba que exista (`FEATURE_CAMERA`); trae su propio `FileProvider` | Cámara y galería en Android 10 y 14 |
+| HEIC | iOS: con `assetRepresentationMode: 'compatible'` el selector entrega JPEG; si llegara un HEIC sin convertir, la app lo rechaza con un aviso (probado) | Foto HEIC real del iPhone |
+| Fotos grandes | Reducción a 2400 px y calidad 0,8 en el selector; 5 MB decodificados en menos de 2 s en Node (probado) | Rendimiento en Hermes con una foto de 12 MP o más |
+| Metadatos | iOS recodifica JPEG/PNG (sin EXIF); Android sube tal cual un JPEG pequeño, por eso la función quita GPS, XMP y textos (probado) | — |
+| Cancelación | Aborta el envío y vuelve la foto a «Subir»; relee la lista por si el servidor ya la tenía (probado) | Cancelar con red lenta |
+| Errores y conectividad | Sin red: aviso y «Reintentar» conserva la foto y su descripción (probado); 413/429/503 traducidos | Modo avión durante la subida |
+| Accesibilidad | Descripción obligatoria como etiqueta de cada foto, barra de progreso con valor, avisos anunciados, botones de 44 px (probado en Jest) | VoiceOver y TalkBack |
+
+
 Solo con **todas** estas casillas marcadas:
 
 - [ ] Pasos 1 a 9 correctos y anotados en el registro.
