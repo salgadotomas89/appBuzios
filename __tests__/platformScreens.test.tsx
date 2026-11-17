@@ -13,7 +13,7 @@ jest.mock('../src/lib/platformService', () => {
     'listProviderApplications', 'reviewProviderApplication', 'saveCampaign', 'setOfferModeration', 'updateIncident',
     'getMyProviderApplication', 'listMyIncidents', 'reportIncident', 'submitProviderApplication',
     'listMediaReviews', 'setMediaModeration', 'listProviderCategoryRates', 'setProviderCategoryRate',
-    'listPostReviews', 'moderatePost',
+    'listPostReviews', 'moderatePost', 'getCategoryKpis',
   ];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -119,6 +119,10 @@ it('suspends with a reason and restores publications', async () => {
 it('triages incidents and shows KPIs, users, audit entries and content-only campaigns', async () => {
   mocked.listIncidents.mockResolvedValue([{ id: 'i1', reservation_id: null, reporter_name: 'Tom', category: 'payment', description: 'Cobro duplicado', status: 'open', admin_note: '', created_at: '', updated_at: '' }]);
   mocked.updateIncident.mockResolvedValue('resolved');
+  mocked.getCategoryKpis.mockResolvedValue([
+    { category: 'pousadas', confirmed: 0, gross_cents: 0, service_fee_cents: 0, commission_cents: 0, discount_cents: 0, effective_rate_bps: 0, source_offer: 0, source_provider_category: 0, source_provider: 0, source_unknown: 0 },
+    { category: 'restaurantes', confirmed: 3, gross_cents: 63600, service_fee_cents: 3600, commission_cents: 9000, discount_cents: 20000, effective_rate_bps: 1500, source_offer: 0, source_provider_category: 3, source_provider: 0, source_unknown: 0 },
+  ]);
   mocked.getPlatformKpis.mockResolvedValue({ quotes: 40, reservations: 12, confirmed: 10, cancelled: 1, expired: 1, refunded: 0, confirmed_gross_cents: 678400, service_fee_cents: 38400, commission_cents: 64000, refunded_cents: 0, quote_to_confirmed_bps: 2500 });
   mocked.listPlatformUsers.mockResolvedValue([{ user_id: 'u1', display_name: 'Ana', country_code: 'BR', role: 'provider', email: 'ana@example.com', created_at: '' }]);
   mocked.listAuditLog.mockResolvedValue([{ id: 1, actor_user_id: null, action: 'role_changed', target_table: 'connectical_profiles', target_id: 'u1', details: {}, created_at: '2099-01-01T00:00:00Z' }]);
@@ -135,6 +139,10 @@ it('triages incidents and shows KPIs, users, audit entries and content-only camp
   await press(root, 'Indicadores');
   expect(hasText(root, 'Cotización → confirmada: 25 %')).toBe(true);
   expect(hasText(root, 'Bruto confirmado: R$ 6.784,00')).toBe(true);
+  expect(hasText(root, 'Restaurantes · 3 · R$ 636,00 · Comisión confirmada R$ 90,00 (tasa efectiva 15 %) · descuentos R$ 200,00')).toBe(true);
+  expect(hasText(root, 'Nivel de comisión: producto 0 · proveedor+categoría 3 · proveedor 0')).toBe(true);
+  // Las categorías sin ventas no ocupan espacio.
+  expect(hasText(root, 'Pousadas · 0')).toBe(false);
 
   await press(root, 'Usuarios');
   expect(hasText(root, 'Ana · proveedor')).toBe(true);

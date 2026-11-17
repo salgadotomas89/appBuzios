@@ -1502,6 +1502,21 @@ audit_posts=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "sel
 [ "$audit_posts" = '4' ] || { echo "Post moderation not audited: $audit_posts" >&2; exit 1; }
 echo "PASS offer posts: own offers, official permalinks only, moderated before public, 24-hour stories, daily limit"
 
+# Admin KPIs by category (202611170004): per-category sales, effective rate and commission level used.
+cat_period="date '$bz_today' - 1, date '$bz_today' + 1"
+activities=$(as_user "$admin_user" "select k.confirmed||'|'||k.gross_cents||'|'||k.service_fee_cents||'|'||k.commission_cents||'|'||k.discount_cents||'|'||k.effective_rate_bps||'|'||k.source_offer||'|'||k.source_provider_category||'|'||k.source_provider||'|'||k.source_unknown from public.connectical_admin_category_kpis($cat_period) k where k.category = 'actividades';")
+[ "$activities" = '1|19080|1080|1800|0|1000|0|0|1|0' ] || { echo "Category KPIs mismatch: $activities" >&2; exit 1; }
+categories_listed=$(as_user "$admin_user" "select count(*) from public.connectical_admin_category_kpis($cat_period);")
+[ "$categories_listed" = '7' ] || { echo "Category KPIs do not list every category: $categories_listed" >&2; exit 1; }
+reconciled=$(as_user "$admin_user" "select (select sum(gross_cents) from public.connectical_admin_category_kpis($cat_period)) = (select confirmed_gross_cents from public.connectical_admin_kpis($cat_period));")
+[ "$reconciled" = 't' ] || { echo "Category KPIs do not add up to the global KPIs" >&2; exit 1; }
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select count(*) from public.connectical_admin_category_kpis($cat_period);" >/dev/null 2>&1; then
+    echo "Non-admin read category KPIs: $actor" >&2; exit 1
+  fi
+done
+echo "PASS admin category KPIs add up to the global KPIs and trace which commission level applied"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

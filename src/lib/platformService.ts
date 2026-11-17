@@ -409,3 +409,30 @@ export async function listPostReviews(status: PostStatus | null = 'pending'): Pr
 export async function moderatePost(postId: string, status: 'approved' | 'rejected', note: string): Promise<string> {
   return callRpc('connectical_admin_moderate_post', { p_post_id: postId, p_status: status, p_note: note });
 }
+
+// Indicadores por categoría para la administración (migración 202611170004). Importes en centavos BRL.
+export type CategoryKpi = {
+  category: PortalCategory;
+  confirmed: number;
+  gross_cents: number;
+  service_fee_cents: number;
+  commission_cents: number;
+  discount_cents: number;
+  effective_rate_bps: number;
+  source_offer: number;
+  source_provider_category: number;
+  source_provider: number;
+  source_unknown: number;
+};
+
+// Si el tenant aún no tiene la migración, la consola sigue mostrando los indicadores globales.
+export async function getCategoryKpis(from: string, to: string): Promise<CategoryKpi[]> {
+  const rows = await callRpc<CategoryKpi[] | null>('connectical_admin_category_kpis', { p_from: from, p_to: to }).catch(() => null);
+  return (rows ?? []).map(row => ({
+    ...row,
+    gross_cents: Number(row.gross_cents),
+    service_fee_cents: Number(row.service_fee_cents),
+    commission_cents: Number(row.commission_cents),
+    discount_cents: Number(row.discount_cents),
+  }));
+}

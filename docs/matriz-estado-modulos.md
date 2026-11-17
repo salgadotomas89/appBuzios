@@ -24,6 +24,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Cargo al turista 4/6/8 % | SIMULADO | 6 % como escenario por defecto; no es tarifa aprobada | Decisión comercial |
 | Tipos de cambio | SIMULADO | Tasas fijas etiquetadas como demostración; sin fuente cambiaria real | P2 |
 | Panel admin: finanzas | COMPLETO | Retenido no es ingreso, bruto/neto/cargo/comisión conciliados, estados inconsistentes | — |
+| Panel admin: indicadores por categoría | COMPLETO (local) | Confirmadas, pagado, cargo, comisión, descuentos y tasa efectiva por categoría, y cuántas reservas usaron cada nivel de comisión; suma igual a los indicadores globales (202611170004). **Migración sin aplicar**; la consola sigue funcionando sin ella | Aplicar 202611170004 |
 | Panel admin: proveedores, tasas, auditoría | COMPLETO | Pausa/reactivación, tasas por producto, auditoría con autoría solo por RPC | — |
 | Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |

@@ -5,6 +5,7 @@ import type { Language } from '../data/homeMock';
 import { inputErrorText, PORTAL_CATEGORIES, portalCopy, type PortalCategory } from '../i18n/portalCopy';
 import { platformCopy } from '../i18n/platformCopy';
 import {
+  getCategoryKpis,
   getPlatformKpis,
   listAuditLog,
   listCampaigns,
@@ -29,6 +30,7 @@ import {
   type MediaReview,
   type ModerationOffer,
   type PlatformKpis,
+  type CategoryKpi,
   type PlatformUser,
   type ProviderCategoryRate,
   type PostReview,
@@ -69,6 +71,7 @@ export function AdminConsole({
   const [incidents, setIncidents] = useState<AdminIncident[]>([]);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [kpis, setKpis] = useState<PlatformKpis | null>(null);
+  const [categoryKpis, setCategoryKpis] = useState<CategoryKpi[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [note, setNote] = useState('');
@@ -100,6 +103,7 @@ export function AdminConsole({
     if (next === 'kpis') {
       const today = buziosIsoDate();
       setKpis(await getPlatformKpis(addDays(today, -29), today));
+      setCategoryKpis(await getCategoryKpis(addDays(today, -29), today));
     }
     if (next === 'audit') setAudit(await listAuditLog(50));
     if (next === 'campaigns') setCampaigns(await listCampaigns());
@@ -347,6 +351,26 @@ export function AdminConsole({
           <Text style={styles.helper}>{words.kpiGross}: {brlFromCents(kpis.confirmed_gross_cents)}</Text>
           <Text style={styles.helper}>{words.kpiFee}: {brlFromCents(kpis.service_fee_cents)} · {words.kpiCommission}: {brlFromCents(kpis.commission_cents)}</Text>
           <Text style={styles.helper}>{words.kpiRefunded}: {brlFromCents(kpis.refunded_cents)}</Text>
+          {categoryKpis.some(row => row.confirmed > 0) ? (
+            <>
+              <Text style={styles.offerName}>{words.kpiByCategory}</Text>
+              {categoryKpis.filter(row => row.confirmed > 0).map(row => (
+                <View key={row.category} style={styles.eventRow}>
+                  <Text style={styles.helper}>
+                    {portalWords.categories[row.category]} · {row.confirmed} · {brlFromCents(row.gross_cents)} · {words.kpiCommission}{' '}
+                    {brlFromCents(row.commission_cents)} ({words.kpiEffectiveRate} {formatBps(row.effective_rate_bps)}) · {words.kpiDiscount}{' '}
+                    {brlFromCents(row.discount_cents)}
+                  </Text>
+                  <Text style={styles.helper}>
+                    {words.kpiSources
+                      .replace('{offer}', String(row.source_offer))
+                      .replace('{category}', String(row.source_provider_category))
+                      .replace('{provider}', String(row.source_provider))}
+                  </Text>
+                </View>
+              ))}
+            </>
+          ) : null}
         </View>
       ) : null}
 
