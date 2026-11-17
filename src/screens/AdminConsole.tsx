@@ -9,6 +9,8 @@ import {
   listAuditLog,
   listCampaigns,
   listProviderCategoryRates,
+  listPostReviews,
+  moderatePost,
   listIncidents,
   listMediaReviews,
   listOffersForModeration,
@@ -29,6 +31,7 @@ import {
   type PlatformKpis,
   type PlatformUser,
   type ProviderCategoryRate,
+  type PostReview,
   type ProviderApplication,
 } from '../lib/platformService';
 import { sessionManager } from '../lib/insforge';
@@ -36,7 +39,7 @@ import { brlFromCents } from '../utils/format';
 import { addDays, buziosIsoDate, parseIsoDate, parsePercentToBps } from '../utils/portalInput';
 
 type Section = keyof (typeof platformCopy)['es']['sections'];
-const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns', 'categoryRates'];
+const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns', 'categoryRates', 'posts'];
 
 export type ConsoleProvider = { id: string; name: string; commission_rate_bps: number };
 
@@ -74,6 +77,7 @@ export function AdminConsole({
   const [rateProviderId, setRateProviderId] = useState<string | null>(null);
   const [rateCategory, setRateCategory] = useState<PortalCategory>(PORTAL_CATEGORIES[0]);
   const [categoryRates, setCategoryRates] = useState<ProviderCategoryRate[]>([]);
+  const [posts, setPosts] = useState<PostReview[]>([]);
   const [campaignDraft, setCampaignDraft] = useState({ title: '', body: '', starts: buziosIsoDate(), ends: addDays(buziosIsoDate(), 7) });
 
   function open(next: Section) {
@@ -99,6 +103,17 @@ export function AdminConsole({
     }
     if (next === 'audit') setAudit(await listAuditLog(50));
     if (next === 'campaigns') setCampaigns(await listCampaigns());
+    if (next === 'posts') setPosts(await listPostReviews('pending'));
+  }
+
+  function reviewPost(post: PostReview, status: 'approved' | 'rejected') {
+    run(async () => {
+      await moderatePost(post.id, status, status === 'rejected' ? note.trim() : '');
+      setSelectedId(null);
+      setNote('');
+      await loadSection('posts');
+      return words.postSaved;
+    });
   }
 
   function selectRateProvider(providerId: string) {
@@ -370,6 +385,30 @@ export function AdminConsole({
             <Field label={words.campaignEnds} value={campaignDraft.ends} onChange={ends => setCampaignDraft({ ...campaignDraft, ends })} />
             <ActionButton title={words.campaignSave} onPress={createCampaign} disabled={busy} />
           </View>
+        </>
+      ) : null}
+
+      {section === 'posts' ? (
+        <>
+          <Text style={styles.helper}>{words.postsHint}</Text>
+          {posts.length ? posts.map(post => (
+            <View key={post.id} style={styles.eventRow}>
+              <Text style={styles.offerName}>{post.offer_title} · {post.provider_name} · {post.kind}</Text>
+              <Text style={styles.helper}>{post.body}</Text>
+              {post.link_url ? <Text selectable style={styles.id}>{post.link_url}</Text> : null}
+              {selectedId === post.id ? (
+                <View style={styles.quote}>
+                  <Field label={words.postRejectReason} value={note} onChange={setNote} maxLength={300} />
+                  <ActionButton title={words.postReject} onPress={() => reviewPost(post, 'rejected')} disabled={busy || note.trim().length < 3} />
+                </View>
+              ) : (
+                <View style={styles.chips}>
+                  <ActionButton title={words.postApprove} onPress={() => reviewPost(post, 'approved')} disabled={busy} />
+                  <ActionButton title={words.postReject} onPress={() => { setSelectedId(post.id); setNote(''); }} disabled={busy} secondary />
+                </View>
+              )}
+            </View>
+          )) : empty}
         </>
       ) : null}
 

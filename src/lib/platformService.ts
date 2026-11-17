@@ -350,3 +350,62 @@ export function totalProviderStats(rows: ProviderOfferStats[]): ProviderStatsTot
   >;
   return { ...totals, conversionBps: totals.quotes ? Math.floor((totals.confirmed * 10000) / totals.quotes) : 0 };
 }
+
+// Publicaciones e historias de ofertas (migración 202611170003).
+export type PostKind = 'post' | 'story';
+export type PostStatus = 'pending' | 'approved' | 'rejected';
+export type FeedPost = {
+  id: string;
+  offer_id: string;
+  kind: PostKind;
+  body: string;
+  link_url: string | null;
+  link_platform: 'instagram' | 'tiktok' | null;
+  published_at: string;
+  visible_until: string | null;
+};
+export type OwnPost = Omit<FeedPost, 'published_at'> & { status: PostStatus; moderation_note: string; created_at: string };
+export type PostReview = Omit<OwnPost, 'visible_until'> & { offer_title: string; provider_name: string };
+
+// Feed público; si el tenant aún no tiene la migración devuelve [] para no romper el inicio.
+export async function listFeed(): Promise<FeedPost[]> {
+  const { data, error } = await (await freshClient()).database.rpc('connectical_list_feed', {});
+  if (error) {
+    if (/connectical_list_feed/.test(error.message) && /(does not exist|not found|PGRST202)/i.test(error.message)) return [];
+    throw toReservationError('connectical_list_feed', error.message);
+  }
+  return (data ?? []) as FeedPost[];
+}
+
+export async function listOwnPosts(): Promise<OwnPost[]> {
+  return (await callRpc<OwnPost[] | null>('connectical_provider_list_posts', {})) ?? [];
+}
+
+export async function saveOwnPost(input: {
+  postId: string | null;
+  offerId: string;
+  kind: PostKind;
+  body: string;
+  linkUrl: string;
+}): Promise<OwnPost> {
+  return callRpc('connectical_provider_save_post', {
+    p_post_id: input.postId,
+    p_offer_id: input.offerId,
+    p_kind: input.kind,
+    p_body: input.body,
+    p_link_url: input.linkUrl,
+  });
+}
+
+export async function deleteOwnPost(postId: string): Promise<void> {
+  const { error } = await (await freshClient()).database.rpc('connectical_provider_delete_post', { p_post_id: postId });
+  if (error) throw toReservationError('connectical_provider_delete_post', error.message);
+}
+
+export async function listPostReviews(status: PostStatus | null = 'pending'): Promise<PostReview[]> {
+  return (await callRpc<PostReview[] | null>('connectical_admin_list_posts', { p_status: status })) ?? [];
+}
+
+export async function moderatePost(postId: string, status: 'approved' | 'rejected', note: string): Promise<string> {
+  return callRpc('connectical_admin_moderate_post', { p_post_id: postId, p_status: status, p_note: note });
+}

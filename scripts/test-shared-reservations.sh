@@ -1451,6 +1451,57 @@ if as_user "$provider_user" "select count(*) from public.connectical_provider_st
 fi
 echo "PASS provider statistics cover only own offers, follow the period and reconcile with reservations"
 
+# Offer posts and stories (202611170003): own offers, official permalinks only, moderated, public feed.
+save_post() { as_user "$1" "select (public.connectical_provider_save_post($2)).id;"; }
+feed_count() { docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) from public.connectical_list_feed() where offer_id = '$tour';" | tail -1; }
+if save_post "$traveler_a" "null, '$tour', 'post', 'Not mine', null" >/dev/null 2>&1; then echo "A traveler published a post" >&2; exit 1; fi
+for bad_link in "https://instagram.com/p/AbCdEf123/?igsh=tracking" "http://instagram.com/p/AbCdEf123/" \
+                "https://evil.example/instagram.com/p/AbCdEf123/" "https://www.tiktok.com/@lab/photo/12345678901" "javascript:alert(1)"; do
+  if save_post "$provider_user" "null, '$tour', 'post', 'Bad link', '$bad_link'" >/dev/null 2>&1; then
+    echo "Unsupported link accepted: $bad_link" >&2; exit 1
+  fi
+done
+if save_post "$provider_user" "null, '$tour', 'reel', 'Bad kind', null" >/dev/null 2>&1; then echo "Unknown post kind accepted" >&2; exit 1; fi
+post_ig=$(save_post "$provider_user" "null, '$tour', 'post', 'Trilha ao nascer do sol', 'https://www.instagram.com/reel/AbCdEf123/'")
+story_tt=$(save_post "$provider_user" "null, '$tour', 'story', 'Vagas hoje!', 'https://www.tiktok.com/@buzios.lab/video/7312345678901234567'")
+post_txt=$(save_post "$provider_user" "null, '$tour', 'post', 'Sem link', '  '")
+platforms=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select string_agg(coalesce(link_platform, 'none'), ',' order by created_at) from public.connectical_offer_posts where offer_id = '$tour';" | tail -1)
+[ "$platforms" = 'instagram,tiktok,none' ] || { echo "Platforms not derived: $platforms" >&2; exit 1; }
+[ "$(feed_count)" = '0' ] || { echo "Pending posts are public" >&2; exit 1; }
+if as_user "$provider_user" "select public.connectical_admin_moderate_post('$post_ig', 'approved', '');" >/dev/null 2>&1; then
+  echo "Provider approved their own post" >&2; exit 1
+fi
+if as_user "$admin_user" "select public.connectical_admin_moderate_post('$post_txt', 'rejected', '');" >/dev/null 2>&1; then
+  echo "Rejection without a reason accepted" >&2; exit 1
+fi
+pending=$(as_user "$admin_user" "select count(*) from public.connectical_admin_list_posts('pending') where offer_id = '$tour';")
+[ "$pending" = '3' ] || { echo "Moderation queue mismatch: $pending" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_moderate_post('$post_ig', 'approved', '');" >/dev/null
+as_user "$admin_user" "select public.connectical_admin_moderate_post('$story_tt', 'approved', '');" >/dev/null
+as_user "$admin_user" "select public.connectical_admin_moderate_post('$post_txt', 'rejected', 'Texto sem informação útil');" >/dev/null
+[ "$(feed_count)" = '2' ] || { echo "Approved posts missing from the feed: $(feed_count)" >&2; exit 1; }
+own_view=$(as_user "$provider_user" "select status || '|' || moderation_note from public.connectical_provider_list_posts() where id = '$post_txt';")
+[ "$own_view" = 'rejected|Texto sem informação útil' ] || { echo "Provider does not see the rejection reason: $own_view" >&2; exit 1; }
+story_until=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select visible_until between now() + interval '23 hours' and now() + interval '25 hours' from public.connectical_offer_posts where id = '$story_tt';" | tail -1)
+[ "$story_until" = 't' ] || { echo "Story is not limited to 24 hours" >&2; exit 1; }
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_offer_posts set visible_until = now() - interval '1 minute' where id = '$story_tt';"
+[ "$(feed_count)" = '1' ] || { echo "Expired story still in the feed" >&2; exit 1; }
+save_post "$provider_user" "'$post_ig', '$tour', 'post', 'Trilha editada', 'https://instagram.com/p/AbCdEf123'" >/dev/null
+[ "$(feed_count)" = '0' ] || { echo "Edited post stayed public without review" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_moderate_post('$post_ig', 'approved', '');" >/dev/null
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$tour', 'suspended', 'Lab check');" >/dev/null
+[ "$(feed_count)" = '0' ] || { echo "Posts of a suspended offer are public" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_moderation('$tour', 'approved', '');" >/dev/null
+if as_user "$traveler_a" "select count(*) from public.connectical_offer_posts;" >/dev/null 2>&1; then echo "Posts table readable directly" >&2; exit 1; fi
+if as_user "$traveler_a" "select public.connectical_provider_delete_post('$post_ig');" >/dev/null 2>&1; then echo "A traveler deleted a post" >&2; exit 1; fi
+i=0; while [ $i -lt 7 ]; do save_post "$provider_user" "null, '$tour', 'story', 'Story $i', null" >/dev/null; i=$((i + 1)); done
+if save_post "$provider_user" "null, '$tour', 'story', 'One too many', null" >/dev/null 2>&1; then echo "Daily post limit not enforced" >&2; exit 1; fi
+as_user "$provider_user" "select public.connectical_provider_delete_post('$post_ig');" >/dev/null
+[ "$(feed_count)" = '0' ] || { echo "Deleted post still public" >&2; exit 1; }
+audit_posts=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from public.connectical_admin_audit_log where target_table = 'connectical_offer_posts';" | tail -1)
+[ "$audit_posts" = '4' ] || { echo "Post moderation not audited: $audit_posts" >&2; exit 1; }
+echo "PASS offer posts: own offers, official permalinks only, moderated before public, 24-hour stories, daily limit"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

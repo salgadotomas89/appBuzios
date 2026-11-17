@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Linking, Text } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
 import App from '../App';
 import * as service from '../src/lib/reservationService';
@@ -24,12 +24,16 @@ jest.mock('../src/lib/reservationService', () => ({
   listSharedOffers: jest.fn(),
   listPublishedAvailability: jest.fn(),
   getSharedRole: jest.fn(async () => null),
+  listActivePromotions: jest.fn(async () => []),
 }));
 
-jest.mock('../src/lib/platformService', () => ({ listOfferMedia: jest.fn(async () => []) }));
+jest.mock('../src/lib/platformService', () => ({
+  listOfferMedia: jest.fn(async () => []),
+  listFeed: jest.fn(async () => []),
+}));
 
 const mocked = service as jest.Mocked<typeof service>;
-const mockedPlatform = jest.requireMock('../src/lib/platformService') as { listOfferMedia: jest.Mock };
+const mockedPlatform = jest.requireMock('../src/lib/platformService') as { listOfferMedia: jest.Mock; listFeed: jest.Mock };
 
 function flattenText(children: unknown): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
@@ -142,4 +146,44 @@ test('filters shared offers by a date with free units', async () => {
   expect(hasText(root, 'Con cupo')).toBe(true);
   expect(hasText(root, 'Sin cupo ese día')).toBe(false);
   expect(hasText(root, 'La fecha filtra solo ofertas con cupo publicado; los ejemplos no tienen calendario.')).toBe(true);
+});
+
+test('shows moderated provider news on the home screen and opens the official permalink', async () => {
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-1', provider_id: 'p-1', category: 'actividades', title: 'Trilha do sol',
+    base_price_cents: 9000, price_mode: 'person', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue([]);
+  mockedPlatform.listFeed.mockResolvedValueOnce([
+    { id: 'post-1', offer_id: 'o-1', kind: 'story', body: 'Vagas hoje ao nascer do sol', link_url: 'https://www.instagram.com/reel/AbCdEf123/', link_platform: 'instagram', published_at: '2099-01-01T00:00:00Z', visible_until: '2099-01-02T00:00:00Z' },
+    // Post de una oferta que el catálogo no conoce (p. ej. ya no publicada): no se muestra.
+    { id: 'post-2', offer_id: 'o-unknown', kind: 'post', body: 'Oferta desconocida', link_url: null, link_platform: null, published_at: '2099-01-01T00:00:00Z', visible_until: null },
+  ]);
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const root = await renderApp();
+
+  expect(hasText(root, 'Novedades en Búzios')).toBe(true);
+  expect(hasText(root, 'Historia · Trilha do sol')).toBe(true);
+  expect(hasText(root, 'Vagas hoje ao nascer do sol')).toBe(true);
+  expect(hasText(root, 'Oferta desconocida')).toBe(false);
+  await pressText(root, 'Ver en Instagram');
+  expect(openURL).toHaveBeenCalledWith('https://www.instagram.com/reel/AbCdEf123/');
+  await pressText(root, 'Ver oferta');
+  expect(hasText(root, 'Trilha do sol')).toBe(true);
+  openURL.mockRestore();
+});
+
+test('prices shared offers with the promotion active today and keeps the list price visible', async () => {
+  const { buziosIsoDate } = jest.requireActual('../src/utils/portalInput');
+  const today = buziosIsoDate();
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-1', provider_id: 'p-1', category: 'restaurantes', title: 'Jantar no cais',
+    base_price_cents: 20000, price_mode: 'person', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue([]);
+  mocked.listActivePromotions.mockResolvedValueOnce([
+    { offer_id: 'o-1', percent_off_bps: 2500, starts_on: today, ends_on: today, label: 'Semana gastronómica' },
+  ]);
+  const root = await renderApp();
+  expect(hasText(root, '25%')).toBe(true);
 });

@@ -19,6 +19,8 @@ import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
 import { CATEGORY_ICONS, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
 import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
+import { OfferFeed } from '../components/OfferFeed';
+import type { FeedPost } from '../lib/platformService';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
 import { useBuziosToday } from '../hooks/useBuziosToday';
@@ -800,7 +802,7 @@ function HomeView({
   onExplore: () => void;
   onOffer: (offer: Offer) => void;
   onOperations: () => void;
-  catalog: Catalog & { source: CatalogSource };
+  catalog: Catalog & { source: CatalogSource; feed?: FeedPost[] };
 }) {
   return (
     <>
@@ -819,6 +821,9 @@ function HomeView({
         </View>
       </View>
       <CatalogNotice source={catalog.source} words={words} />
+      {catalog.feed?.length ? (
+        <OfferFeed posts={catalog.feed} offers={catalog.offers} language={language} onOffer={onOffer} />
+      ) : null}
       <SectionHeading title={words.categories} trailing={String(catalog.categories.length).padStart(2, '0')} />
       <View style={styles.categoryGrid}>
         {catalog.categories.map(category => (

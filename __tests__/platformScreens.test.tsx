@@ -13,6 +13,7 @@ jest.mock('../src/lib/platformService', () => {
     'listProviderApplications', 'reviewProviderApplication', 'saveCampaign', 'setOfferModeration', 'updateIncident',
     'getMyProviderApplication', 'listMyIncidents', 'reportIncident', 'submitProviderApplication',
     'listMediaReviews', 'setMediaModeration', 'listProviderCategoryRates', 'setProviderCategoryRate',
+    'listPostReviews', 'moderatePost',
   ];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -258,4 +259,26 @@ it('sets and removes a per-category commission for a chosen provider', async () 
   await press(root, 'Quitar (usar la del proveedor)');
   expect(mocked.setProviderCategoryRate).toHaveBeenLastCalledWith('prov-1', 'restaurantes', null);
   expect(hasText(root, 'no tiene comisiones por categoría')).toBe(true);
+});
+
+it('moderates provider posts: approve, or reject only with a reason', async () => {
+  const review: platform.PostReview = {
+    id: 'post-1', offer_id: 'o1', offer_title: 'Trilha', provider_name: 'Mar Azul', kind: 'story', body: 'Vagas hoje',
+    link_url: 'https://www.instagram.com/reel/AbCdEf123/', link_platform: 'instagram', status: 'pending', moderation_note: '', created_at: '',
+  };
+  mocked.listPostReviews.mockResolvedValue([review]);
+  mocked.moderatePost.mockResolvedValue('approved');
+  const root = await renderAdmin();
+  await press(root, 'Novedades');
+  expect(mocked.listPostReviews).toHaveBeenCalledWith('pending');
+  expect(hasText(root, 'Trilha · Mar Azul · story')).toBe(true);
+  expect(hasText(root, 'https://www.instagram.com/reel/AbCdEf123/')).toBe(true);
+  await press(root, 'Aprobar publicación');
+  expect(mocked.moderatePost).toHaveBeenCalledWith('post-1', 'approved', '');
+  expect(hasText(root, 'message:Publicación revisada.')).toBe(true);
+
+  await press(root, 'Rechazar publicación');
+  await type(root, 'Motivo del rechazo (lo ve el proveedor)', ' Link de outra conta ');
+  await press(root, 'Rechazar publicación');
+  expect(mocked.moderatePost).toHaveBeenLastCalledWith('post-1', 'rejected', 'Link de outra conta');
 });

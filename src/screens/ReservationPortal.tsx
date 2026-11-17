@@ -101,7 +101,8 @@ import { OfferPhotoManager } from '../components/OfferPhotoManager';
 import { PromotionManager } from '../components/PromotionManager';
 import { ProviderStats } from '../components/ProviderStats';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
-import { getProviderStats, listOwnOfferMedia } from '../lib/platformService';
+import { deleteOwnPost, getProviderStats, listOwnOfferMedia, listOwnPosts, saveOwnPost } from '../lib/platformService';
+import { PostManager } from '../components/PostManager';
 import { offerPhotoGateway } from '../media/offerPhotos';
 import { sessionManager } from '../lib/insforge';
 import { AdminConsole } from './AdminConsole';
@@ -824,6 +825,14 @@ export function ReservationPortal({
               <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
               <Text style={styles.helper}>{words.publishNightsHint}</Text>
               <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
+              <PostManager
+                offerId={selectedProviderOfferId}
+                language={language}
+                load={listOwnPosts}
+                save={saveOwnPost}
+                remove={deleteOwnPost}
+                describeError={describeError}
+              />
               <PromotionManager
                 offerId={selectedProviderOfferId}
                 language={language}

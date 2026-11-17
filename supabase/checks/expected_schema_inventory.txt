@@ -57,6 +57,21 @@ column connectical_offer_media.position integer null=NO
 column connectical_offer_media.storage_key text null=NO
 column connectical_offer_media.url text null=NO
 column connectical_offer_media.width integer null=NO
+column connectical_offer_posts.body text null=NO
+column connectical_offer_posts.created_at timestamp with time zone null=NO
+column connectical_offer_posts.created_by uuid null=YES
+column connectical_offer_posts.id uuid null=NO
+column connectical_offer_posts.kind text null=NO
+column connectical_offer_posts.link_platform text null=YES
+column connectical_offer_posts.link_url text null=YES
+column connectical_offer_posts.moderated_at timestamp with time zone null=YES
+column connectical_offer_posts.moderated_by uuid null=YES
+column connectical_offer_posts.moderation_note text null=NO
+column connectical_offer_posts.offer_id uuid null=NO
+column connectical_offer_posts.provider_id uuid null=NO
+column connectical_offer_posts.status text null=NO
+column connectical_offer_posts.updated_at timestamp with time zone null=NO
+column connectical_offer_posts.visible_until timestamp with time zone null=YES
 column connectical_offer_promotions.active boolean null=NO
 column connectical_offer_promotions.created_at timestamp with time zone null=NO
 column connectical_offer_promotions.created_by uuid null=YES
@@ -215,10 +230,12 @@ function connectical_admin_list_incidents(p_status text) definer=true md5=dd9586
 function connectical_admin_list_media_reviews(p_status text) definer=true md5=ad3ff2125f85a506b6487f1ef28249db
 function connectical_admin_list_offers_for_moderation() definer=true md5=5865fd70ee5bab3440d33251b11c75a4
 function connectical_admin_list_payment_reviews(p_limit integer) definer=true md5=35c5b132cfd3911822fb800e62c019cb
+function connectical_admin_list_posts(p_status text) definer=true md5=86e3b6be668052407b8ada5528f8dc4d
 function connectical_admin_list_provider_applications(p_status text) definer=true md5=1a33c9acb674a4c076017642c7a850e5
 function connectical_admin_list_provider_category_rates(p_provider_id uuid) definer=true md5=5a21497059ee927ba4075ca7f6d172aa
 function connectical_admin_list_reservation_events(p_reservation_id uuid, p_limit integer) definer=true md5=d55c4f2a1d6fee0c932d33ed59532065
 function connectical_admin_list_users(p_role text) definer=true md5=669fa50cceac71d19f1703d5df8959f2
+function connectical_admin_moderate_post(p_post_id uuid, p_status text, p_note text) definer=true md5=66a5b425d3d0444c8e822db59c48d495
 function connectical_admin_record_refund(p_reservation_id uuid, p_amount_cents integer, p_reason text, p_idempotency_key uuid) definer=true md5=0628cdf8b4814772192137addd95e2a7
 function connectical_admin_review_provider_application(p_application_id uuid, p_decision text, p_note text, p_commission_rate_bps integer) definer=true md5=da1b6be863deeb1a2c10df61c2baa5ca
 function connectical_admin_save_campaign(p_campaign_id uuid, p_title text, p_body text, p_category text, p_starts_on date, p_ends_on date, p_status text) definer=true md5=96e7491a31aaede9bd09029d812eb129
@@ -244,6 +261,7 @@ function connectical_is_admin() definer=true md5=9f8e09ad68c6a55eb1e12b7ffa94e89
 function connectical_is_category(p_category text) definer=true md5=c53ec20c888bda9b798591a7db66a65a
 function connectical_issue_voucher() definer=true md5=7f1445e47791dbe71512f0ce81d0462e
 function connectical_list_active_promotions() definer=true md5=6642ea79469b7c81d523b5c9b613ee21
+function connectical_list_feed() definer=true md5=6540f08eca1cf759ac8fbb3fb388137b
 function connectical_list_reservations() definer=true md5=0863ee2c32962de8695c7f374cd4ec5c
 function connectical_lock_offer(p_offer_id uuid) definer=false md5=a69a57dfde1a25a403f3739f026c19f6
 function connectical_my_incidents() definer=true md5=5e28095c5066d0fd14bf196e27b1e362
@@ -254,9 +272,12 @@ function connectical_offer_media_new_pending() definer=false md5=ba91b426225edc5
 function connectical_offer_moderation_guard() definer=true md5=fd5f09ed8bbf7a992ff482d9f6dca2db
 function connectical_owns_offer(p_offer_id uuid) definer=true md5=72f2e5f8bdfd05dc5432098cbd1520af
 function connectical_provider_check_in(p_voucher_code text) definer=true md5=68ab08665b86e4e51cc511550e6686db
+function connectical_provider_delete_post(p_post_id uuid) definer=true md5=2927417b6b7509e957069988ef2b7a80
+function connectical_provider_list_posts() definer=true md5=2dbd1444a1d65ba7edc4c275fcfc4ce9
 function connectical_provider_list_promotions(p_offer_id uuid) definer=true md5=5a3f1946b859728a138198b1cacc0274
 function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date date, p_total_units integer) definer=true md5=d9fdb95dad61964675ff588b9f5f69f0
 function connectical_provider_publish_inventory_range(p_offer_id uuid, p_from_date date, p_nights integer, p_total_units integer) definer=true md5=45c6eba21cc037eca0487f24a565fdda
+function connectical_provider_save_post(p_post_id uuid, p_offer_id uuid, p_kind text, p_body text, p_link_url text) definer=true md5=2bedc292273875f67e02fc6564c91141
 function connectical_provider_save_promotion(p_promotion_id uuid, p_offer_id uuid, p_percent_off_bps integer, p_starts_on date, p_ends_on date, p_label text, p_active boolean) definer=true md5=a40834269db76873d01f373b7af7e171
 function connectical_provider_set_offer_details(p_offer_id uuid, p_description text, p_location text, p_meeting_point text, p_schedule text, p_min_quantity integer, p_max_quantity integer) definer=true md5=c08a029448466d147ca74d60409f3d97
 function connectical_provider_stats(p_from date, p_to date) definer=true md5=d810ff9d0c7f41851e2c7c689278f591
@@ -267,6 +288,7 @@ function connectical_redact_reservation(p_reservation connectical_reservations) 
 function connectical_remove_offer_media(p_media_id uuid) definer=true md5=1352f72016699ce882cc6fce1ea306e3
 function connectical_report_incident(p_reservation_id uuid, p_category text, p_description text) definer=true md5=383f082fcbef78694a029aaaf2b73f70
 function connectical_simulate_payment(p_reservation_id uuid, p_outcome text, p_method text, p_reference text) definer=true md5=2aa8f57fc5c9c34b0d38fd0c432eff65
+function connectical_social_platform(p_url text) definer=false md5=d225a9197a29253a28ddeb29735cd17f
 function connectical_submit_provider_application(p_business_name text, p_category text, p_contact_name text, p_contact_phone text, p_contact_email text, p_location text, p_description text) definer=true md5=9f89cf60e81cab764872b03571018cf2
 function connectical_system_expire_holds() definer=true md5=afbf55b0016e4b818707a268fcce2fbb
 function connectical_system_ingest_payment_event(p_gateway text, p_event_id text, p_reservation_id uuid, p_kind text, p_amount_cents integer, p_currency text, p_method text, p_gateway_reference text) definer=true md5=0ef61a23142068ffc5fc3d33c43ef267
@@ -287,6 +309,10 @@ index connectical_offer_media.connectical_offer_media_offer_idx USING btree (off
 index connectical_offer_media.connectical_offer_media_pkey USING btree (id)
 index connectical_offer_media.connectical_offer_media_review_idx USING btree (created_at) WHERE (moderation_status = 'pending'::text)
 index connectical_offer_media.connectical_offer_media_storage_key_key USING btree (storage_key)
+index connectical_offer_posts.connectical_offer_posts_offer_idx USING btree (offer_id)
+index connectical_offer_posts.connectical_offer_posts_pending_idx USING btree (created_at) WHERE (status = 'pending'::text)
+index connectical_offer_posts.connectical_offer_posts_pkey USING btree (id)
+index connectical_offer_posts.connectical_offer_posts_provider_idx USING btree (provider_id, created_at DESC)
 index connectical_offer_promotions.connectical_offer_promotions_offer_idx USING btree (offer_id, starts_on)
 index connectical_offer_promotions.connectical_offer_promotions_pkey USING btree (id)
 index connectical_offers.connectical_offers_category_idx USING btree (category)
@@ -348,6 +374,7 @@ table connectical_commission_references rls=true
 table connectical_incidents rls=true
 table connectical_inventory rls=true
 table connectical_offer_media rls=true
+table connectical_offer_posts rls=true
 table connectical_offer_promotions rls=true
 table connectical_offers rls=true
 table connectical_payment_events rls=true
