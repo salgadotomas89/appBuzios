@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Linking, Text } from 'react-native';
 import ReactTestRenderer, { type ReactTestInstance } from 'react-test-renderer';
 import App from '../App';
 import { addDays, buziosIsoDate } from '../src/utils/portalInput';
@@ -308,4 +308,21 @@ test('shows bookings stored before English existed using the Spanish snapshot', 
   pressText(root, 'BF-DEMO-007');
   expect(hasText(root, 'Escuna antigua')).toBe(true);
   expect(hasText(root, 'por persona')).toBe(true);
+});
+
+test('opens directions in the maps app and suggests other bookable offers from the detail', async () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const root = (await renderApp()).root;
+  pressText(root, 'Barcos');
+  pressText(root, 'Escuna por 12 playas');
+  const directions = root.findAllByType(Text).map(node => flattenText(node.props.children)).find(text => text.startsWith('Cómo llegar · '));
+  expect(directions).toBeDefined();
+  pressText(root, directions as string);
+  expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/maps\.apple\.com\/\?q=.*B%C3%BAzios/));
+  expect(hasText(root, 'También te puede interesar')).toBe(true);
+  // Un buggy sin cupo no se recomienda.
+  expect(hasText(root, 'Buggy al atardecer')).toBe(false);
+  pressAccessible(root, 'Ruta en buggy por Búzios');
+  expect(hasText(root, 'Ruta en buggy por Búzios')).toBe(true);
+  openURL.mockRestore();
 });

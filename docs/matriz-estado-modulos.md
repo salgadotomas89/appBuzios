@@ -41,7 +41,8 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Búsqueda | COMPLETO | Sin distinguir acentos ni mayúsculas, todas las palabras, sobre título, ubicación, descripción y categoría | — |
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
 | Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |
-| Mapas | NO IMPLEMENTADO | Sin proveedor de mapas elegido | P2 |
+| Mapas | PARCIAL | «Cómo llegar» en el detalle abre Apple Maps (iOS) o Google Maps con el punto de encuentro o la ubicación acotada a Búzios, por URL universal (sin SDK ni clave). Falta un mapa incrustado y coordenadas por oferta | P2: elegir proveedor de mapas |
+| Recomendaciones | COMPLETO | «También te puede interesar» en el detalle: reglas locales y explicables (categoría, favoritos, oferta real, descuento, cupo); nunca ofertas sin cupo | — |
 | Comprobantes y check-in | COMPLETO (local) | Código BZ-XXXX-XXXX al confirmar (cualquier camino), visible solo al turista dueño y a admin; el turista lo comparte con la hoja del sistema; el proveedor lo valida una vez, desde la víspera hasta el último día, con 20 fallos/hora como máximo y evento `checked_in` (202611170001). **Migración sin aplicar** | Aplicar 202611170001 |
 | Notificaciones (correo/push) | BLOQUEADO | Sin SMTP propio ni proveedor de push; el comprobante se comparte desde la app mientras tanto | P2 |
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
