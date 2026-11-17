@@ -40,7 +40,8 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
 | Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |
 | Mapas | NO IMPLEMENTADO | Sin proveedor de mapas elegido | P2 |
-| Notificaciones y comprobantes | NO IMPLEMENTADO | Requiere proveedor de correo/push | P2 |
+| Comprobantes y check-in | COMPLETO (local) | Código BZ-XXXX-XXXX al confirmar (cualquier camino), visible solo al turista dueño y a admin; el turista lo comparte con la hoja del sistema; el proveedor lo valida una vez, desde la víspera hasta el último día, con 20 fallos/hora como máximo y evento `checked_in` (202611170001). **Migración sin aplicar** | Aplicar 202611170001 |
+| Notificaciones (correo/push) | BLOQUEADO | Sin SMTP propio ni proveedor de push; el comprobante se comparte desde la app mientras tanto | P2 |
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
 | Inglés | PARCIAL | Interfaz y contenido de ejemplo traducidos, con aviso visible de traducción pendiente de revisión profesional; términos legales no aprobados en inglés | Revisión humana |
 | Privacidad de identificadores y comisiones | COMPLETO | 0005 y 0010: el proveedor no lee uuid de turistas (tampoco en cotizaciones) y el turista no recibe la comisión B2B en ninguna lectura ni respuesta; sondas de fuga y verificación automática | P0 hecho |

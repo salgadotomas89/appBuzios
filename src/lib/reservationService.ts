@@ -34,7 +34,19 @@ export type SharedReservation = {
   quote_version: string;
   created_at: string;
   updated_at: string;
+  // Migración 202611170001: código del comprobante (solo el turista dueño y la administración) y check-in.
+  voucher_code?: string | null;
+  checked_in_at?: string | null;
 };
+
+export type CheckInStatus =
+  | 'checked_in'
+  | 'already_checked_in'
+  | 'not_found'
+  | 'not_confirmed'
+  | 'outside_dates'
+  | 'too_many_attempts';
+export type CheckInResult = { status: CheckInStatus; reservation?: SharedReservation };
 
 export type SharedQuote = {
   id: string;
@@ -232,6 +244,11 @@ export async function saveProviderPromotion(input: {
     p_label: input.label,
     p_active: input.active,
   });
+}
+
+// Proveedor (o administración): valida el comprobante que muestra el turista. Un solo uso, dentro de las fechas.
+export async function providerCheckIn(voucherCode: string): Promise<CheckInResult> {
+  return callRpc<CheckInResult>('connectical_provider_check_in', { p_voucher_code: voucherCode });
 }
 
 export async function createSharedReservationHold(

@@ -165,6 +165,8 @@ column connectical_reservation_events.event_type text null=NO
 column connectical_reservation_events.id bigint null=NO
 column connectical_reservation_events.reservation_id uuid null=NO
 column connectical_reservations.amount_cents integer null=NO
+column connectical_reservations.checked_in_at timestamp with time zone null=YES
+column connectical_reservations.checked_in_by uuid null=YES
 column connectical_reservations.connectical_margin_cents integer null=NO
 column connectical_reservations.created_at timestamp with time zone null=NO
 column connectical_reservations.hold_expires_at timestamp with time zone null=YES
@@ -188,6 +190,7 @@ column connectical_reservations.service_fee_rate_bps integer null=NO
 column connectical_reservations.status text null=NO
 column connectical_reservations.traveler_user_id uuid null=NO
 column connectical_reservations.updated_at timestamp with time zone null=NO
+column connectical_reservations.voucher_code text null=YES
 column connectical_settings.key text null=NO
 column connectical_settings.updated_at timestamp with time zone null=NO
 column connectical_settings.value jsonb null=NO
@@ -197,6 +200,10 @@ column connectical_sweep_runs.finished_at timestamp with time zone null=YES
 column connectical_sweep_runs.id bigint null=NO
 column connectical_sweep_runs.started_at timestamp with time zone null=NO
 column connectical_sweep_runs.status text null=NO
+column connectical_voucher_attempts.created_at timestamp with time zone null=NO
+column connectical_voucher_attempts.id bigint null=NO
+column connectical_voucher_attempts.succeeded boolean null=NO
+column connectical_voucher_attempts.user_id uuid null=NO
 function connectical_active_campaigns() definer=true md5=0abf11159e46fdb22afcf40862c646ff
 function connectical_add_offer_media(p_offer_id uuid, p_storage_key text, p_content_type text, p_byte_size integer, p_width integer, p_height integer, p_alt_text text) definer=true md5=cb7afb9808f6e08a07fd4e97ab0f2e57
 function connectical_adjust_stay_inventory(p_offer_id uuid, p_service_date date, p_nights integer, p_held_delta integer, p_sold_delta integer) definer=true md5=034afe718fcfda2f9621b6f6f0b358e3
@@ -235,15 +242,18 @@ function connectical_expire_holds() definer=true md5=6d0d6f87ec295badee5e054a743
 function connectical_expire_offer_holds(p_offer_id uuid) definer=true md5=4ead1325995c9522ecf4122e06d0d972
 function connectical_is_admin() definer=true md5=9f8e09ad68c6a55eb1e12b7ffa94e899
 function connectical_is_category(p_category text) definer=true md5=c53ec20c888bda9b798591a7db66a65a
+function connectical_issue_voucher() definer=true md5=7f1445e47791dbe71512f0ce81d0462e
 function connectical_list_active_promotions() definer=true md5=6642ea79469b7c81d523b5c9b613ee21
 function connectical_list_reservations() definer=true md5=0863ee2c32962de8695c7f374cd4ec5c
 function connectical_lock_offer(p_offer_id uuid) definer=false md5=a69a57dfde1a25a403f3739f026c19f6
 function connectical_my_incidents() definer=true md5=5e28095c5066d0fd14bf196e27b1e362
 function connectical_my_provider_application() definer=true md5=0c87776cbf5d2d8c38b9959d40cd0e11
+function connectical_new_voucher_code() definer=false md5=da1d7a580cbeac6f71c86374c2c0e428
 function connectical_offer_media_moderation_guard() definer=false md5=aa017723992b74204304a985cda4ba3f
 function connectical_offer_media_new_pending() definer=false md5=ba91b426225edc5164e7b71eda020c37
 function connectical_offer_moderation_guard() definer=true md5=fd5f09ed8bbf7a992ff482d9f6dca2db
 function connectical_owns_offer(p_offer_id uuid) definer=true md5=72f2e5f8bdfd05dc5432098cbd1520af
+function connectical_provider_check_in(p_voucher_code text) definer=true md5=68ab08665b86e4e51cc511550e6686db
 function connectical_provider_list_promotions(p_offer_id uuid) definer=true md5=5a3f1946b859728a138198b1cacc0274
 function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date date, p_total_units integer) definer=true md5=d9fdb95dad61964675ff588b9f5f69f0
 function connectical_provider_publish_inventory_range(p_offer_id uuid, p_from_date date, p_nights integer, p_total_units integer) definer=true md5=45c6eba21cc037eca0487f24a565fdda
@@ -251,7 +261,8 @@ function connectical_provider_save_promotion(p_promotion_id uuid, p_offer_id uui
 function connectical_provider_set_offer_details(p_offer_id uuid, p_description text, p_location text, p_meeting_point text, p_schedule text, p_min_quantity integer, p_max_quantity integer) definer=true md5=c08a029448466d147ca74d60409f3d97
 function connectical_provider_upsert_offer(p_offer_id uuid, p_category text, p_title text, p_base_price_cents integer, p_price_mode text, p_published boolean) definer=true md5=bfe5b848fb00b080ae2274e548a6bc65
 function connectical_prune_sweep_runs() definer=true md5=50148376a5eba44e6ac78d7906d35d93
-function connectical_redact_reservation(p_reservation connectical_reservations) definer=true md5=3c67e0870807c35327bd864578b42796
+function connectical_prune_voucher_attempts() definer=true md5=34346a933acf8412a2401b5514fd248a
+function connectical_redact_reservation(p_reservation connectical_reservations) definer=true md5=8599c0b8f4a7016ba15b2e7771f0032f
 function connectical_remove_offer_media(p_media_id uuid) definer=true md5=1352f72016699ce882cc6fce1ea306e3
 function connectical_report_incident(p_reservation_id uuid, p_category text, p_description text) definer=true md5=383f082fcbef78694a029aaaf2b73f70
 function connectical_simulate_payment(p_reservation_id uuid, p_outcome text, p_method text, p_reference text) definer=true md5=2aa8f57fc5c9c34b0d38fd0c432eff65
@@ -308,9 +319,12 @@ index connectical_reservations.connectical_reservations_provider_idx USING btree
 index connectical_reservations.connectical_reservations_quote_id_key USING btree (quote_id)
 index connectical_reservations.connectical_reservations_traveler_idx USING btree (traveler_user_id, created_at DESC)
 index connectical_reservations.connectical_reservations_traveler_user_id_idempotency_key_key USING btree (traveler_user_id, idempotency_key)
+index connectical_reservations.connectical_reservations_voucher_code_key USING btree (voucher_code) WHERE (voucher_code IS NOT NULL)
 index connectical_settings.connectical_settings_pkey USING btree (key)
 index connectical_sweep_runs.connectical_sweep_runs_pkey USING btree (id)
 index connectical_sweep_runs.connectical_sweep_runs_started_idx USING btree (started_at DESC)
+index connectical_voucher_attempts.connectical_voucher_attempts_pkey USING btree (id)
+index connectical_voucher_attempts.connectical_voucher_attempts_user_idx USING btree (user_id, created_at DESC)
 policy connectical_categories.connectical_categories_read SELECT anon,authenticated
 policy connectical_inventory.connectical_inventory_read SELECT anon,authenticated
 policy connectical_offer_media.connectical_offer_media_read SELECT anon,authenticated
@@ -346,6 +360,7 @@ table connectical_reservation_events rls=true
 table connectical_reservations rls=true
 table connectical_settings rls=true
 table connectical_sweep_runs rls=true
+table connectical_voucher_attempts rls=true
 trigger connectical_offer_media.connectical_offer_media_moderation_guard
 trigger connectical_offer_media.connectical_offer_media_new_pending
 trigger connectical_offers.connectical_audit_offers
@@ -354,3 +369,5 @@ trigger connectical_profiles.connectical_audit_profiles
 trigger connectical_provider_applications.connectical_audit_applications
 trigger connectical_providers.connectical_audit_providers
 trigger connectical_refunds.connectical_audit_refunds
+trigger connectical_reservations.connectical_reservations_issue_voucher
+trigger connectical_voucher_attempts.connectical_voucher_attempts_prune

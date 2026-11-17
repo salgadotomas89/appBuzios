@@ -1387,6 +1387,51 @@ audit_actions=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "s
 [ "$audit_actions" = '2|2' ] || { echo "Commerce changes not audited: $audit_actions" >&2; exit 1; }
 echo "PASS categories as data, dated promotions on discounted subtotals and three-level commission traced per quote"
 
+# Vouchers (202611170001): code on confirmation, visible to the traveler only, single check-in within the dates.
+bz_today=$(as_user "$traveler_b" "select public.connectical_today();")
+tour=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'actividades', 'Lab trail', 9000, 'person', true)).id;")
+for offset in 0 20; do
+  as_user "$provider_user" "select public.connectical_provider_publish_inventory('$tour', date '$bz_today' + $offset, 5);" >/dev/null
+done
+book_tour() {
+  quote=$(as_user "$traveler_b" "select (public.connectical_create_quote('$tour', date '$bz_today' + $1, 2, 1, 600)).id;")
+  hold=$(as_user "$traveler_b" "select (public.connectical_create_reservation_hold('$quote', gen_random_uuid())).id;")
+  if [ "$2" = 'pay' ]; then as_user "$traveler_b" "select public.connectical_simulate_payment('$hold','approved','pix','LAB-VOUCHER');" >/dev/null; fi
+  printf '%s' "$hold"
+}
+today_res=$(book_tour 0 pay)
+later_res=$(book_tour 20 pay)
+held_res=$(book_tour 0 hold)
+code=$(as_user "$traveler_b" "select voucher_code from public.connectical_list_reservations() where id = '$today_res';")
+printf '%s' "$code" | grep -Eq '^BZ-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$' || { echo "Voucher code missing or malformed: $code" >&2; exit 1; }
+held_code=$(as_user "$traveler_b" "select coalesce(voucher_code, 'none') from public.connectical_list_reservations() where id = '$held_res';")
+[ "$held_code" = 'none' ] || { echo "Unpaid hold got a voucher: $held_code" >&2; exit 1; }
+provider_code=$(as_user "$provider_user" "select coalesce(voucher_code, 'hidden') from public.connectical_list_reservations() where id = '$today_res';")
+[ "$provider_code" = 'hidden' ] || { echo "Provider can read the voucher code: $provider_code" >&2; exit 1; }
+other_code=$(as_user "$traveler_a" "select count(*) from public.connectical_list_reservations() where voucher_code is not null and id = '$today_res';")
+[ "$other_code" = '0' ] || { echo "Another traveler sees the voucher" >&2; exit 1; }
+if as_user "$traveler_b" "select public.connectical_provider_check_in('$code');" >/dev/null 2>&1; then
+  echo "A traveler could check in" >&2; exit 1
+fi
+check_in() { as_user "$1" "select (r->>'status') || '|' || coalesce(r->'reservation'->>'id', '-') || '|' || coalesce(r->'reservation'->>'voucher_code', 'hidden') from public.connectical_provider_check_in('$2') r;"; }
+loose=$(printf '%s' "$code" | tr -d '-' | tr 'A-Z' 'a-z')
+[ "$(check_in "$provider_user" " $loose ")" = "checked_in|$today_res|hidden" ] || { echo "Check-in with a loosely typed code failed: $(check_in "$provider_user" "$loose")" >&2; exit 1; }
+[ "$(check_in "$provider_user" "$code")" = "already_checked_in|$today_res|hidden" ] || { echo "Voucher accepted twice" >&2; exit 1; }
+checked=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select (checked_in_at is not null) || '|' || (checked_in_by = '$provider_user') || '|' || (select count(*) from public.connectical_reservation_events where reservation_id = '$today_res' and event_type = 'checked_in') from public.connectical_reservations where id = '$today_res';" | tail -1)
+[ "$checked" = 'true|true|1' ] || { echo "Check-in not recorded: $checked" >&2; exit 1; }
+later_code=$(as_user "$traveler_b" "select voucher_code from public.connectical_list_reservations() where id = '$later_res';")
+[ "$(check_in "$provider_user" "$later_code")" = "outside_dates|$later_res|hidden" ] || { echo "Check-in allowed outside the service dates" >&2; exit 1; }
+as_user "$traveler_b" "select public.connectical_cancel_reservation('$later_res', 'traveler_request');" >/dev/null
+[ "$(check_in "$admin_user" "$later_code")" = "not_confirmed|$later_res|$later_code" ] || { echo "Cancelled voucher not rejected (or admin view wrong): $(check_in "$admin_user" "$later_code")" >&2; exit 1; }
+[ "$(check_in "$provider_user" 'BZ-2222-2222')" = 'not_found|-|hidden' ] || { echo "Unknown voucher not reported" >&2; exit 1; }
+if as_user "$provider_user" "select count(*) from public.connectical_voucher_attempts;" >/dev/null 2>&1; then
+  echo "Voucher attempts readable through the API" >&2; exit 1
+fi
+i=0; while [ $i -lt 19 ]; do check_in "$provider_user" 'nonsense' >/dev/null; i=$((i + 1)); done
+[ "$(check_in "$provider_user" "$code")" = 'too_many_attempts|-|hidden' ] || { echo "Voucher guessing not rate limited" >&2; exit 1; }
+docker exec "$container" psql -q -U postgres -d postgres -c "delete from public.connectical_voucher_attempts;"
+echo "PASS vouchers: issued on confirmation, traveler-only, single check-in within the dates, guessing limited"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

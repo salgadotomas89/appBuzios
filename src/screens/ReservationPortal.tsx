@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  Share,
   Text,
   TextInput,
   View,
@@ -10,6 +11,8 @@ import {
 import {
   cancelSharedReservation,
   createSharedQuote,
+  providerCheckIn,
+  type CheckInResult,
   listProviderPromotions,
   saveProviderPromotion,
   createSharedReservationHold,
@@ -65,6 +68,7 @@ import {
   type SimulatedOutcome,
 } from '../i18n/portalCopy';
 import { brlFromCents } from '../utils/format';
+import { voucherShareText } from '../utils/voucher';
 import { DEMO_SERVICE_FEE_RATES, type DemoServiceFeeRate } from '../utils/journey';
 import {
   addDays,
@@ -132,9 +136,12 @@ export function ReservationPortal({
   onClose,
   language = 'es',
   photosEnabled = OFFER_PHOTOS_ENABLED,
+  shareText = Share.share,
 }: {
   onClose: () => void;
   language?: Language;
+  // Hoja de compartir del sistema; inyectable en pruebas.
+  shareText?: (content: { message: string }) => Promise<unknown>;
   // Solo para pruebas: el gestor de fotos depende del despliegue de offer-media (OFFER_PHOTOS_ENABLED).
   photosEnabled?: boolean;
 }) {
@@ -181,6 +188,8 @@ export function ReservationPortal({
   const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [voucherInput, setVoucherInput] = useState('');
+  const [checkInResult, setCheckInResult] = useState<CheckInResult | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -570,6 +579,21 @@ export function ReservationPortal({
       ? addDays(date.trim(), parsedNights)
       : null;
 
+  function shareVoucher(reservation: SharedReservation) {
+    const text = voucherShareText(reservation, offerTitles.get(reservation.offer_id) ?? '', language);
+    if (text) shareText({ message: text }).catch(() => undefined);
+  }
+
+  function checkIn() {
+    run(async () => {
+      const result = await providerCheckIn(voucherInput);
+      setCheckInResult(result);
+      if (result.status === 'checked_in') setVoucherInput('');
+      await loadForRole('provider');
+      return words.vouchers.results[result.status];
+    });
+  }
+
   const reservationList = (reason: CancelReason, list = reservations) => (
     <ReservationList
       reservations={list}
@@ -579,6 +603,7 @@ export function ReservationPortal({
       // Solo el turista paga; el backend rechaza pagos de reservas ajenas.
       onPay={role === 'traveler' ? pay : undefined}
       onRefund={role === 'admin' ? openRefund : undefined}
+      onShare={role === 'traveler' ? shareVoucher : undefined}
       disabled={busy}
     />
   );
@@ -830,6 +855,15 @@ export function ReservationPortal({
               <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
               <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
               <Text style={styles.helper}>{words.providerEarningsHint}</Text>
+              <Text style={styles.sectionTitle}>{words.vouchers.checkInTitle}</Text>
+              <Text style={styles.helper}>{words.vouchers.checkInHint}</Text>
+              <Field label={words.vouchers.checkInCode} value={voucherInput} onChange={setVoucherInput} maxLength={20} />
+              <ActionButton title={words.vouchers.checkInButton} onPress={checkIn} disabled={busy || !voucherInput.trim()} />
+              {checkInResult?.reservation ? (
+                <Text style={styles.helper}>
+                  {offerTitles.get(checkInResult.reservation.offer_id) ?? checkInResult.reservation.offer_id} · {checkInResult.reservation.service_date} · ×{checkInResult.reservation.quantity}
+                </Text>
+              ) : null}
               <Text style={styles.sectionTitle}>{words.receivedReservations}</Text>
               {reservationList('provider_cancelled')}
             </View>
@@ -1014,6 +1048,7 @@ function ReservationList({
   onCancel,
   onPay,
   onRefund,
+  onShare,
   disabled,
 }: {
   reservations: SharedReservation[];
@@ -1022,6 +1057,7 @@ function ReservationList({
   onCancel: (id: string) => void;
   onPay?: (id: string) => void;
   onRefund?: (reservation: SharedReservation) => void;
+  onShare?: (reservation: SharedReservation) => void;
   disabled: boolean;
 }) {
   if (!reservations.length) return <Text style={styles.helper}>{words.noReservations}</Text>;
@@ -1056,9 +1092,20 @@ function ReservationList({
                 : words.holdMinutesLeft.replace('{n}', String(minutesUntil(reservation.hold_expires_at)))}
             </Text>
           ) : null}
+          {reservation.voucher_code ? (
+            <Text selectable style={styles.offerName}>{words.vouchers.code}: {reservation.voucher_code}</Text>
+          ) : null}
+          {reservation.checked_in_at ? (
+            <Text style={styles.helper}>{words.vouchers.checkedIn} · {formatTime(reservation.checked_in_at)}</Text>
+          ) : null}
           <Text selectable style={styles.id}>{reservation.id}</Text>
         </View>
         <View>
+          {onShare && reservation.voucher_code && reservation.status === 'confirmed' ? (
+            <Pressable onPress={() => onShare(reservation)} accessibilityRole="button" accessibilityLabel={`${words.vouchers.share} ${reservation.voucher_code}`}>
+              <Text style={styles.link}>{words.vouchers.share}</Text>
+            </Pressable>
+          ) : null}
           {awaitingPayment && onPay ? (
             <Pressable onPress={() => onPay(reservation.id)} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${words.payNow} ${reservation.id}`}>
               <Text style={styles.link}>{words.payNow}</Text>
