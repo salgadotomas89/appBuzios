@@ -1,7 +1,7 @@
 import type { PortalCategory } from '../i18n/portalCopy';
 import type { OfferMediaGateway } from '../media/offerMediaGateway';
 import type { ImageCandidate } from '../media/imagePolicy';
-import { callRpc, freshClient } from './reservationService';
+import { callRpc, freshClient, toReservationError } from './reservationService';
 import { insforge } from './insforge';
 
 // Alta de proveedores, administración e incidencias (migraciones 202611150001 y 202611150002).
@@ -280,4 +280,159 @@ export async function addOfferPhoto(gateway: OfferMediaGateway, offerId: string,
 
 export async function removeOfferPhoto(gateway: OfferMediaGateway, mediaId: string): Promise<void> {
   await gateway.remove(mediaId);
+}
+
+// Comisión por categoría de un proveedor (migración 202611160006). Solo administración.
+export type ProviderCategoryRate = { provider_id: string; category: PortalCategory; rate_bps: number; updated_at: string };
+
+export async function listProviderCategoryRates(providerId: string): Promise<ProviderCategoryRate[]> {
+  return (await callRpc<ProviderCategoryRate[] | null>('connectical_admin_list_provider_category_rates', { p_provider_id: providerId })) ?? [];
+}
+
+// rateBps nulo elimina la tasa de esa categoría y vuelve a la general del proveedor.
+export async function setProviderCategoryRate(providerId: string, category: PortalCategory, rateBps: number | null): Promise<void> {
+  const { error } = await (await freshClient()).database.rpc('connectical_admin_set_provider_category_rate', {
+    p_provider_id: providerId,
+    p_category: category,
+    p_rate_bps: rateBps,
+  });
+  if (error) throw toReservationError('connectical_admin_set_provider_category_rate', error.message);
+}
+
+// Estadísticas del proveedor por oferta (migración 202611170002). Importes en centavos BRL.
+export type ProviderOfferStats = {
+  offer_id: string;
+  title: string;
+  category: PortalCategory;
+  published: boolean;
+  quotes: number;
+  reservations: number;
+  confirmed: number;
+  cancelled: number;
+  expired: number;
+  units_sold: number;
+  gross_cents: number;
+  service_fee_cents: number;
+  commission_cents: number;
+  net_cents: number;
+  refunded_cents: number;
+  discount_cents: number;
+  checked_in: number;
+  upcoming_7d: number;
+};
+
+export async function getProviderStats(from: string, to: string): Promise<ProviderOfferStats[]> {
+  const rows = await callRpc<ProviderOfferStats[] | null>('connectical_provider_stats', { p_from: from, p_to: to });
+  // bigint llega como texto o número según el driver: se normaliza a número.
+  return (rows ?? []).map(row => ({
+    ...row,
+    gross_cents: Number(row.gross_cents),
+    service_fee_cents: Number(row.service_fee_cents),
+    commission_cents: Number(row.commission_cents),
+    net_cents: Number(row.net_cents),
+    refunded_cents: Number(row.refunded_cents),
+    discount_cents: Number(row.discount_cents),
+  }));
+}
+
+export type ProviderStatsTotals = Omit<ProviderOfferStats, 'offer_id' | 'title' | 'category' | 'published'> & {
+  conversionBps: number;
+};
+
+// Suma por oferta y conversión cotización → confirmada en puntos básicos (0 sin cotizaciones).
+export function totalProviderStats(rows: ProviderOfferStats[]): ProviderStatsTotals {
+  const keys = ['quotes', 'reservations', 'confirmed', 'cancelled', 'expired', 'units_sold', 'gross_cents',
+    'service_fee_cents', 'commission_cents', 'net_cents', 'refunded_cents', 'discount_cents', 'checked_in',
+    'upcoming_7d'] as const;
+  const totals = Object.fromEntries(keys.map(key => [key, rows.reduce((sum, row) => sum + row[key], 0)])) as Record<
+    (typeof keys)[number],
+    number
+  >;
+  return { ...totals, conversionBps: totals.quotes ? Math.floor((totals.confirmed * 10000) / totals.quotes) : 0 };
+}
+
+// Publicaciones e historias de ofertas (migración 202611170003).
+export type PostKind = 'post' | 'story';
+export type PostStatus = 'pending' | 'approved' | 'rejected';
+export type FeedPost = {
+  id: string;
+  offer_id: string;
+  kind: PostKind;
+  body: string;
+  link_url: string | null;
+  link_platform: 'instagram' | 'tiktok' | null;
+  published_at: string;
+  visible_until: string | null;
+};
+export type OwnPost = Omit<FeedPost, 'published_at'> & { status: PostStatus; moderation_note: string; created_at: string };
+export type PostReview = Omit<OwnPost, 'visible_until'> & { offer_title: string; provider_name: string };
+
+// Feed público; si el tenant aún no tiene la migración devuelve [] para no romper el inicio.
+export async function listFeed(): Promise<FeedPost[]> {
+  const { data, error } = await (await freshClient()).database.rpc('connectical_list_feed', {});
+  if (error) {
+    if (/connectical_list_feed/.test(error.message) && /(does not exist|not found|PGRST202)/i.test(error.message)) return [];
+    throw toReservationError('connectical_list_feed', error.message);
+  }
+  return (data ?? []) as FeedPost[];
+}
+
+export async function listOwnPosts(): Promise<OwnPost[]> {
+  return (await callRpc<OwnPost[] | null>('connectical_provider_list_posts', {})) ?? [];
+}
+
+export async function saveOwnPost(input: {
+  postId: string | null;
+  offerId: string;
+  kind: PostKind;
+  body: string;
+  linkUrl: string;
+}): Promise<OwnPost> {
+  return callRpc('connectical_provider_save_post', {
+    p_post_id: input.postId,
+    p_offer_id: input.offerId,
+    p_kind: input.kind,
+    p_body: input.body,
+    p_link_url: input.linkUrl,
+  });
+}
+
+export async function deleteOwnPost(postId: string): Promise<void> {
+  const { error } = await (await freshClient()).database.rpc('connectical_provider_delete_post', { p_post_id: postId });
+  if (error) throw toReservationError('connectical_provider_delete_post', error.message);
+}
+
+export async function listPostReviews(status: PostStatus | null = 'pending'): Promise<PostReview[]> {
+  return (await callRpc<PostReview[] | null>('connectical_admin_list_posts', { p_status: status })) ?? [];
+}
+
+export async function moderatePost(postId: string, status: 'approved' | 'rejected', note: string): Promise<string> {
+  return callRpc('connectical_admin_moderate_post', { p_post_id: postId, p_status: status, p_note: note });
+}
+
+// Indicadores por categoría para la administración (migración 202611170004). Importes en centavos BRL.
+export type CategoryKpi = {
+  category: PortalCategory;
+  confirmed: number;
+  gross_cents: number;
+  service_fee_cents: number;
+  commission_cents: number;
+  discount_cents: number;
+  effective_rate_bps: number;
+  source_offer: number;
+  source_provider_category: number;
+  source_provider: number;
+  source_unknown: number;
+};
+
+// Si el tenant aún no tiene la migración, la consola sigue mostrando los indicadores globales.
+export async function getCategoryKpis(from: string, to: string): Promise<CategoryKpi[]> {
+  const rows = await callRpc<CategoryKpi[] | null>('connectical_admin_category_kpis', { p_from: from, p_to: to }).catch(() => null);
+  return (rows ?? []).map(row => ({
+    ...row,
+    gross_cents: Number(row.gross_cents),
+    service_fee_cents: Number(row.service_fee_cents),
+    commission_cents: Number(row.commission_cents),
+    discount_cents: Number(row.discount_cents),
+  }));
 }

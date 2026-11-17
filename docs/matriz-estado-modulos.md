@@ -1,6 +1,6 @@
 # Matriz de estado por módulo — Búzios Flow
 
-Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
+Actualizada el 14-11-2026 (noche); ciclo de catálogo y comercio el 17-11-2026 en `work/mvp-2026-11-16`, sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
 Actualización 15-11-2026: 17 de 20 migraciones aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos). Las
 tres de fotos (registro solo por la función, bucket cerrado a las sesiones y moderación) están preparadas y ensayadas en el laboratorio
@@ -20,25 +20,32 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Pagos reales | BLOQUEADO | Sin pasarela contratada; tres controles independientes apagados y ningún adaptador en vivo ([arquitectura-pagos.md](arquitectura-pagos.md)) | Decisión comercial |
 | Reembolsos | SIMULADO | Registro de admin idempotente con topes (0003); sin devolución bancaria | — |
 | Política de cancelación | PARCIAL | Motor configurable probado, **apagado**, sin política aprobada | Decisión comercial |
-| Comisiones | PARCIAL | Por proveedor y por producto, solo admin, congeladas por cotización (0007); referencias sin aprobar; Buggy sin tasa | Decisión comercial |
+| Comisiones | PARCIAL | Tres niveles: producto > proveedor+categoría > proveedor, solo admin y auditado; cada cotización congela la tasa y guarda el nivel aplicado (`provider_commission_source`, nunca visible al turista) — 202611160006 y sección «Comisión por categoría» de la consola; **migración sin aplicar**; referencias sin aprobar; Buggy, Restaurantes y Actividades sin tasa | Decisión comercial y aplicar 202611160006 |
 | Cargo al turista 4/6/8 % | SIMULADO | 6 % como escenario por defecto; no es tarifa aprobada | Decisión comercial |
 | Tipos de cambio | SIMULADO | Tasas fijas etiquetadas como demostración; sin fuente cambiaria real | P2 |
 | Panel admin: finanzas | COMPLETO | Retenido no es ingreso, bruto/neto/cargo/comisión conciliados, estados inconsistentes | — |
+| Panel admin: indicadores por categoría | COMPLETO (local) | Confirmadas, pagado, cargo, comisión, descuentos y tasa efectiva por categoría, y cuántas reservas usaron cada nivel de comisión; suma igual a los indicadores globales (202611170004). **Migración sin aplicar**; la consola sigue funcionando sin ella | Aplicar 202611170004 |
 | Panel admin: proveedores, tasas, auditoría | COMPLETO | Pausa/reactivación, tasas por producto, auditoría con autoría solo por RPC | — |
 | Panel admin: solicitudes, moderación, incidencias, usuarios, indicadores, actividad, campañas | COMPLETO | Migraciones 202611150001/0002 y consola admin; todo validado en SQL. Campañas solo de contenido (sin descuentos). Los roles de admin siguen asignándose por SQL | — |
 | Portal proveedor: ofertas, cupo, rangos, reservas | COMPLETO | Validación de propiedad y proveedor activo en SQL | — |
 | Portal proveedor: descripción, ubicación, horario, límites por reserva, ingresos | COMPLETO | Migración 0009 y resumen de ingresos | — |
+| Estadísticas del proveedor | COMPLETO (local) | Por oferta, últimos 30 días: cotizaciones, confirmadas, conversión, unidades, pagado, neto, comisión, descuentos, reembolsos, check-ins y llegadas en 7 días; solo ofertas propias y conciliado con las reservas (202611170002). **Migración sin aplicar** | Aplicar 202611170002 |
+| Contenido dinámico (publicaciones e historias) | COMPLETO (local) | Texto + permalink de Instagram/TikTok validado en servidor y cliente (mismos patrones, prueba de paridad), moderación previa con motivo y auditoría, historias de 24 h, 10 altas/día, feed en portada que abre la red oficial con `Linking` (202611170003, [contenido-social.md](contenido-social.md)). **Migración sin aplicar**; sin oEmbed | Aplicar 202611170003; app de Meta para oEmbed |
 | Fotos de ofertas | PARCIAL | Selector (galería y cámara), gestor del proveedor con estado de cada foto, bandeja de revisión de la administración, función `offer-media` (valida bytes, quita metadatos de ubicación, límites, sirve solo lo aprobado) y migraciones 202611160003/0004/0005, probadas en Jest, PostgreSQL y Deno (auditoría en docs/auditoria-fotos.md); **sin desplegar, sin bucket**, oculto con `OFFER_PHOTOS_ENABLED` y sin probar en teléfonos reales | Autorización de despliegue y prueba en dispositivos |
 | Políticas propias del proveedor | NO IMPLEMENTADO | Esperan la política comercial | Decisión comercial |
 | Registro de proveedores | COMPLETO | Solicitud del turista, revisión admin con comisión explícita, estado visible para el solicitante | — |
 | Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN); recuperación de contraseña por código. **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`); el correo llega en inglés sin SMTP propio | P1 |
 | OAuth | BLOQUEADO | No configurado; contrato PKCE y URI de retorno propuestos en [autenticacion-oauth.md](autenticacion-oauth.md) | Decisión humana |
 | Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado en `main`); lectura sin sesión comprobada contra buziosflow con el SDK (catálogo, inventario y fotos) | Recorrido en dispositivo |
-| Categorías | COMPLETO | Pousadas, barcos, noche/discotecas, buggy y experiencias VIP (0007) | — |
+| Categorías | COMPLETO (local) | Pousadas, barcos, noche/discotecas, buggy, experiencias VIP, **restaurantes y actividades**; desde 202611160006 son datos (`connectical_categories`, FK en ofertas, solicitudes, campañas y referencias) en vez de listas fijas. Sin ofertas de ejemplo inventadas para las nuevas | Aplicar 202611160006 |
+| Promociones y descuentos | COMPLETO (local) | Descuento 1-90 % por fechas de servicio, sin solapes por oferta, creado por el proveedor dueño o admin y auditado; la cotización congela precio de lista, descuento y promoción; comisión y cargo sobre el precio descontado (lo financia el proveedor). Catálogo público muestra precio tachado según la fecha elegida; gestor en el portal del proveedor. **Migración sin aplicar** | Aplicar 202611160006; validar con proveedores quién financia el descuento |
+| Búsqueda | COMPLETO | Sin distinguir acentos ni mayúsculas, todas las palabras, sobre título, ubicación, descripción y categoría | — |
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
 | Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |
-| Mapas | NO IMPLEMENTADO | Sin proveedor de mapas elegido | P2 |
-| Notificaciones y comprobantes | NO IMPLEMENTADO | Requiere proveedor de correo/push | P2 |
+| Mapas | PARCIAL | «Cómo llegar» en el detalle abre Apple Maps (iOS) o Google Maps con el punto de encuentro o la ubicación acotada a Búzios, por URL universal (sin SDK ni clave). Falta un mapa incrustado y coordenadas por oferta | P2: elegir proveedor de mapas |
+| Recomendaciones | COMPLETO | «También te puede interesar» en el detalle: reglas locales y explicables (categoría, favoritos, oferta real, descuento, cupo); nunca ofertas sin cupo | — |
+| Comprobantes y check-in | COMPLETO (local) | Código BZ-XXXX-XXXX al confirmar (cualquier camino), visible solo al turista dueño y a admin; el turista lo comparte con la hoja del sistema; el proveedor lo valida una vez, desde la víspera hasta el último día, con 20 fallos/hora como máximo y evento `checked_in` (202611170001). **Migración sin aplicar** | Aplicar 202611170001 |
+| Notificaciones (correo/push) | BLOQUEADO | Sin SMTP propio ni proveedor de push; el comprobante se comparte desde la app mientras tanto | P2 |
 | Idiomas ES/PT | COMPLETO | Contrato de errores SQL ↔ textos; etiquetas accesibles | — |
 | Inglés | PARCIAL | Interfaz y contenido de ejemplo traducidos, con aviso visible de traducción pendiente de revisión profesional; términos legales no aprobados en inglés | Revisión humana |
 | Privacidad de identificadores y comisiones | COMPLETO | 0005 y 0010: el proveedor no lee uuid de turistas (tampoco en cotizaciones) y el turista no recibe la comisión B2B en ninguna lectura ni respuesta; sondas de fuga y verificación automática | P0 hecho |

@@ -129,7 +129,12 @@ with checks(name, ok) as (
           and not has_table_privilege('authenticated', 'public.connectical_payment_events', 'SELECT'))),
     -- Comprueba que existe una referencia por categoría; aprobarlas es una decisión comercial legítima.
     ('commission references cover every category',
-      (select count(*) = 5 from public.connectical_commission_references)),
+      -- Antes de 202611160006 hay cinco categorías fijas; después, una referencia por fila de connectical_categories.
+      -- query_to_xml evita nombrar la tabla nueva cuando aún no existe en el tenant.
+      (select count(*) = case when to_regclass('public.connectical_categories') is null then 5
+          else (xpath('/row/count/text()', query_to_xml(
+            'select count(*) from public.connectical_categories', false, true, '')))[1]::text::bigint end
+        from public.connectical_commission_references)),
     ('simulated payments switch exists (informative: check its value before a live gateway)',
       (select count(*) = 1 from public.connectical_settings where key = 'simulated_payments_enabled')),
     ('no scheduler assumed: system sweeps exist but are private',

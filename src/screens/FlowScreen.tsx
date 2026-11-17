@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Image,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,9 +18,13 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
-import { CATEGORY_ICONS, filterOffers, type Catalog } from '../data/catalog';
+import { mapsUrl } from '../utils/maps';
+import { recommendOffers } from '../utils/recommendations';
+import { CATEGORY_ICONS, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
 import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
+import { OfferFeed } from '../components/OfferFeed';
+import type { FeedPost } from '../lib/platformService';
 import { colors, radius } from '../theme';
 import { brlFromCents } from '../utils/format';
 import { useBuziosToday } from '../hooks/useBuziosToday';
@@ -48,6 +54,8 @@ const copy = {
     savings: 'Hasta',
     categories: 'Elige tu plan',
     featured: 'Ideas para tu viaje',
+    directions: 'Cómo llegar',
+    related: 'También te puede interesar',
     explore: 'Explorar ofertas',
     all: 'Todas',
     search: 'Buscar por nombre o lugar',
@@ -154,6 +162,8 @@ const copy = {
     savings: 'Até',
     categories: 'Escolha seu passeio',
     featured: 'Ideias para sua viagem',
+    directions: 'Como chegar',
+    related: 'Você também pode gostar',
     explore: 'Explorar ofertas',
     all: 'Todas',
     search: 'Buscar por nome ou lugar',
@@ -260,6 +270,8 @@ const copy = {
     savings: 'Up to',
     categories: 'Choose your plan',
     featured: 'Ideas for your trip',
+    directions: 'Get directions',
+    related: 'You may also like',
     explore: 'Explore offers',
     all: 'All',
     search: 'Search by name or place',
@@ -502,22 +514,19 @@ export function FlowScreen() {
     });
   }
 
-  const searchedOffers = catalog.offers.filter(offer => {
-    const categoryMatch = !selectedCategory || offer.category === selectedCategory;
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const searchMatch =
-      !normalizedQuery ||
-      `${offer.title[language]} ${offer.location[language]}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery);
-    return categoryMatch && searchMatch;
-  });
+  const categoryLabels = new Map(catalog.categories.map(category => [category.id, category.label[language]]));
+  const searchedOffers = catalog.offers.filter(
+    offer =>
+      (!selectedCategory || offer.category === selectedCategory) &&
+      matchesSearch(offer, query, language, categoryLabels.get(offer.category)),
+  );
+  // Con fecha elegida, el precio mostrado es el de la promoción de ese día (si la hay).
   const matchingOffers = filterOffers(searchedOffers, {
     date: filterDate,
     people: filterPeople,
     favoritesOnly,
     favorites: new Set(favorites),
-  });
+  }).map(offer => (filterDate ? withPromotionOn(offer, filterDate) : offer));
 
   function openExplore(category?: OfferCategory | null) {
     setSelectedCategory(category ?? null);
@@ -687,6 +696,8 @@ export function FlowScreen() {
             onAdd={() => addToTrip(selectedOffer)}
             addLabel={selectedOffer.source === 'shared' ? (words.bookInPortal as string) : (words.addTrip as string)}
             onBack={() => changeScreen('explore')}
+            related={recommendOffers(selectedOffer, catalog.offers, favorites)}
+            onOffer={openOffer}
           />
         ) : null}
         {screen === 'trip' ? (
@@ -803,7 +814,7 @@ function HomeView({
   onExplore: () => void;
   onOffer: (offer: Offer) => void;
   onOperations: () => void;
-  catalog: Catalog & { source: CatalogSource };
+  catalog: Catalog & { source: CatalogSource; feed?: FeedPost[] };
 }) {
   return (
     <>
@@ -822,6 +833,9 @@ function HomeView({
         </View>
       </View>
       <CatalogNotice source={catalog.source} words={words} />
+      {catalog.feed?.length ? (
+        <OfferFeed posts={catalog.feed} offers={catalog.offers} language={language} onOffer={onOffer} />
+      ) : null}
       <SectionHeading title={words.categories} trailing={String(catalog.categories.length).padStart(2, '0')} />
       <View style={styles.categoryGrid}>
         {catalog.categories.map(category => (
@@ -985,6 +999,9 @@ function DetailView({
   today,
   favorite,
   onToggleFavorite,
+  related = [],
+  onOffer,
+  openUrl = url => Linking.openURL(url),
 }: {
   offer: Offer;
   language: Language;
@@ -1001,7 +1018,11 @@ function DetailView({
   today: string;
   favorite: boolean;
   onToggleFavorite: () => void;
+  related?: Offer[];
+  onOffer?: (offer: Offer) => void;
+  openUrl?: (url: string) => Promise<unknown>;
 }) {
+  const place = offer.meetingPoint?.[language] ?? offer.location[language];
   const canBook = offer.availability === 'available' || offer.availability === 'limited';
   const categorySpecific = [
     offer.schedule ? [words.schedule as string, offer.schedule[language]] : null,
@@ -1072,6 +1093,12 @@ function DetailView({
           <Text style={styles.bodyText}>{offer.meetingPoint[language]}</Text>
         </InfoSection>
       ) : null}
+      <SecondaryButton
+        title={`${words.directions} · ${place}`}
+        onPress={() => {
+          openUrl(mapsUrl(place, Platform.OS)).catch(() => undefined);
+        }}
+      />
       <InfoSection title={words.conditions as string}>
         <Text style={styles.bodyText}>{offer.cancellation[language]}</Text>
       </InfoSection>
@@ -1102,6 +1129,23 @@ function DetailView({
           )}
           <PrimaryButton title={addLabel} onPress={onAdd} />
         </View>
+      ) : null}
+      {related.length && onOffer ? (
+        <InfoSection title={words.related as string}>
+          {related.map(item => (
+            <Pressable
+              key={item.id}
+              onPress={() => onOffer(item)}
+              accessibilityRole="button"
+              accessibilityLabel={item.title[language]}
+              style={styles.relatedRow}
+            >
+              <Icon name={item.icon} size={20} color={colors.sea} />
+              <Text style={styles.relatedTitle}>{item.title[language]}</Text>
+              {item.price !== undefined ? <Text style={styles.relatedPrice}>{brlFromCents(Math.round(item.price * 100))}</Text> : null}
+            </Pressable>
+          ))}
+        </InfoSection>
       ) : null}
     </>
   );
@@ -1606,6 +1650,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '600', color: colors.text },
   sectionTrailing: { fontSize: 11, fontWeight: '600', color: colors.muted },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  relatedRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingVertical: 6 },
+  relatedTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.text },
+  relatedPrice: { fontSize: 13, fontWeight: '700', color: colors.sea },
   homeCategory: { width: '48%', minHeight: 88, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.card, borderRadius: radius.card },
   homeCategoryName: { marginTop: 5, fontSize: 14, fontWeight: '600', color: colors.text },
   categoryCount: { marginTop: 2, fontSize: 10, color: colors.muted },

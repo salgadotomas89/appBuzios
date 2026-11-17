@@ -8,6 +8,7 @@ export type IconName =
   | 'buggy'
   | 'bed'
   | 'food'
+  | 'compass'
   | 'star';
 
 type Props = {
@@ -63,6 +64,12 @@ export function Icon({ name, size = 24, color = '#1E1E1E' }: Props) {
       )}
       {name === 'star' && (
         <Path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" {...stroke} />
+      )}
+      {name === 'compass' && (
+        <>
+          <Circle cx="12" cy="12" r="8.5" {...stroke} />
+          <Path d="M15.5 8.5l-2 5-5 2 2-5z" {...stroke} />
+        </>
       )}
       {name === 'food' && (
         <>

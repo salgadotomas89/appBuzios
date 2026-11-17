@@ -12,7 +12,8 @@ jest.mock('../src/lib/platformService', () => {
     'getPlatformKpis', 'listAuditLog', 'listCampaigns', 'listIncidents', 'listOffersForModeration', 'listPlatformUsers',
     'listProviderApplications', 'reviewProviderApplication', 'saveCampaign', 'setOfferModeration', 'updateIncident',
     'getMyProviderApplication', 'listMyIncidents', 'reportIncident', 'submitProviderApplication',
-    'listMediaReviews', 'setMediaModeration',
+    'listMediaReviews', 'setMediaModeration', 'listProviderCategoryRates', 'setProviderCategoryRate',
+    'listPostReviews', 'moderatePost', 'getCategoryKpis',
   ];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -118,6 +119,10 @@ it('suspends with a reason and restores publications', async () => {
 it('triages incidents and shows KPIs, users, audit entries and content-only campaigns', async () => {
   mocked.listIncidents.mockResolvedValue([{ id: 'i1', reservation_id: null, reporter_name: 'Tom', category: 'payment', description: 'Cobro duplicado', status: 'open', admin_note: '', created_at: '', updated_at: '' }]);
   mocked.updateIncident.mockResolvedValue('resolved');
+  mocked.getCategoryKpis.mockResolvedValue([
+    { category: 'pousadas', confirmed: 0, gross_cents: 0, service_fee_cents: 0, commission_cents: 0, discount_cents: 0, effective_rate_bps: 0, source_offer: 0, source_provider_category: 0, source_provider: 0, source_unknown: 0 },
+    { category: 'restaurantes', confirmed: 3, gross_cents: 63600, service_fee_cents: 3600, commission_cents: 9000, discount_cents: 20000, effective_rate_bps: 1500, source_offer: 0, source_provider_category: 3, source_provider: 0, source_unknown: 0 },
+  ]);
   mocked.getPlatformKpis.mockResolvedValue({ quotes: 40, reservations: 12, confirmed: 10, cancelled: 1, expired: 1, refunded: 0, confirmed_gross_cents: 678400, service_fee_cents: 38400, commission_cents: 64000, refunded_cents: 0, quote_to_confirmed_bps: 2500 });
   mocked.listPlatformUsers.mockResolvedValue([{ user_id: 'u1', display_name: 'Ana', country_code: 'BR', role: 'provider', email: 'ana@example.com', created_at: '' }]);
   mocked.listAuditLog.mockResolvedValue([{ id: 1, actor_user_id: null, action: 'role_changed', target_table: 'connectical_profiles', target_id: 'u1', details: {}, created_at: '2099-01-01T00:00:00Z' }]);
@@ -134,6 +139,10 @@ it('triages incidents and shows KPIs, users, audit entries and content-only camp
   await press(root, 'Indicadores');
   expect(hasText(root, 'Cotización → confirmada: 25 %')).toBe(true);
   expect(hasText(root, 'Bruto confirmado: R$ 6.784,00')).toBe(true);
+  expect(hasText(root, 'Restaurantes · 3 · R$ 636,00 · Comisión confirmada R$ 90,00 (tasa efectiva 15 %) · descuentos R$ 200,00')).toBe(true);
+  expect(hasText(root, 'Nivel de comisión: producto 0 · proveedor+categoría 3 · proveedor 0')).toBe(true);
+  // Las categorías sin ventas no ocupan espacio.
+  expect(hasText(root, 'Pousadas · 0')).toBe(false);
 
   await press(root, 'Usuarios');
   expect(hasText(root, 'Ana · proveedor')).toBe(true);
@@ -224,4 +233,60 @@ it('reviews new photos from the queue: approve, or reject only with a reason', a
   await type(root, 'Motivo del rechazo (obligatorio)', ' Mostra rostos ');
   await press(root, 'Rechazar foto');
   expect(mocked.setMediaModeration).toHaveBeenLastCalledWith('m1', 'rejected', 'Mostra rostos');
+});
+
+it('sets and removes a per-category commission for a chosen provider', async () => {
+  let rates: platform.ProviderCategoryRate[] = [];
+  mocked.listProviderCategoryRates.mockImplementation(async () => rates);
+  mocked.setProviderCategoryRate.mockImplementation(async (providerId, category, rateBps) => {
+    rates = rateBps === null ? [] : [{ provider_id: providerId, category, rate_bps: rateBps, updated_at: '' }];
+  });
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <Harness>{props => <AdminConsole language="es" {...props} providers={[{ id: 'prov-1', name: 'Mar Azul', commission_rate_bps: 1000 }]} />}</Harness>,
+    );
+  });
+  const root = renderer.root;
+  await press(root, 'Comisión por categoría');
+  await press(root, 'Mar Azul · 10 %');
+  expect(mocked.listProviderCategoryRates).toHaveBeenCalledWith('prov-1');
+  expect(hasText(root, 'no tiene comisiones por categoría')).toBe(true);
+
+  await press(root, 'Restaurantes');
+  await press(root, 'Guardar comisión de categoría');
+  expect(hasText(root, 'message:La comisión debe estar entre 0 % y 100 %.')).toBe(true);
+  expect(mocked.setProviderCategoryRate).not.toHaveBeenCalled();
+
+  await type(root, 'Comisión para la categoría (%)', '15');
+  await press(root, 'Guardar comisión de categoría');
+  expect(mocked.setProviderCategoryRate).toHaveBeenCalledWith('prov-1', 'restaurantes', 1500);
+  expect(hasText(root, 'Restaurantes: 15 %')).toBe(true);
+  expect(hasText(root, 'message:Comisión de categoría guardada.')).toBe(true);
+
+  await press(root, 'Quitar (usar la del proveedor)');
+  expect(mocked.setProviderCategoryRate).toHaveBeenLastCalledWith('prov-1', 'restaurantes', null);
+  expect(hasText(root, 'no tiene comisiones por categoría')).toBe(true);
+});
+
+it('moderates provider posts: approve, or reject only with a reason', async () => {
+  const review: platform.PostReview = {
+    id: 'post-1', offer_id: 'o1', offer_title: 'Trilha', provider_name: 'Mar Azul', kind: 'story', body: 'Vagas hoje',
+    link_url: 'https://www.instagram.com/reel/AbCdEf123/', link_platform: 'instagram', status: 'pending', moderation_note: '', created_at: '',
+  };
+  mocked.listPostReviews.mockResolvedValue([review]);
+  mocked.moderatePost.mockResolvedValue('approved');
+  const root = await renderAdmin();
+  await press(root, 'Novedades');
+  expect(mocked.listPostReviews).toHaveBeenCalledWith('pending');
+  expect(hasText(root, 'Trilha · Mar Azul · story')).toBe(true);
+  expect(hasText(root, 'https://www.instagram.com/reel/AbCdEf123/')).toBe(true);
+  await press(root, 'Aprobar publicación');
+  expect(mocked.moderatePost).toHaveBeenCalledWith('post-1', 'approved', '');
+  expect(hasText(root, 'message:Publicación revisada.')).toBe(true);
+
+  await press(root, 'Rechazar publicación');
+  await type(root, 'Motivo del rechazo (lo ve el proveedor)', ' Link de outra conta ');
+  await press(root, 'Rechazar publicación');
+  expect(mocked.moderatePost).toHaveBeenLastCalledWith('post-1', 'rejected', 'Link de outra conta');
 });

@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ActionButton, Chip, Field, formatBps, portalStyles as styles } from '../components/PortalControls';
 import type { Language } from '../data/homeMock';
-import { inputErrorText, portalCopy, type PortalCategory } from '../i18n/portalCopy';
+import { inputErrorText, PORTAL_CATEGORIES, portalCopy, type PortalCategory } from '../i18n/portalCopy';
 import { platformCopy } from '../i18n/platformCopy';
 import {
+  getCategoryKpis,
   getPlatformKpis,
   listAuditLog,
   listCampaigns,
+  listProviderCategoryRates,
+  listPostReviews,
+  moderatePost,
   listIncidents,
   listMediaReviews,
   listOffersForModeration,
@@ -17,6 +21,7 @@ import {
   saveCampaign,
   setMediaModeration,
   setOfferModeration,
+  setProviderCategoryRate,
   updateIncident,
   type AdminIncident,
   type AuditEntry,
@@ -25,7 +30,10 @@ import {
   type MediaReview,
   type ModerationOffer,
   type PlatformKpis,
+  type CategoryKpi,
   type PlatformUser,
+  type ProviderCategoryRate,
+  type PostReview,
   type ProviderApplication,
 } from '../lib/platformService';
 import { sessionManager } from '../lib/insforge';
@@ -33,7 +41,9 @@ import { brlFromCents } from '../utils/format';
 import { addDays, buziosIsoDate, parseIsoDate, parsePercentToBps } from '../utils/portalInput';
 
 type Section = keyof (typeof platformCopy)['es']['sections'];
-const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns'];
+const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns', 'categoryRates', 'posts'];
+
+export type ConsoleProvider = { id: string; name: string; commission_rate_bps: number };
 
 // Error de validación ya traducido; el portal lo muestra tal cual.
 class ConsoleInputError extends Error {}
@@ -42,10 +52,13 @@ export function AdminConsole({
   language,
   busy,
   run,
+  providers = [],
 }: {
   language: Language;
   busy: boolean;
   run: (action: () => Promise<string | void>) => void;
+  // Proveedores que el portal ya cargó para la administración; los usa la comisión por categoría.
+  providers?: ConsoleProvider[];
 }) {
   const words = platformCopy[language];
   const portalWords = portalCopy[language];
@@ -58,11 +71,16 @@ export function AdminConsole({
   const [incidents, setIncidents] = useState<AdminIncident[]>([]);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [kpis, setKpis] = useState<PlatformKpis | null>(null);
+  const [categoryKpis, setCategoryKpis] = useState<CategoryKpi[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [note, setNote] = useState('');
   const [commission, setCommission] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rateProviderId, setRateProviderId] = useState<string | null>(null);
+  const [rateCategory, setRateCategory] = useState<PortalCategory>(PORTAL_CATEGORIES[0]);
+  const [categoryRates, setCategoryRates] = useState<ProviderCategoryRate[]>([]);
+  const [posts, setPosts] = useState<PostReview[]>([]);
   const [campaignDraft, setCampaignDraft] = useState({ title: '', body: '', starts: buziosIsoDate(), ends: addDays(buziosIsoDate(), 7) });
 
   function open(next: Section) {
@@ -85,9 +103,45 @@ export function AdminConsole({
     if (next === 'kpis') {
       const today = buziosIsoDate();
       setKpis(await getPlatformKpis(addDays(today, -29), today));
+      setCategoryKpis(await getCategoryKpis(addDays(today, -29), today));
     }
     if (next === 'audit') setAudit(await listAuditLog(50));
     if (next === 'campaigns') setCampaigns(await listCampaigns());
+    if (next === 'posts') setPosts(await listPostReviews('pending'));
+  }
+
+  function reviewPost(post: PostReview, status: 'approved' | 'rejected') {
+    run(async () => {
+      await moderatePost(post.id, status, status === 'rejected' ? note.trim() : '');
+      setSelectedId(null);
+      setNote('');
+      await loadSection('posts');
+      return words.postSaved;
+    });
+  }
+
+  function selectRateProvider(providerId: string) {
+    setRateProviderId(providerId);
+    setCommission('');
+    run(async () => setCategoryRates(await listProviderCategoryRates(providerId)));
+  }
+
+  function saveCategoryRate(remove: boolean) {
+    const providerId = rateProviderId;
+    if (!providerId) return;
+    run(async () => {
+      let rate: number | null = null;
+      if (!remove) {
+        const parsed = parsePercentToBps(commission);
+        if (!parsed.ok) throw new ConsoleInputError(inputErrorText(language, words.categoryRateValue, parsed.error));
+        if (parsed.value === null) throw new ConsoleInputError(portalWords.errors.invalid_commission_rate);
+        rate = parsed.value;
+      }
+      await setProviderCategoryRate(providerId, rateCategory, rate);
+      setCommission('');
+      setCategoryRates(await listProviderCategoryRates(providerId));
+      return words.categoryRateSaved;
+    });
   }
 
   function review(application: ProviderApplication, decision: 'approved' | 'rejected') {
@@ -297,6 +351,26 @@ export function AdminConsole({
           <Text style={styles.helper}>{words.kpiGross}: {brlFromCents(kpis.confirmed_gross_cents)}</Text>
           <Text style={styles.helper}>{words.kpiFee}: {brlFromCents(kpis.service_fee_cents)} · {words.kpiCommission}: {brlFromCents(kpis.commission_cents)}</Text>
           <Text style={styles.helper}>{words.kpiRefunded}: {brlFromCents(kpis.refunded_cents)}</Text>
+          {categoryKpis.some(row => row.confirmed > 0) ? (
+            <>
+              <Text style={styles.offerName}>{words.kpiByCategory}</Text>
+              {categoryKpis.filter(row => row.confirmed > 0).map(row => (
+                <View key={row.category} style={styles.eventRow}>
+                  <Text style={styles.helper}>
+                    {portalWords.categories[row.category]} · {row.confirmed} · {brlFromCents(row.gross_cents)} · {words.kpiCommission}{' '}
+                    {brlFromCents(row.commission_cents)} ({words.kpiEffectiveRate} {formatBps(row.effective_rate_bps)}) · {words.kpiDiscount}{' '}
+                    {brlFromCents(row.discount_cents)}
+                  </Text>
+                  <Text style={styles.helper}>
+                    {words.kpiSources
+                      .replace('{offer}', String(row.source_offer))
+                      .replace('{category}', String(row.source_provider_category))
+                      .replace('{provider}', String(row.source_provider))}
+                  </Text>
+                </View>
+              ))}
+            </>
+          ) : null}
         </View>
       ) : null}
 
@@ -335,6 +409,70 @@ export function AdminConsole({
             <Field label={words.campaignEnds} value={campaignDraft.ends} onChange={ends => setCampaignDraft({ ...campaignDraft, ends })} />
             <ActionButton title={words.campaignSave} onPress={createCampaign} disabled={busy} />
           </View>
+        </>
+      ) : null}
+
+      {section === 'posts' ? (
+        <>
+          <Text style={styles.helper}>{words.postsHint}</Text>
+          {posts.length ? posts.map(post => (
+            <View key={post.id} style={styles.eventRow}>
+              <Text style={styles.offerName}>{post.offer_title} · {post.provider_name} · {post.kind}</Text>
+              <Text style={styles.helper}>{post.body}</Text>
+              {post.link_url ? <Text selectable style={styles.id}>{post.link_url}</Text> : null}
+              {selectedId === post.id ? (
+                <View style={styles.quote}>
+                  <Field label={words.postRejectReason} value={note} onChange={setNote} maxLength={300} />
+                  <ActionButton title={words.postReject} onPress={() => reviewPost(post, 'rejected')} disabled={busy || note.trim().length < 3} />
+                </View>
+              ) : (
+                <View style={styles.chips}>
+                  <ActionButton title={words.postApprove} onPress={() => reviewPost(post, 'approved')} disabled={busy} />
+                  <ActionButton title={words.postReject} onPress={() => { setSelectedId(post.id); setNote(''); }} disabled={busy} secondary />
+                </View>
+              )}
+            </View>
+          )) : empty}
+        </>
+      ) : null}
+
+      {section === 'categoryRates' ? (
+        <>
+          <Text style={styles.helper}>{words.categoryRatesHint}</Text>
+          {providers.length ? (
+            <>
+              <Text style={styles.fieldLabel}>{words.categoryRateProvider}</Text>
+              <View style={styles.chips}>
+                {providers.map(provider => (
+                  <Chip
+                    key={provider.id}
+                    label={`${provider.name} · ${formatBps(provider.commission_rate_bps)}`}
+                    selected={rateProviderId === provider.id}
+                    onPress={() => selectRateProvider(provider.id)}
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.helper}>{words.categoryRateNoProviders}</Text>
+          )}
+          {rateProviderId ? (
+            <View style={styles.quote}>
+              {categoryRates.length ? categoryRates.map(rate => (
+                <Text key={rate.category} style={styles.helper}>
+                  {portalWords.categories[rate.category]}: {formatBps(rate.rate_bps)}
+                </Text>
+              )) : <Text style={styles.helper}>{words.categoryRateNone}</Text>}
+              <View style={styles.chips}>
+                {PORTAL_CATEGORIES.map(category => (
+                  <Chip key={category} label={portalWords.categories[category]} selected={rateCategory === category} onPress={() => setRateCategory(category)} />
+                ))}
+              </View>
+              <Field label={words.categoryRateValue} value={commission} onChange={setCommission} decimal />
+              <ActionButton title={words.categoryRateSave} onPress={() => saveCategoryRate(false)} disabled={busy} />
+              <ActionButton title={words.categoryRateRemove} onPress={() => saveCategoryRate(true)} disabled={busy} secondary />
+            </View>
+          ) : null}
         </>
       ) : null}
     </View>

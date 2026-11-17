@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { ActionButton, Chip, Field, portalStyles as styles } from '../components/PortalControls';
 import type { Language } from '../data/homeMock';
-import { portalCopy, type PortalCategory } from '../i18n/portalCopy';
+import { PORTAL_CATEGORIES, portalCopy, type PortalCategory } from '../i18n/portalCopy';
 import { platformCopy } from '../i18n/platformCopy';
 import {
   getMyProviderApplication,
@@ -15,7 +15,7 @@ import {
 } from '../lib/platformService';
 import type { SharedReservation, SharedRole } from '../lib/reservationService';
 
-const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
+const CATEGORIES: PortalCategory[] = PORTAL_CATEGORIES;
 const INCIDENT_CATEGORIES: IncidentCategory[] = ['service', 'payment', 'safety', 'access', 'other'];
 const EMPTY_APPLICATION = { businessName: '', contactName: '', contactPhone: '', contactEmail: '', location: '', description: '' };
 

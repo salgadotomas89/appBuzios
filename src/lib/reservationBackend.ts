@@ -1,10 +1,11 @@
 import { addDays } from '../utils/portalInput';
+import type { PortalCategory } from '../i18n/portalCopy';
 
 // Modelo en memoria de las reglas de supabase/migrations para pruebas sin base de datos.
 // La app usa reservationService (PostgreSQL); si cambian las reglas SQL, este modelo debe seguirlas.
 
 export type UserRole = 'traveler' | 'provider' | 'admin';
-export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
+export type OfferCategory = PortalCategory;
 export type PriceMode = 'night' | 'person' | 'ticket' | 'group';
 export type ReservationStatus =
   | 'draft'

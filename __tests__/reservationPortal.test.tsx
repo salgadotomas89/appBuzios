@@ -19,7 +19,8 @@ jest.mock('../src/lib/reservationService', () => {
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
     'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
     'restoreSharedSession', 'isSharedSessionPersisted', 'verifyTravelerEmail', 'resendVerificationCode',
-    'requestPasswordReset', 'resetAccountPassword',
+    'requestPasswordReset', 'resetAccountPassword', 'listProviderPromotions', 'saveProviderPromotion',
+    'providerCheckIn',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -75,10 +76,10 @@ async function type(root: ReactTestInstance, label: string, value: string) {
   await ReactTestRenderer.act(async () => input.props.onChangeText(value));
 }
 
-async function render(language: 'es' | 'pt' | 'en' = 'es') {
+async function render(language: 'es' | 'pt' | 'en' = 'es', shareText?: (content: { message: string }) => Promise<unknown>) {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   await ReactTestRenderer.act(async () => {
-    renderer = ReactTestRenderer.create(<ReservationPortal onClose={jest.fn()} language={language} />);
+    renderer = ReactTestRenderer.create(<ReservationPortal onClose={jest.fn()} language={language} shareText={shareText} />);
   });
   return renderer!.root;
 }
@@ -149,6 +150,41 @@ it('quotes a multi-night stay and books it with the quote id as idempotency key'
   expect(mocked.createSharedReservationHold).toHaveBeenCalledWith('q1', 'q1');
   expect(mocked.simulateSharedPayment).toHaveBeenCalledWith('r1', 'approved', 'pix');
   expect(hasText(root, 'Reserva: Confirmada · r1')).toBe(true);
+});
+
+it('shows the list price and the promotion discount frozen in the quote', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockResolvedValue({
+    id: 'q2', offer_id: pousada.id, service_date: '2099-01-10', quantity: 1, nights: 1,
+    service_fee_rate_bps: 600, subtotal_cents: 24000, service_fee_cents: 1440, traveler_total_cents: 25440,
+    provider_commission_rate_bps: null, provider_commission_cents: null,
+    quote_version: 'connectical-brl-v2-promo', expires_at: '2099-01-01T00:15:00Z',
+    list_subtotal_cents: 32000, discount_cents: 8000, promotion_id: 'promo-1', provider_commission_source: null,
+  });
+  const root = await render();
+  await press(root, 'Pousada Porto');
+  await type(root, 'Entrada (AAAA-MM-DD)', '2099-01-10');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'Precio de lista')).toBe(true);
+  expect(hasText(root, 'R$ 320,00')).toBe(true);
+  expect(hasText(root, '-R$ 80,00')).toBe(true);
+  expect(hasText(root, 'R$ 254,40')).toBe(true);
+});
+
+it('shows no discount rows for a quote without a promotion', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockResolvedValue({
+    id: 'q3', offer_id: pousada.id, service_date: '2099-01-10', quantity: 1, nights: 1,
+    service_fee_rate_bps: 600, subtotal_cents: 32000, service_fee_cents: 1920, traveler_total_cents: 33920,
+    provider_commission_rate_bps: null, provider_commission_cents: null,
+    quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z', discount_cents: 0,
+  });
+  const root = await render();
+  await press(root, 'Pousada Porto');
+  await type(root, 'Entrada (AAAA-MM-DD)', '2099-01-10');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'R$ 339,20')).toBe(true);
+  expect(hasText(root, 'Precio de lista')).toBe(false);
 });
 
 it('hides nights for per-person offers and always sends one night', async () => {
@@ -748,4 +784,47 @@ it('shows sign-in and verification rejections in the chosen language', async () 
   expect(hasText(root, 'El código no es válido o ya venció.')).toBe(true);
   await press(root, 'Verificar correo');
   expect(hasText(root, 'No se pudo completar el acceso (Email service unavailable)')).toBe(true);
+});
+
+it('shows the traveler their voucher and shares it without internal ids', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ voucher_code: 'BZ-ABCD-EFGH', provider_commission_rate_bps: null, provider_commission_cents: null }),
+    reservation({ id: 'r2', status: 'held', payment_status: null, voucher_code: null, provider_commission_rate_bps: null, provider_commission_cents: null }),
+  ]);
+  const shareText = jest.fn(async () => undefined);
+  const root = await render('es', shareText);
+  expect(hasText(root, 'Comprobante: BZ-ABCD-EFGH')).toBe(true);
+  // Solo la reserva confirmada con código se puede compartir.
+  expect(texts(root).filter(text => text === 'Compartir comprobante')).toHaveLength(1);
+  await press(root, 'Compartir comprobante');
+  const shared = (shareText.mock.calls[0] as unknown as [{ message: string }])[0].message;
+  expect(shared).toBe('Búzios Flow · Comprobante BZ-ABCD-EFGH\nPousada Porto\n2099-01-10 → 2099-01-12 · ×1\nTotal: R$ 678,40\nMuéstralo al proveedor al llegar.');
+  expect(shared).not.toContain('r1');
+});
+
+it('lets a provider validate a voucher once and explains each refusal', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.listProviderOffers.mockResolvedValue([pousada]);
+  mocked.providerCheckIn
+    .mockResolvedValueOnce({ status: 'checked_in', reservation: reservation({ checked_in_at: '2099-01-10T15:00:00Z' }) })
+    .mockResolvedValueOnce({ status: 'already_checked_in', reservation: reservation({}) })
+    .mockResolvedValueOnce({ status: 'too_many_attempts' });
+  const root = await render();
+  expect(hasText(root, 'Check-in con comprobante')).toBe(true);
+
+  await type(root, 'Código del comprobante', 'bz-abcd-efgh');
+  await press(root, 'Validar comprobante');
+  expect(mocked.providerCheckIn).toHaveBeenCalledWith('bz-abcd-efgh');
+  expect(hasText(root, 'Check-in registrado.')).toBe(true);
+  expect(hasText(root, 'Pousada Porto · 2099-01-10 · ×1')).toBe(true);
+  // Tras un check-in correcto el campo se vacía y se recargan las reservas.
+  const input = root.findAll(node => node.type === TextInput && node.props.accessibilityLabel === 'Código del comprobante')[0];
+  expect(input.props.value).toBe('');
+
+  await type(root, 'Código del comprobante', 'BZ-ABCD-EFGH');
+  await press(root, 'Validar comprobante');
+  expect(hasText(root, 'Este comprobante ya se usó.')).toBe(true);
+  await press(root, 'Validar comprobante');
+  expect(hasText(root, 'Demasiados códigos incorrectos.')).toBe(true);
 });
