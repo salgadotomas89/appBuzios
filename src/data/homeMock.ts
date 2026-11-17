@@ -48,6 +48,8 @@ export type Offer = {
   // Solo ofertas compartidas: precio base del proveedor y promociones activas (migración 202611160006).
   // price/originalPrice reflejan la promoción vigente en la fecha de referencia (ver withPromotionOn).
   listPrice?: number;
+  // Perfil comercial público del proveedor (202611170005), solo ofertas compartidas.
+  provider?: { name: string; description: string; neighborhood: string; languages: Array<'pt' | 'es' | 'en'> };
   promotions?: OfferPromotion[];
 };
 

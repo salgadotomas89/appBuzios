@@ -1,6 +1,7 @@
 module.exports = {
   preset: '@react-native/jest-preset',
   setupFiles: ['<rootDir>/jest.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/jest.afterEnv.js'],
   // @insforge/shared-schemas solo publica ESM (exports con la condición "import") y el SDK lo carga con
   // require(): Metro lo resuelve, Jest no. Se apunta a su entrada y Babel la transforma.
   moduleNameMapper: {

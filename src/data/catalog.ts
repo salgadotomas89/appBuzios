@@ -1,5 +1,5 @@
 import type { IconName } from '../components/Icon';
-import type { OfferMedia } from '../lib/platformService';
+import type { OfferMedia, PublicProviderProfile } from '../lib/platformService';
 import type { SharedInventory, SharedOffer, SharedPromotion } from '../lib/reservationService';
 import { PORTAL_CATEGORIES } from '../i18n/portalCopy';
 import { discountPercent } from '../utils/format';
@@ -53,6 +53,7 @@ export function sharedOfferToOffer(
   media: OfferMedia[] = [],
   promotions: SharedPromotion[] = [],
   referenceDate?: string,
+  profile?: PublicProviderProfile,
 ): Offer {
   const ownInventory = inventory?.filter(item => item.offer_id === shared.id) ?? null;
   const freeUnits = ownInventory?.reduce(
@@ -109,6 +110,9 @@ export function sharedOfferToOffer(
       .sort((left, right) => left.position - right.position)
       .map(item => ({ url: item.url, alt: item.alt_text, width: item.width, height: item.height })),
     listPrice: shared.base_price_cents / 100,
+    provider: profile
+      ? { name: profile.name, description: profile.public_description, neighborhood: profile.neighborhood, languages: profile.languages }
+      : undefined,
     promotions: promotions
       .filter(item => item.offer_id === shared.id)
       .map(item => ({ percentOffBps: item.percent_off_bps, startsOn: item.starts_on, endsOn: item.ends_on, label: item.label })),
@@ -137,11 +141,15 @@ export function buildCatalog(
     inventory: SharedInventory[] | null;
     media?: OfferMedia[];
     promotions?: SharedPromotion[];
+    profiles?: PublicProviderProfile[];
   } | null,
   referenceDate?: string,
 ): Catalog {
+  const profiles = new Map(shared?.profiles?.map(profile => [profile.provider_id, profile]));
   const sharedOffers =
-    shared?.offers.map(offer => sharedOfferToOffer(offer, shared.inventory, shared.media, shared.promotions, referenceDate)) ?? [];
+    shared?.offers.map(offer =>
+      sharedOfferToOffer(offer, shared.inventory, shared.media, shared.promotions, referenceDate, profiles.get(offer.provider_id)),
+    ) ?? [];
   const offers = [...sharedOffers, ...demoOffers.map(offer => ({ ...offer, source: 'demo' as const }))];
   const labels = new Map(categoryLabels.map(category => [category.id, category]));
   const categories = CATEGORY_ORDER.map(id => ({

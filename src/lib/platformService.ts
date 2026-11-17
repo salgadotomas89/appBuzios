@@ -436,3 +436,34 @@ export async function getCategoryKpis(from: string, to: string): Promise<Categor
     discount_cents: Number(row.discount_cents),
   }));
 }
+
+// Perfil comercial público del proveedor (migración 202611170005).
+export type ProfileLanguage = 'pt' | 'es' | 'en';
+export type ProviderProfile = { name: string; public_description: string; neighborhood: string; languages: ProfileLanguage[] };
+export type PublicProviderProfile = ProviderProfile & { provider_id: string };
+
+// Sin sesión también funciona; si el tenant aún no tiene la migración, las ofertas se muestran sin perfil.
+export async function listProviderProfiles(providerIds: string[]): Promise<PublicProviderProfile[]> {
+  if (!providerIds.length) return [];
+  const { data, error } = await (await freshClient()).database.rpc('connectical_list_provider_profiles', { p_provider_ids: providerIds });
+  if (error) return [];
+  return (data ?? []) as PublicProviderProfile[];
+}
+
+export async function getOwnProviderProfile(): Promise<ProviderProfile | null> {
+  const rows = await callRpc<ProviderProfile[] | null>('connectical_provider_get_profile', {});
+  return rows?.[0] ?? null;
+}
+
+export async function updateOwnProviderProfile(input: {
+  description: string;
+  neighborhood: string;
+  languages: ProfileLanguage[];
+}): Promise<ProviderProfile | null> {
+  const rows = await callRpc<ProviderProfile[] | null>('connectical_provider_update_profile', {
+    p_description: input.description,
+    p_neighborhood: input.neighborhood,
+    p_languages: input.languages,
+  });
+  return rows?.[0] ?? null;
+}

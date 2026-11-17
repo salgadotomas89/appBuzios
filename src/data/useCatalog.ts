@@ -9,10 +9,24 @@ import {
   type SharedOffer,
   type SharedPromotion,
 } from '../lib/reservationService';
-import { listFeed, listOfferMedia, type FeedPost, type OfferMedia } from '../lib/platformService';
+import {
+  listFeed,
+  listOfferMedia,
+  listProviderProfiles,
+  type FeedPost,
+  type OfferMedia,
+  type PublicProviderProfile,
+} from '../lib/platformService';
 import { buziosIsoDate } from '../utils/portalInput';
 import { buildCatalog, type Catalog } from './catalog';
 import { homeMock } from './homeMock';
+
+// Extras del catálogo (promociones, novedades, perfiles): si fallan, incluso de forma síncrona, el catálogo sigue.
+function optional<T>(load: () => Promise<T>, fallback: T): Promise<T> {
+  return Promise.resolve()
+    .then(load)
+    .catch(() => fallback);
+}
 
 export type CatalogSource = 'demo' | 'loading' | 'shared' | 'demo_fallback';
 
@@ -25,6 +39,7 @@ export function useCatalog(sharedEnabled: boolean): Catalog & { source: CatalogS
     inventory: SharedInventory[] | null;
     media: OfferMedia[];
     promotions: SharedPromotion[];
+    profiles: PublicProviderProfile[];
   } | null>(null);
   const [feed, setFeed] = useState<FeedPost[]>([]);
   const [source, setSource] = useState<CatalogSource>(active ? 'loading' : 'demo');
@@ -43,11 +58,12 @@ export function useCatalog(sharedEnabled: boolean): Catalog & { source: CatalogS
         // Sin fotos la oferta se muestra con su ilustración de categoría.
         const media = await listOfferMedia(offers.map(offer => offer.id)).catch(() => []);
         // Sin promociones se muestra el precio base; la cotización del servidor aplica la vigente igualmente.
-        const promotions = await listActivePromotions().catch(() => []);
+        const promotions = await optional(listActivePromotions, []);
         // Novedades moderadas; sin ellas la portada sigue igual.
-        const posts = await listFeed().catch(() => []);
+        const posts = await optional(listFeed, []);
+        const profiles = await optional(() => listProviderProfiles([...new Set(offers.map(offer => offer.provider_id))]), []);
         if (!mounted) return;
-        setShared({ offers, inventory, media, promotions });
+        setShared({ offers, inventory, media, promotions, profiles });
         setFeed(posts);
         setSource('shared');
       } catch {

@@ -828,3 +828,21 @@ it('lets a provider validate a voucher once and explains each refusal', async ()
   await press(root, 'Validar comprobante');
   expect(hasText(root, 'Demasiados códigos incorrectos.')).toBe(true);
 });
+
+it('shows the traveler a day-by-day agenda with today, tomorrow and each night of a stay', async () => {
+  const { buziosIsoDate, addDays } = jest.requireActual('../src/utils/portalInput');
+  const today = buziosIsoDate();
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.listSharedReservations.mockResolvedValue([
+    reservation({ id: 'stay', service_date: today, nights: 2, voucher_code: 'BZ-ABCD-EFGH', provider_commission_rate_bps: null, provider_commission_cents: null }),
+    reservation({ id: 'boat', offer_id: boat.id, service_date: addDays(today, 3), nights: 1, quantity: 2, status: 'held', payment_status: null, provider_commission_rate_bps: null, provider_commission_cents: null }),
+    reservation({ id: 'gone', status: 'cancelled', service_date: today, provider_commission_rate_bps: null, provider_commission_cents: null }),
+  ]);
+  const root = await render();
+  expect(hasText(root, 'Mi agenda en Búzios')).toBe(true);
+  expect(texts(root)).toContain('Hoy');
+  expect(texts(root)).toContain('Mañana');
+  expect(hasText(root, 'Pousada Porto · ×1 · noche 1 de 2 · BZ-ABCD-EFGH')).toBe(true);
+  expect(hasText(root, 'Pousada Porto · ×1 · noche 2 de 2')).toBe(true);
+  expect(hasText(root, 'Barco Azul · ×2 · pendiente de pago')).toBe(true);
+});

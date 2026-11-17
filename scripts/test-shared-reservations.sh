@@ -1517,6 +1517,28 @@ for actor in "$traveler_a" "$provider_user"; do
 done
 echo "PASS admin category KPIs add up to the global KPIs and trace which commission level applied"
 
+# Provider public profiles (202611170005): owner-only edits, public read of active providers with visible offers.
+saved_profile=$(as_user "$provider_user" "select public_description||'|'||neighborhood||'|'||array_to_string(languages, ',') from public.connectical_provider_update_profile('  Pousada familiar com café da manhã  ', ' Geribá ', array['pt','en','pt']);")
+[ "$saved_profile" = 'Pousada familiar com café da manhã|Geribá|en,pt' ] || { echo "Profile not saved as expected: $saved_profile" >&2; exit 1; }
+for bad in "repeat('x', 501), '', null" "'', '', array['fr']"; do
+  if as_user "$provider_user" "select public.connectical_provider_update_profile($bad);" >/dev/null 2>&1; then
+    echo "Invalid profile accepted: $bad" >&2; exit 1
+  fi
+done
+if as_user "$traveler_a" "select public.connectical_provider_update_profile('x', '', null);" >/dev/null 2>&1; then
+  echo "A traveler edited a provider profile" >&2; exit 1
+fi
+anon_profile=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select name||'|'||neighborhood||'|'||array_to_string(languages, ',') from public.connectical_list_provider_profiles(array['$lab_provider']::uuid[]);" | tail -1)
+[ "$anon_profile" = 'Pousada laboratorio|Geribá|en,pt' ] || { echo "Public profile not readable: $anon_profile" >&2; exit 1; }
+leak=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) from information_schema.routines r join information_schema.parameters p on p.specific_name = r.specific_name where r.routine_name = 'connectical_list_provider_profiles' and p.parameter_name in ('commission_rate_bps', 'owner_user_id', 'country_code');" | tail -1)
+[ "$leak" = '0' ] || { echo "Public profile exposes private provider fields" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_provider_active('$lab_provider', false);" >/dev/null 2>&1 || \
+  docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_providers set active = false where id = '$lab_provider';"
+paused=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) from public.connectical_list_provider_profiles(array['$lab_provider']::uuid[]);" | tail -1)
+docker exec "$container" psql -q -U postgres -d postgres -c "update public.connectical_providers set active = true where id = '$lab_provider';"
+[ "$paused" = '0' ] || { echo "Paused provider profile still public" >&2; exit 1; }
+echo "PASS provider profiles: owner-only edits, validated languages, public only for active providers with visible offers"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

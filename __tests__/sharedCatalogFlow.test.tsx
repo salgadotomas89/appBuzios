@@ -30,10 +30,11 @@ jest.mock('../src/lib/reservationService', () => ({
 jest.mock('../src/lib/platformService', () => ({
   listOfferMedia: jest.fn(async () => []),
   listFeed: jest.fn(async () => []),
+  listProviderProfiles: jest.fn(async () => []),
 }));
 
 const mocked = service as jest.Mocked<typeof service>;
-const mockedPlatform = jest.requireMock('../src/lib/platformService') as { listOfferMedia: jest.Mock; listFeed: jest.Mock };
+const mockedPlatform = jest.requireMock('../src/lib/platformService') as { listOfferMedia: jest.Mock; listFeed: jest.Mock; listProviderProfiles: jest.Mock };
 
 function flattenText(children: unknown): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
@@ -186,4 +187,33 @@ test('prices shared offers with the promotion active today and keeps the list pr
   ]);
   const root = await renderApp();
   expect(hasText(root, '25%')).toBe(true);
+});
+
+test('shows who offers a shared offer, their neighborhood and languages', async () => {
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-1', provider_id: 'p-1', category: 'pousadas', title: 'Quarto vista mar',
+    base_price_cents: 32000, price_mode: 'night', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue([]);
+  mockedPlatform.listProviderProfiles.mockResolvedValueOnce([
+    { provider_id: 'p-1', name: 'Pousada Mar Azul', public_description: 'Pousada familiar com café da manhã', neighborhood: 'Geribá', languages: ['pt', 'es'] },
+  ]);
+  const root = await renderApp();
+  expect(mockedPlatform.listProviderProfiles).toHaveBeenCalledWith(['p-1']);
+  await pressText(root, 'Quarto vista mar');
+  expect(hasText(root, 'Ofrecido por Pousada Mar Azul')).toBe(true);
+  expect(hasText(root, 'Pousada familiar com café da manhã')).toBe(true);
+  expect(hasText(root, 'Geribá')).toBe(true);
+  expect(hasText(root, 'Portugués, Español')).toBe(true);
+});
+
+test('keeps the shared catalog when an optional extra throws synchronously', async () => {
+  mocked.listSharedOffers.mockResolvedValue([{
+    id: 'o-1', provider_id: 'p-1', category: 'barcos', title: 'Escuna real',
+    base_price_cents: 12550, price_mode: 'person', currency: 'BRL', published: true,
+  }]);
+  mocked.listPublishedAvailability.mockResolvedValue([]);
+  mockedPlatform.listFeed.mockImplementationOnce(() => { throw new Error('boom'); });
+  const root = await renderApp();
+  expect(hasText(root, 'OFERTA PUBLICADA · SE RESERVA EN EL PORTAL CON PAGO SIMULADO')).toBe(true);
 });

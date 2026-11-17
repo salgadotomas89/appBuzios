@@ -18,6 +18,7 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
+import { portalCopy } from '../i18n/portalCopy';
 import { mapsUrl } from '../utils/maps';
 import { recommendOffers } from '../utils/recommendations';
 import { CATEGORY_ICONS, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
@@ -55,6 +56,8 @@ const copy = {
     categories: 'Elige tu plan',
     featured: 'Ideas para tu viaje',
     directions: 'Cómo llegar',
+    offeredBy: 'Ofrecido por',
+    speaks: 'Atiende en',
     related: 'También te puede interesar',
     explore: 'Explorar ofertas',
     all: 'Todas',
@@ -163,6 +166,8 @@ const copy = {
     categories: 'Escolha seu passeio',
     featured: 'Ideias para sua viagem',
     directions: 'Como chegar',
+    offeredBy: 'Oferecido por',
+    speaks: 'Atende em',
     related: 'Você também pode gostar',
     explore: 'Explorar ofertas',
     all: 'Todas',
@@ -271,6 +276,8 @@ const copy = {
     categories: 'Choose your plan',
     featured: 'Ideas for your trip',
     directions: 'Get directions',
+    offeredBy: 'Offered by',
+    speaks: 'Speaks',
     related: 'You may also like',
     explore: 'Explore offers',
     all: 'All',
@@ -1099,6 +1106,18 @@ function DetailView({
           openUrl(mapsUrl(place, Platform.OS)).catch(() => undefined);
         }}
       />
+      {offer.provider ? (
+        <InfoSection title={`${words.offeredBy} ${offer.provider.name}`}>
+          {offer.provider.description ? <Text style={styles.bodyText}>{offer.provider.description}</Text> : null}
+          {offer.provider.neighborhood ? <DetailFact label="Búzios" value={offer.provider.neighborhood} /> : null}
+          {offer.provider.languages.length ? (
+            <DetailFact
+              label={words.speaks as string}
+              value={offer.provider.languages.map(code => portalCopy[language].profile.languageNames[code]).join(', ')}
+            />
+          ) : null}
+        </InfoSection>
+      ) : null}
       <InfoSection title={words.conditions as string}>
         <Text style={styles.bodyText}>{offer.cancellation[language]}</Text>
       </InfoSection>

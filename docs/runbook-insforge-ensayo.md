@@ -216,12 +216,12 @@ fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simu
 laboratorio InsForge 2.3.5 con el correo capturado por Mailpit (código erróneo rechazado, contraseña anterior
 inválida, correo desconocido sin envío). Sin probar contra el tenant.
 
-### Migraciones 22 a 25 y 19 (17-11-2026, preparadas, SIN aplicar)
+### Migraciones 21 a 26 (17-11-2026, preparadas, SIN aplicar)
 
 Preparadas en `work/mvp-2026-11-16` y probadas en PostgreSQL 17 local (integración, ensayo de actualización desde
 las etapas 1, 4 y 11, inventario de esquema) y en la CI. **No se aplicó nada en buziosflow.** Para aplicarlas hace
 falta autorización expresa, un respaldo verificado justo antes (`npm run backup:verified`) y aplicarlas **una por
-ejecución, en este orden**, comprobando `npm run check:remote-schema` después de cada una:
+ejecución, en este orden** (seis migraciones), comprobando `npm run check:remote-schema` después de cada una:
 
 | Orden | Migración | Qué cambia | Riesgo y reversión |
 | --- | --- | --- | --- |
@@ -230,6 +230,7 @@ ejecución, en este orden**, comprobando `npm run check:remote-schema` después 
 | 3 | `20261117000002_provider-stats` | Solo una función de lectura | Ninguno |
 | 4 | `20261117000003_offer-posts` | Tabla de publicaciones, moderación y feed público | Tabla nueva sin datos |
 | 5 | `20261117000004_admin-category-kpis` | Solo una función de lectura | Ninguno |
+| 6 | `20261117000005_provider-profiles` | Tres columnas con valor por defecto en proveedores y tres funciones | Ninguno para datos existentes |
 
 Las tres de fotos (`…16000003` a `…16000005`) siguen pendientes por separado (ver «Storage»). La app es compatible
 con un tenant sin estas migraciones: promociones, feed e indicadores por categoría devuelven vacío si la función no
