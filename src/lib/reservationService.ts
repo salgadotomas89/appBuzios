@@ -51,6 +51,29 @@ export type SharedQuote = {
   provider_commission_cents: number | null;
   quote_version: string;
   expires_at: string;
+  // Migración 202611160006: precio de lista, descuento de la promoción usada y origen de la comisión
+  // (este último nulo para el turista). Opcionales mientras el tenant no tenga la migración.
+  list_subtotal_cents?: number | null;
+  discount_cents?: number;
+  promotion_id?: string | null;
+  provider_commission_source?: 'offer' | 'provider_category' | 'provider' | null;
+};
+
+// Promoción activa tal como la lee el catálogo público (sin autoría).
+export type SharedPromotion = {
+  offer_id: string;
+  percent_off_bps: number;
+  starts_on: string;
+  ends_on: string;
+  label: string;
+};
+
+// Promoción completa para su dueño o la administración.
+export type ProviderPromotion = SharedPromotion & {
+  id: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SharedReservationEvent = {
@@ -170,6 +193,44 @@ export async function createSharedQuote(input: {
     p_quantity: input.quantity,
     p_nights: input.nights,
     p_service_fee_rate_bps: input.serviceFeeRateBps,
+  });
+}
+
+// Catálogo público: sin sesión también funciona. Si el tenant aún no tiene la migración, devuelve [].
+export async function listActivePromotions(): Promise<SharedPromotion[]> {
+  const { data, error } = await (await freshClient()).database.rpc('connectical_list_active_promotions', {});
+  if (error) {
+    if (/connectical_list_active_promotions/.test(error.message) && /(does not exist|not found|PGRST202)/i.test(error.message)) {
+      return [];
+    }
+    throw toReservationError('connectical_list_active_promotions', error.message);
+  }
+  return (data ?? []) as SharedPromotion[];
+}
+
+export async function listProviderPromotions(offerId: string): Promise<ProviderPromotion[]> {
+  const rows = await callRpc<ProviderPromotion[] | null>('connectical_provider_list_promotions', { p_offer_id: offerId });
+  return rows ?? [];
+}
+
+// promotionId nulo crea; con id edita. Desactivar = active false (queda en el historial).
+export async function saveProviderPromotion(input: {
+  promotionId: string | null;
+  offerId: string;
+  percentOffBps: number;
+  startsOn: string;
+  endsOn: string;
+  label: string;
+  active: boolean;
+}): Promise<ProviderPromotion> {
+  return callRpc('connectical_provider_save_promotion', {
+    p_promotion_id: input.promotionId,
+    p_offer_id: input.offerId,
+    p_percent_off_bps: input.percentOffBps,
+    p_starts_on: input.startsOn,
+    p_ends_on: input.endsOn,
+    p_label: input.label,
+    p_active: input.active,
   });
 }
 

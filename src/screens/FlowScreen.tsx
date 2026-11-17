@@ -16,7 +16,7 @@ import type { Language, Offer, OfferCategory } from '../data/homeMock';
 import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
-import { CATEGORY_ICONS, filterOffers, type Catalog } from '../data/catalog';
+import { CATEGORY_ICONS, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
 import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { colors, radius } from '../theme';
@@ -502,22 +502,19 @@ export function FlowScreen() {
     });
   }
 
-  const searchedOffers = catalog.offers.filter(offer => {
-    const categoryMatch = !selectedCategory || offer.category === selectedCategory;
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const searchMatch =
-      !normalizedQuery ||
-      `${offer.title[language]} ${offer.location[language]}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery);
-    return categoryMatch && searchMatch;
-  });
+  const categoryLabels = new Map(catalog.categories.map(category => [category.id, category.label[language]]));
+  const searchedOffers = catalog.offers.filter(
+    offer =>
+      (!selectedCategory || offer.category === selectedCategory) &&
+      matchesSearch(offer, query, language, categoryLabels.get(offer.category)),
+  );
+  // Con fecha elegida, el precio mostrado es el de la promoción de ese día (si la hay).
   const matchingOffers = filterOffers(searchedOffers, {
     date: filterDate,
     people: filterPeople,
     favoritesOnly,
     favorites: new Set(favorites),
-  });
+  }).map(offer => (filterDate ? withPromotionOn(offer, filterDate) : offer));
 
   function openExplore(category?: OfferCategory | null) {
     setSelectedCategory(category ?? null);

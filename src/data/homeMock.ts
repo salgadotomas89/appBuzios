@@ -1,4 +1,5 @@
 import type { IconName } from '../components/Icon';
+import type { PortalCategory } from '../i18n/portalCopy';
 
 // Datos de ejemplo para el Home. Reemplazar por datos de InsForge.
 
@@ -9,7 +10,7 @@ export type CategoryStat = {
   highlight?: boolean;
 };
 
-export type OfferCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
+export type OfferCategory = PortalCategory;
 export type Language = 'es' | 'pt' | 'en';
 // Texto en cada idioma de la interfaz; TypeScript exige las tres versiones.
 export type Localized<T = string> = Record<Language, T>;
@@ -44,7 +45,13 @@ export type Offer = {
   // Solo ofertas compartidas: cupo libre por fecha publicada y límites por reserva.
   freeUnitsByDate?: Record<string, number>;
   quantityLimits?: { min: number; max: number | null };
+  // Solo ofertas compartidas: precio base del proveedor y promociones activas (migración 202611160006).
+  // price/originalPrice reflejan la promoción vigente en la fecha de referencia (ver withPromotionOn).
+  listPrice?: number;
+  promotions?: OfferPromotion[];
 };
+
+export type OfferPromotion = { percentOffBps: number; startsOn: string; endsOn: string; label: string };
 
 export const homeMock = {
   locationLabel: { es: 'Búzios, Brasil · hoy', pt: 'Búzios, Brasil · hoje', en: 'Búzios, Brazil · today' },
@@ -57,6 +64,9 @@ export const homeMock = {
     { id: 'buggy', label: { es: 'Buggy', pt: 'Buggy', en: 'Buggy' }, count: 2 },
     // Sin ofertas de ejemplo: no se inventan experiencias VIP para la demo.
     { id: 'experiencias', label: { es: 'Experiencias VIP', pt: 'Experiências VIP', en: 'VIP experiences' }, count: 0 },
+    // Categorías de 202611160006: se llenan con ofertas reales de proveedores, sin ejemplos inventados.
+    { id: 'restaurantes', label: { es: 'Restaurantes', pt: 'Restaurantes', en: 'Restaurants' }, count: 0 },
+    { id: 'actividades', label: { es: 'Actividades', pt: 'Atividades', en: 'Activities' }, count: 0 },
   ] as CategoryStat[],
   offers: [
     {

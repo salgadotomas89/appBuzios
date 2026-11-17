@@ -1,6 +1,6 @@
 # Matriz de estado por módulo — Búzios Flow
 
-Actualizada el 14-11-2026 (noche), sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
+Actualizada el 14-11-2026 (noche); ciclo de catálogo y comercio el 17-11-2026 en `work/mvp-2026-11-16`, sobre la rama `work/dev-2026-11-15`. "Probado" significa con pruebas automatizadas
 en este repositorio (Jest o PostgreSQL 17 local en Docker); **nada está desplegado ni operativo en producción**.
 Actualización 15-11-2026: 17 de 20 migraciones aplicadas y verificadas en el proyecto InsForge buziosflow (sin datos). Las
 tres de fotos (registro solo por la función, bucket cerrado a las sesiones y moderación) están preparadas y ensayadas en el laboratorio
@@ -20,7 +20,7 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Pagos reales | BLOQUEADO | Sin pasarela contratada; tres controles independientes apagados y ningún adaptador en vivo ([arquitectura-pagos.md](arquitectura-pagos.md)) | Decisión comercial |
 | Reembolsos | SIMULADO | Registro de admin idempotente con topes (0003); sin devolución bancaria | — |
 | Política de cancelación | PARCIAL | Motor configurable probado, **apagado**, sin política aprobada | Decisión comercial |
-| Comisiones | PARCIAL | Por proveedor y por producto, solo admin, congeladas por cotización (0007); referencias sin aprobar; Buggy sin tasa | Decisión comercial |
+| Comisiones | PARCIAL | Tres niveles: producto > proveedor+categoría > proveedor, solo admin y auditado; cada cotización congela la tasa y guarda el nivel aplicado (`provider_commission_source`, nunca visible al turista) — 202611160006 y sección «Comisión por categoría» de la consola; **migración sin aplicar**; referencias sin aprobar; Buggy, Restaurantes y Actividades sin tasa | Decisión comercial y aplicar 202611160006 |
 | Cargo al turista 4/6/8 % | SIMULADO | 6 % como escenario por defecto; no es tarifa aprobada | Decisión comercial |
 | Tipos de cambio | SIMULADO | Tasas fijas etiquetadas como demostración; sin fuente cambiaria real | P2 |
 | Panel admin: finanzas | COMPLETO | Retenido no es ingreso, bruto/neto/cargo/comisión conciliados, estados inconsistentes | — |
@@ -34,7 +34,9 @@ Estados: **COMPLETO** (implementado y probado localmente) · **PARCIAL** · **SI
 | Autenticación y sesión persistente | PARCIAL | Sesión en Keychain/Keystore con renovación y caducidad (flujo móvil del SDK); endpoint móvil comprobado contra buziosflow; errores de acceso traducidos (ES/PT/EN); recuperación de contraseña por código. **Sin probar en dispositivo** y sin confirmar la entrega de códigos por correo (`scripts/verify-email-delivery.mjs`); el correo llega en inglés sin SMTP propio | P1 |
 | OAuth | BLOQUEADO | No configurado; contrato PKCE y URI de retorno propuestos en [autenticacion-oauth.md](autenticacion-oauth.md) | Decisión humana |
 | Catálogo unificado | PARCIAL | Detrás de `SHARED_CATALOG_ENABLED` (apagado en `main`); lectura sin sesión comprobada contra buziosflow con el SDK (catálogo, inventario y fotos) | Recorrido en dispositivo |
-| Categorías | COMPLETO | Pousadas, barcos, noche/discotecas, buggy y experiencias VIP (0007) | — |
+| Categorías | COMPLETO (local) | Pousadas, barcos, noche/discotecas, buggy, experiencias VIP, **restaurantes y actividades**; desde 202611160006 son datos (`connectical_categories`, FK en ofertas, solicitudes, campañas y referencias) en vez de listas fijas. Sin ofertas de ejemplo inventadas para las nuevas | Aplicar 202611160006 |
+| Promociones y descuentos | COMPLETO (local) | Descuento 1-90 % por fechas de servicio, sin solapes por oferta, creado por el proveedor dueño o admin y auditado; la cotización congela precio de lista, descuento y promoción; comisión y cargo sobre el precio descontado (lo financia el proveedor). Catálogo público muestra precio tachado según la fecha elegida; gestor en el portal del proveedor. **Migración sin aplicar** | Aplicar 202611160006; validar con proveedores quién financia el descuento |
+| Búsqueda | COMPLETO | Sin distinguir acentos ni mayúsculas, todas las palabras, sobre título, ubicación, descripción y categoría | — |
 | Recorrido demo del turista | COMPLETO | Exploración → detalle → viaje → confirmación demo, fechas de Búzios | — |
 | Favoritos y filtros por fecha y personas | COMPLETO | Favoritos locales sin datos personales; filtros con cupo real publicado | — |
 | Mapas | NO IMPLEMENTADO | Sin proveedor de mapas elegido | P2 |

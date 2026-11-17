@@ -1318,6 +1318,75 @@ case "$race_b" in *media_rate_limited*) ;; *) echo "Concurrent photo got past th
   echo "Hourly photo limit exceeded under concurrency" >&2; exit 1; }
 echo "PASS offer photos: owner-only metadata, only files written by the gateway, key bound to the offer, limits, visibility and removal key"
 
+# Catalog and commerce (202611160006): categories as data, offer promotions, per-category commission with its source.
+for cat in restaurantes actividades; do
+  cat_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, '$cat', 'Lab $cat', 10000, 'person', true)).id;")
+  [ -n "$cat_offer" ] || { echo "Provider could not publish in category $cat" >&2; exit 1; }
+done
+if as_user "$provider_user" "select public.connectical_provider_upsert_offer(null, 'casino', 'Unknown category', 10000, 'person', true);" >/dev/null 2>&1; then
+  echo "Unknown category accepted" >&2; exit 1
+fi
+anon_categories=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select string_agg(id, ',' order by sort_order) from public.connectical_categories;" | tail -1)
+[ "$anon_categories" = 'pousadas,barcos,noche,buggy,experiencias,restaurantes,actividades' ] || { echo "Categories not readable in order: $anon_categories" >&2; exit 1; }
+
+promo_offer=$(as_user "$provider_user" "select (public.connectical_provider_upsert_offer(null, 'restaurantes', 'Lab dinner', 20000, 'person', true)).id;")
+save_promo() { as_user "$1" "select (public.connectical_provider_save_promotion($2)).id;"; }
+if save_promo "$traveler_a" "null, '$promo_offer', 2500, current_date + 160, current_date + 165, 'Lab', true" >/dev/null 2>&1; then
+  echo "A non-owner created a promotion" >&2; exit 1
+fi
+promo_id=$(save_promo "$provider_user" "null, '$promo_offer', 2500, current_date + 160, current_date + 165, 'Semana gastronómica', true")
+for bad in "null, '$promo_offer', 2000, current_date + 165, current_date + 170, 'Overlap', true" \
+           "null, '$promo_offer', 50, current_date + 200, current_date + 201, 'Too small', true" \
+           "null, '$promo_offer', 9500, current_date + 200, current_date + 201, 'Too large', true" \
+           "null, '$promo_offer', 1000, current_date - 10, current_date - 5, 'Already over', true" \
+           "null, '$promo_offer', 1000, current_date + 210, current_date + 205, 'Reversed', true"; do
+  if save_promo "$provider_user" "$bad" >/dev/null 2>&1; then echo "Invalid promotion accepted: $bad" >&2; exit 1; fi
+done
+traveler_promo_quote=$(as_user "$traveler_a" "select q.id || '|' || q.list_subtotal_cents || '|' || q.discount_cents || '|' || q.subtotal_cents || '|' || q.traveler_total_cents || '|' || coalesce(q.provider_commission_source, 'hidden') || '|' || (q.promotion_id = '$promo_id') from public.connectical_create_quote('$promo_offer', current_date + 162, 2, 1, 600) q;")
+[ "${traveler_promo_quote#*|}" = '40000|10000|30000|31800|hidden|true' ] || { echo "Promotion quote mismatch: $traveler_promo_quote" >&2; exit 1; }
+promo_quote_id=${traveler_promo_quote%%|*}
+commission_of() { docker exec "$container" psql -qAt -U postgres -d postgres -c "select provider_commission_rate_bps || '|' || provider_commission_cents || '|' || provider_commission_source from public.connectical_quotes where id = '$1';" | tail -1; }
+[ "$(commission_of "$promo_quote_id")" = '1000|3000|provider' ] || { echo "Commission not on discounted subtotal: $(commission_of "$promo_quote_id")" >&2; exit 1; }
+outside_promo=$(as_user "$traveler_a" "select q.discount_cents || '|' || q.subtotal_cents || '|' || (q.promotion_id is null) from public.connectical_create_quote('$promo_offer', current_date + 170, 2, 1, 600) q;")
+[ "$outside_promo" = '0|40000|true' ] || { echo "Promotion applied outside its dates: $outside_promo" >&2; exit 1; }
+if as_user "$traveler_a" "select provider_commission_source from public.connectical_quotes limit 1;" >/dev/null 2>&1; then
+  echo "Traveler can read the commission source" >&2; exit 1
+fi
+anon_promos=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "set role anon; select count(*) || '|' || min(percent_off_bps) from public.connectical_list_active_promotions() where offer_id = '$promo_offer';" | tail -1)
+[ "$anon_promos" = '1|2500' ] || { echo "Active promotion not listed for visitors: $anon_promos" >&2; exit 1; }
+if as_user "$traveler_a" "select count(*) from public.connectical_offer_promotions;" >/dev/null 2>&1; then
+  echo "Promotions table readable directly" >&2; exit 1
+fi
+
+for actor in "$traveler_a" "$provider_user"; do
+  if as_user "$actor" "select public.connectical_admin_set_provider_category_rate('$lab_provider', 'restaurantes', 0);" >/dev/null 2>&1; then
+    echo "Non-admin set a category commission" >&2; exit 1
+  fi
+done
+if as_user "$admin_user" "select public.connectical_admin_set_provider_category_rate('$lab_provider', 'casino', 1500);" >/dev/null 2>&1; then
+  echo "Category commission accepted for an unknown category" >&2; exit 1
+fi
+as_user "$admin_user" "select public.connectical_admin_set_provider_category_rate('$lab_provider', 'restaurantes', 1500);" >/dev/null
+category_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$promo_offer', current_date + 162, 2, 1, 600)).id;")
+[ "$(commission_of "$category_quote")" = '1500|4500|provider_category' ] || { echo "Category commission not applied: $(commission_of "$category_quote")" >&2; exit 1; }
+[ "$(commission_of "$promo_quote_id")" = '1000|3000|provider' ] || { echo "Earlier quote changed after a category rate: $(commission_of "$promo_quote_id")" >&2; exit 1; }
+other_category=$(as_user "$traveler_a" "select (public.connectical_create_quote('$vip_offer', current_date + 150, 1, 1, 600)).id;")
+[ "$(commission_of "$other_category")" = '1000|5000|provider' ] || { echo "Category rate leaked to another category: $(commission_of "$other_category")" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$promo_offer', 2000);" >/dev/null
+offer_quote=$(as_user "$traveler_a" "select (public.connectical_create_quote('$promo_offer', current_date + 162, 2, 1, 600)).id;")
+[ "$(commission_of "$offer_quote")" = '2000|6000|offer' ] || { echo "Product commission did not win over the category: $(commission_of "$offer_quote")" >&2; exit 1; }
+as_user "$admin_user" "select public.connectical_admin_set_offer_commission('$promo_offer', null);" >/dev/null
+as_user "$admin_user" "select public.connectical_admin_set_provider_category_rate('$lab_provider', 'restaurantes', null);" >/dev/null
+rates_left=$(as_user "$admin_user" "select count(*) from public.connectical_admin_list_provider_category_rates('$lab_provider');")
+[ "$rates_left" = '0' ] || { echo "Category rate not removed: $rates_left" >&2; exit 1; }
+
+save_promo "$provider_user" "'$promo_id', '$promo_offer', 2500, current_date + 160, current_date + 165, 'Semana gastronómica', false" >/dev/null
+after_off=$(as_user "$traveler_a" "select (public.connectical_create_quote('$promo_offer', current_date + 162, 2, 1, 600)).discount_cents;")
+[ "$after_off" = '0' ] || { echo "Deactivated promotion still applied: $after_off" >&2; exit 1; }
+audit_actions=$(docker exec "$container" psql -qAt -U postgres -d postgres -c "select count(*) filter (where action = 'promotion_saved') || '|' || count(*) filter (where action = 'category_rate_set') from public.connectical_admin_audit_log;" | tail -1)
+[ "$audit_actions" = '2|2' ] || { echo "Commerce changes not audited: $audit_actions" >&2; exit 1; }
+echo "PASS categories as data, dated promotions on discounted subtotals and three-level commission traced per quote"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

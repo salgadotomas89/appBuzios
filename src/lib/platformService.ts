@@ -1,7 +1,7 @@
 import type { PortalCategory } from '../i18n/portalCopy';
 import type { OfferMediaGateway } from '../media/offerMediaGateway';
 import type { ImageCandidate } from '../media/imagePolicy';
-import { callRpc, freshClient } from './reservationService';
+import { callRpc, freshClient, toReservationError } from './reservationService';
 import { insforge } from './insforge';
 
 // Alta de proveedores, administración e incidencias (migraciones 202611150001 y 202611150002).
@@ -280,4 +280,21 @@ export async function addOfferPhoto(gateway: OfferMediaGateway, offerId: string,
 
 export async function removeOfferPhoto(gateway: OfferMediaGateway, mediaId: string): Promise<void> {
   await gateway.remove(mediaId);
+}
+
+// Comisión por categoría de un proveedor (migración 202611160006). Solo administración.
+export type ProviderCategoryRate = { provider_id: string; category: PortalCategory; rate_bps: number; updated_at: string };
+
+export async function listProviderCategoryRates(providerId: string): Promise<ProviderCategoryRate[]> {
+  return (await callRpc<ProviderCategoryRate[] | null>('connectical_admin_list_provider_category_rates', { p_provider_id: providerId })) ?? [];
+}
+
+// rateBps nulo elimina la tasa de esa categoría y vuelve a la general del proveedor.
+export async function setProviderCategoryRate(providerId: string, category: PortalCategory, rateBps: number | null): Promise<void> {
+  const { error } = await (await freshClient()).database.rpc('connectical_admin_set_provider_category_rate', {
+    p_provider_id: providerId,
+    p_category: category,
+    p_rate_bps: rateBps,
+  });
+  if (error) throw toReservationError('connectical_admin_set_provider_category_rate', error.message);
 }

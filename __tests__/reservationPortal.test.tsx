@@ -19,7 +19,7 @@ jest.mock('../src/lib/reservationService', () => {
     'publishProviderInventoryRange', 'setSharedProviderActive', 'getSweepHealth',
     'listCommissionTerms', 'setOfferCommission', 'listPaymentReviews', 'setProviderOfferDetails',
     'restoreSharedSession', 'isSharedSessionPersisted', 'verifyTravelerEmail', 'resendVerificationCode',
-    'requestPasswordReset', 'resetAccountPassword',
+    'requestPasswordReset', 'resetAccountPassword', 'listProviderPromotions', 'saveProviderPromotion',
   ];
   return { ...actual, ...Object.fromEntries(names.map(name => [name, jest.fn()])) };
 });
@@ -149,6 +149,41 @@ it('quotes a multi-night stay and books it with the quote id as idempotency key'
   expect(mocked.createSharedReservationHold).toHaveBeenCalledWith('q1', 'q1');
   expect(mocked.simulateSharedPayment).toHaveBeenCalledWith('r1', 'approved', 'pix');
   expect(hasText(root, 'Reserva: Confirmada · r1')).toBe(true);
+});
+
+it('shows the list price and the promotion discount frozen in the quote', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockResolvedValue({
+    id: 'q2', offer_id: pousada.id, service_date: '2099-01-10', quantity: 1, nights: 1,
+    service_fee_rate_bps: 600, subtotal_cents: 24000, service_fee_cents: 1440, traveler_total_cents: 25440,
+    provider_commission_rate_bps: null, provider_commission_cents: null,
+    quote_version: 'connectical-brl-v2-promo', expires_at: '2099-01-01T00:15:00Z',
+    list_subtotal_cents: 32000, discount_cents: 8000, promotion_id: 'promo-1', provider_commission_source: null,
+  });
+  const root = await render();
+  await press(root, 'Pousada Porto');
+  await type(root, 'Entrada (AAAA-MM-DD)', '2099-01-10');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'Precio de lista')).toBe(true);
+  expect(hasText(root, 'R$ 320,00')).toBe(true);
+  expect(hasText(root, '-R$ 80,00')).toBe(true);
+  expect(hasText(root, 'R$ 254,40')).toBe(true);
+});
+
+it('shows no discount rows for a quote without a promotion', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockResolvedValue({
+    id: 'q3', offer_id: pousada.id, service_date: '2099-01-10', quantity: 1, nights: 1,
+    service_fee_rate_bps: 600, subtotal_cents: 32000, service_fee_cents: 1920, traveler_total_cents: 33920,
+    provider_commission_rate_bps: null, provider_commission_cents: null,
+    quote_version: 'connectical-brl-v1', expires_at: '2099-01-01T00:15:00Z', discount_cents: 0,
+  });
+  const root = await render();
+  await press(root, 'Pousada Porto');
+  await type(root, 'Entrada (AAAA-MM-DD)', '2099-01-10');
+  await press(root, 'Crear cotización');
+  expect(hasText(root, 'R$ 339,20')).toBe(true);
+  expect(hasText(root, 'Precio de lista')).toBe(false);
 });
 
 it('hides nights for per-person offers and always sends one night', async () => {

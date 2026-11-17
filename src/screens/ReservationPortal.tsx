@@ -10,6 +10,8 @@ import {
 import {
   cancelSharedReservation,
   createSharedQuote,
+  listProviderPromotions,
+  saveProviderPromotion,
   createSharedReservationHold,
   getSharedRole,
   listProviderInventory,
@@ -55,6 +57,7 @@ import { AuthFlowError } from '../auth/authErrors';
 import type { Language } from '../data/homeMock';
 import {
   inputErrorText,
+  PORTAL_CATEGORIES,
   portalCopy,
   type PortalCategory,
   type PortalPriceMode,
@@ -91,6 +94,7 @@ import {
 } from '../components/PortalControls';
 import { colors } from '../theme';
 import { OfferPhotoManager } from '../components/OfferPhotoManager';
+import { PromotionManager } from '../components/PromotionManager';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
 import { listOwnOfferMedia } from '../lib/platformService';
 import { offerPhotoGateway } from '../media/offerPhotos';
@@ -98,7 +102,7 @@ import { sessionManager } from '../lib/insforge';
 import { AdminConsole } from './AdminConsole';
 import { TravelerServices } from './TravelerServices';
 
-const CATEGORIES: PortalCategory[] = ['pousadas', 'barcos', 'noche', 'buggy', 'experiencias'];
+const CATEGORIES: PortalCategory[] = PORTAL_CATEGORIES;
 const PRICE_MODES: PortalPriceMode[] = ['night', 'person', 'ticket', 'group'];
 const OUTCOMES: SimulatedOutcome[] = ['approved', 'rejected', 'pending'];
 const STATUSES: ReservationStatus[] = ['held', 'pending_payment', 'confirmed', 'expired', 'cancelled', 'refunded'];
@@ -712,6 +716,12 @@ export function ReservationPortal({
                   {quote ? (
                     <View style={styles.quote}>
                       <Text style={styles.helper}>{words.frozenQuote} · {quote.quote_version} · {quote.service_date}{quote.nights > 1 ? ` → ${addDays(quote.service_date, quote.nights)}` : ''}</Text>
+                      {quote.discount_cents ? (
+                        <>
+                          <MoneyRow label={words.promotions.listPrice} cents={quote.list_subtotal_cents ?? quote.subtotal_cents + quote.discount_cents} />
+                          <MoneyRow label={words.promotions.discount} cents={-quote.discount_cents} />
+                        </>
+                      ) : null}
                       <MoneyRow label={words.subtotal} cents={quote.subtotal_cents} />
                       <MoneyRow label={`${words.travelerFee} · ${quote.service_fee_rate_bps / 100}%`} cents={quote.service_fee_cents} />
                       <MoneyRow label={words.total} cents={quote.traveler_total_cents} strong />
@@ -788,6 +798,14 @@ export function ReservationPortal({
               <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
               <Text style={styles.helper}>{words.publishNightsHint}</Text>
               <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
+              <PromotionManager
+                offerId={selectedProviderOfferId}
+                language={language}
+                today={buziosIsoDate()}
+                load={listProviderPromotions}
+                save={saveProviderPromotion}
+                describeError={describeError}
+              />
               {photosEnabled && offerPhotoGateway ? (
                 <OfferPhotoManager
                   offerId={selectedProviderOfferId}
@@ -967,7 +985,7 @@ export function ReservationPortal({
                 ))}
                 {!events.length ? <Text style={styles.helper}>{words.noEvents}</Text> : null}
               </View>
-              <AdminConsole language={language} busy={busy} run={run} />
+              <AdminConsole language={language} busy={busy} run={run} providers={providers} />
             </>
           ) : null}
           {role === 'traveler' || role === 'provider' ? (

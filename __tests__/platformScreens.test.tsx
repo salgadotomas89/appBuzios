@@ -12,7 +12,7 @@ jest.mock('../src/lib/platformService', () => {
     'getPlatformKpis', 'listAuditLog', 'listCampaigns', 'listIncidents', 'listOffersForModeration', 'listPlatformUsers',
     'listProviderApplications', 'reviewProviderApplication', 'saveCampaign', 'setOfferModeration', 'updateIncident',
     'getMyProviderApplication', 'listMyIncidents', 'reportIncident', 'submitProviderApplication',
-    'listMediaReviews', 'setMediaModeration',
+    'listMediaReviews', 'setMediaModeration', 'listProviderCategoryRates', 'setProviderCategoryRate',
   ];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -224,4 +224,38 @@ it('reviews new photos from the queue: approve, or reject only with a reason', a
   await type(root, 'Motivo del rechazo (obligatorio)', ' Mostra rostos ');
   await press(root, 'Rechazar foto');
   expect(mocked.setMediaModeration).toHaveBeenLastCalledWith('m1', 'rejected', 'Mostra rostos');
+});
+
+it('sets and removes a per-category commission for a chosen provider', async () => {
+  let rates: platform.ProviderCategoryRate[] = [];
+  mocked.listProviderCategoryRates.mockImplementation(async () => rates);
+  mocked.setProviderCategoryRate.mockImplementation(async (providerId, category, rateBps) => {
+    rates = rateBps === null ? [] : [{ provider_id: providerId, category, rate_bps: rateBps, updated_at: '' }];
+  });
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <Harness>{props => <AdminConsole language="es" {...props} providers={[{ id: 'prov-1', name: 'Mar Azul', commission_rate_bps: 1000 }]} />}</Harness>,
+    );
+  });
+  const root = renderer.root;
+  await press(root, 'Comisión por categoría');
+  await press(root, 'Mar Azul · 10 %');
+  expect(mocked.listProviderCategoryRates).toHaveBeenCalledWith('prov-1');
+  expect(hasText(root, 'no tiene comisiones por categoría')).toBe(true);
+
+  await press(root, 'Restaurantes');
+  await press(root, 'Guardar comisión de categoría');
+  expect(hasText(root, 'message:La comisión debe estar entre 0 % y 100 %.')).toBe(true);
+  expect(mocked.setProviderCategoryRate).not.toHaveBeenCalled();
+
+  await type(root, 'Comisión para la categoría (%)', '15');
+  await press(root, 'Guardar comisión de categoría');
+  expect(mocked.setProviderCategoryRate).toHaveBeenCalledWith('prov-1', 'restaurantes', 1500);
+  expect(hasText(root, 'Restaurantes: 15 %')).toBe(true);
+  expect(hasText(root, 'message:Comisión de categoría guardada.')).toBe(true);
+
+  await press(root, 'Quitar (usar la del proveedor)');
+  expect(mocked.setProviderCategoryRate).toHaveBeenLastCalledWith('prov-1', 'restaurantes', null);
+  expect(hasText(root, 'no tiene comisiones por categoría')).toBe(true);
 });

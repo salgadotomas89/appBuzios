@@ -16,7 +16,24 @@ export type ReservationStatus =
   | 'expired'
   | 'cancelled'
   | 'refunded';
-export type PortalCategory = 'pousadas' | 'barcos' | 'noche' | 'buggy' | 'experiencias';
+export type PortalCategory =
+  | 'pousadas'
+  | 'barcos'
+  | 'noche'
+  | 'buggy'
+  | 'experiencias'
+  | 'restaurantes'
+  | 'actividades';
+// Mismo orden que connectical_categories.sort_order (migración 202611160006).
+export const PORTAL_CATEGORIES: PortalCategory[] = [
+  'pousadas',
+  'barcos',
+  'noche',
+  'buggy',
+  'experiencias',
+  'restaurantes',
+  'actividades',
+];
 export type PortalPriceMode = 'night' | 'person' | 'ticket' | 'group';
 export type SimulatedOutcome = 'approved' | 'rejected' | 'pending';
 export type ReservationErrorCode = keyof (typeof portalCopy)['es']['errors'];
@@ -84,6 +101,8 @@ const es = {
     noche: 'Noche',
     buggy: 'Buggy',
     experiencias: 'Experiencias privadas y VIP',
+    restaurantes: 'Restaurantes',
+    actividades: 'Actividades y paseos',
   } satisfies Record<PortalCategory, string>,
   availability: 'Fechas con cupo publicado',
   noAvailability: 'El proveedor todavía no publicó cupo para esta oferta.',
@@ -252,6 +271,26 @@ const es = {
     percent_format: 'Porcentaje inválido. Usa por ejemplo 18 o 18,5.',
     percent_range: 'El porcentaje no puede superar 100.',
   } satisfies Record<InputError['code'], string>,
+  promotions: {
+    title: 'Promociones',
+    hint: 'Descuento sobre tu precio, por fechas de servicio. Lo asumes tú: la comisión se calcula sobre el precio con descuento. No puede haber dos promociones activas en las mismas fechas.',
+    needsOffer: 'Guarda la oferta antes de crear promociones.',
+    percent: 'Descuento (%)',
+    startsOn: 'Desde (AAAA-MM-DD)',
+    endsOn: 'Hasta (AAAA-MM-DD)',
+    label: 'Nombre visible (opcional)',
+    save: 'Crear promoción',
+    deactivate: 'Desactivar',
+    active: 'Activa',
+    inactive: 'Inactiva',
+    none: 'Esta oferta no tiene promociones.',
+    loadFailed: 'No se pudieron cargar las promociones.',
+    saved: 'Promoción guardada.',
+    deactivated: 'Promoción desactivada.',
+    endsBeforeStart: 'La fecha final no puede ser anterior a la inicial.',
+    listPrice: 'Precio de lista',
+    discount: 'Descuento de la promoción',
+  },
   photos: {
     title: 'Fotos de la oferta',
     count: '{n} de {max}',
@@ -317,6 +356,9 @@ const es = {
     invalid_inventory: 'El cupo debe ser cero o mayor.',
     invalid_offer: 'Revisa nombre, categoría, modalidad y precio de la oferta.',
     offer_not_owned: 'Esta oferta pertenece a otro proveedor.',
+    invalid_promotion: 'Revisa la promoción: descuento entre 1 % y 90 %, fechas válidas (máximo un año) y que no haya terminado.',
+    promotion_overlap: 'Ya hay otra promoción activa en esas fechas para esta oferta.',
+    promotion_not_found: 'No se encontró la promoción.',
     provider_not_authorized: 'Tu cuenta no tiene permiso de proveedor.',
     admin_offer_requires_provider: 'Un administrador debe indicar un proveedor para crear ofertas.',
     reservation_not_found: 'No encontramos la reserva.',
@@ -408,7 +450,7 @@ const pt: PortalCopy = {
   checkOut: 'Check-out',
   quantity: { night: 'Quartos', person: 'Pessoas', ticket: 'Ingressos', group: 'Grupos' },
   priceUnit: { night: 'por noite', person: 'por pessoa', ticket: 'por ingresso', group: 'por grupo' },
-  categories: { pousadas: 'Pousadas', barcos: 'Barcos', noche: 'Noite', buggy: 'Buggy', experiencias: 'Experiências privadas e VIP' },
+  categories: { pousadas: 'Pousadas', barcos: 'Barcos', noche: 'Noite', buggy: 'Buggy', experiencias: 'Experiências privadas e VIP', restaurantes: 'Restaurantes', actividades: 'Atividades e passeios' },
   availability: 'Datas com vagas publicadas',
   noAvailability: 'O fornecedor ainda não publicou vagas para esta oferta.',
   feeHint: 'Taxa de serviço do turista sobre o subtotal em BRL. A comissão do fornecedor é calculada à parte.',
@@ -572,6 +614,26 @@ const pt: PortalCopy = {
     percent_format: 'Porcentagem inválida. Use por exemplo 18 ou 18,5.',
     percent_range: 'A porcentagem não pode passar de 100.',
   },
+  promotions: {
+    title: 'Promoções',
+    hint: 'Desconto sobre o seu preço, por datas de serviço. Você o assume: a comissão é calculada sobre o preço com desconto. Não pode haver duas promoções ativas nas mesmas datas.',
+    needsOffer: 'Salve a oferta antes de criar promoções.',
+    percent: 'Desconto (%)',
+    startsOn: 'De (AAAA-MM-DD)',
+    endsOn: 'Até (AAAA-MM-DD)',
+    label: 'Nome visível (opcional)',
+    save: 'Criar promoção',
+    deactivate: 'Desativar',
+    active: 'Ativa',
+    inactive: 'Inativa',
+    none: 'Esta oferta não tem promoções.',
+    loadFailed: 'Não foi possível carregar as promoções.',
+    saved: 'Promoção salva.',
+    deactivated: 'Promoção desativada.',
+    endsBeforeStart: 'A data final não pode ser anterior à inicial.',
+    listPrice: 'Preço de tabela',
+    discount: 'Desconto da promoção',
+  },
   photos: {
     title: 'Fotos da oferta',
     count: '{n} de {max}',
@@ -637,6 +699,9 @@ const pt: PortalCopy = {
     invalid_inventory: 'As vagas devem ser zero ou mais.',
     invalid_offer: 'Revise nome, categoria, modalidade e preço da oferta.',
     offer_not_owned: 'Esta oferta pertence a outro fornecedor.',
+    invalid_promotion: 'Revise a promoção: desconto entre 1 % e 90 %, datas válidas (máximo um ano) e que ainda não tenha terminado.',
+    promotion_overlap: 'Já existe outra promoção ativa nessas datas para esta oferta.',
+    promotion_not_found: 'Promoção não encontrada.',
     provider_not_authorized: 'Sua conta não tem permissão de fornecedor.',
     admin_offer_requires_provider: 'Um administrador deve indicar um fornecedor para criar ofertas.',
     reservation_not_found: 'Não encontramos a reserva.',
@@ -734,6 +799,8 @@ const en: PortalCopy = {
     noche: 'Nightlife',
     buggy: 'Buggy',
     experiencias: 'Private and VIP experiences',
+    restaurantes: 'Restaurants',
+    actividades: 'Activities and tours',
   },
   availability: 'Dates with published availability',
   noAvailability: 'The provider has not published availability for this offer yet.',
@@ -898,6 +965,26 @@ const en: PortalCopy = {
     percent_format: 'Invalid percentage. Use for example 18 or 18.5.',
     percent_range: 'The percentage cannot exceed 100.',
   },
+  promotions: {
+    title: 'Promotions',
+    hint: 'A discount on your price for given service dates. You fund it: the commission is calculated on the discounted price. Two active promotions cannot cover the same dates.',
+    needsOffer: 'Save the offer before creating promotions.',
+    percent: 'Discount (%)',
+    startsOn: 'From (YYYY-MM-DD)',
+    endsOn: 'Until (YYYY-MM-DD)',
+    label: 'Visible name (optional)',
+    save: 'Create promotion',
+    deactivate: 'Deactivate',
+    active: 'Active',
+    inactive: 'Inactive',
+    none: 'This offer has no promotions.',
+    loadFailed: 'Promotions could not be loaded.',
+    saved: 'Promotion saved.',
+    deactivated: 'Promotion deactivated.',
+    endsBeforeStart: 'The end date cannot be before the start date.',
+    listPrice: 'List price',
+    discount: 'Promotion discount',
+  },
   photos: {
     title: 'Offer photos',
     count: '{n} of {max}',
@@ -963,6 +1050,9 @@ const en: PortalCopy = {
     invalid_inventory: 'Availability must be zero or more.',
     invalid_offer: 'Check the offer name, category, pricing mode and price.',
     offer_not_owned: 'This offer belongs to another provider.',
+    invalid_promotion: 'Check the promotion: a 1–90% discount, valid dates (one year at most) and not already over.',
+    promotion_overlap: 'Another active promotion already covers those dates for this offer.',
+    promotion_not_found: 'Promotion not found.',
     provider_not_authorized: 'Your account does not have provider permission.',
     admin_offer_requires_provider: 'An administrator must specify a provider to create offers.',
     reservation_not_found: 'Reservation not found.',
