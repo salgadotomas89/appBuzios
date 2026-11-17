@@ -1432,6 +1432,25 @@ i=0; while [ $i -lt 19 ]; do check_in "$provider_user" 'nonsense' >/dev/null; i=
 docker exec "$container" psql -q -U postgres -d postgres -c "delete from public.connectical_voucher_attempts;"
 echo "PASS vouchers: issued on confirmation, traveler-only, single check-in within the dates, guessing limited"
 
+# Provider statistics (202611170002): own offers only, BRL totals that reconcile, no traveler data.
+stats_row() { as_user "$provider_user" "select s.quotes||'|'||s.reservations||'|'||s.confirmed||'|'||s.cancelled||'|'||s.units_sold||'|'||s.gross_cents||'|'||s.service_fee_cents||'|'||s.commission_cents||'|'||s.net_cents||'|'||s.discount_cents||'|'||s.checked_in||'|'||s.upcoming_7d from public.connectical_provider_stats($1) s where s.offer_id = '$tour';"; }
+period="date '$bz_today' - 1, date '$bz_today' + 1"
+[ "$(stats_row "$period")" = '3|3|1|1|2|19080|1080|1800|16200|0|1|1' ] || { echo "Provider stats mismatch: $(stats_row "$period")" >&2; exit 1; }
+[ "$(stats_row "date '$bz_today' + 2, date '$bz_today' + 3")" = '0|0|0|0|0|0|0|0|0|0|0|1' ] || { echo "Stats ignore the period: $(stats_row "date '$bz_today' + 2, date '$bz_today' + 3")" >&2; exit 1; }
+own_offers=$(as_user "$provider_user" "select count(*) = (select count(*) from public.connectical_offers o join public.connectical_providers p on p.id = o.provider_id where p.owner_user_id = auth.uid()) from public.connectical_provider_stats($period);")
+[ "$own_offers" = 't' ] || { echo "Provider stats do not list exactly the own offers" >&2; exit 1; }
+stats_total=$(as_user "$provider_user" "select sum(gross_cents) = (select coalesce(sum(amount_cents), 0) from public.connectical_list_reservations() r where r.status = 'confirmed' and (r.created_at at time zone 'America/Sao_Paulo')::date between date '$bz_today' - 1 and date '$bz_today' + 1) from public.connectical_provider_stats($period);")
+[ "$stats_total" = 't' ] || { echo "Provider stats total does not reconcile with the reservation list" >&2; exit 1; }
+for actor in "$traveler_a" "$admin_user"; do
+  if as_user "$actor" "select count(*) from public.connectical_provider_stats($period);" >/dev/null 2>&1; then
+    echo "Non-provider read provider stats: $actor" >&2; exit 1
+  fi
+done
+if as_user "$provider_user" "select count(*) from public.connectical_provider_stats(date '$bz_today', date '$bz_today' - 1);" >/dev/null 2>&1; then
+  echo "Reversed stats period accepted" >&2; exit 1
+fi
+echo "PASS provider statistics cover only own offers, follow the period and reconcile with reservations"
+
 # Anonymous catalog: visitors without a session read published, visible offers and their inventory.
 anon_read() { docker exec "$container" psql -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "set role anon; $1" 2>&1 | tail -1; }
 anon_offers=$(anon_read "select count(*) from public.connectical_offers;")

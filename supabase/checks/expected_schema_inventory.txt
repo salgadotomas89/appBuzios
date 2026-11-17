@@ -259,6 +259,7 @@ function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date 
 function connectical_provider_publish_inventory_range(p_offer_id uuid, p_from_date date, p_nights integer, p_total_units integer) definer=true md5=45c6eba21cc037eca0487f24a565fdda
 function connectical_provider_save_promotion(p_promotion_id uuid, p_offer_id uuid, p_percent_off_bps integer, p_starts_on date, p_ends_on date, p_label text, p_active boolean) definer=true md5=a40834269db76873d01f373b7af7e171
 function connectical_provider_set_offer_details(p_offer_id uuid, p_description text, p_location text, p_meeting_point text, p_schedule text, p_min_quantity integer, p_max_quantity integer) definer=true md5=c08a029448466d147ca74d60409f3d97
+function connectical_provider_stats(p_from date, p_to date) definer=true md5=d810ff9d0c7f41851e2c7c689278f591
 function connectical_provider_upsert_offer(p_offer_id uuid, p_category text, p_title text, p_base_price_cents integer, p_price_mode text, p_published boolean) definer=true md5=bfe5b848fb00b080ae2274e548a6bc65
 function connectical_prune_sweep_runs() definer=true md5=50148376a5eba44e6ac78d7906d35d93
 function connectical_prune_voucher_attempts() definer=true md5=34346a933acf8412a2401b5514fd248a

@@ -99,8 +99,9 @@ import {
 import { colors } from '../theme';
 import { OfferPhotoManager } from '../components/OfferPhotoManager';
 import { PromotionManager } from '../components/PromotionManager';
+import { ProviderStats } from '../components/ProviderStats';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
-import { listOwnOfferMedia } from '../lib/platformService';
+import { getProviderStats, listOwnOfferMedia } from '../lib/platformService';
 import { offerPhotoGateway } from '../media/offerPhotos';
 import { sessionManager } from '../lib/insforge';
 import { AdminConsole } from './AdminConsole';
@@ -855,6 +856,7 @@ export function ReservationPortal({
               <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
               <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
               <Text style={styles.helper}>{words.providerEarningsHint}</Text>
+              <ProviderStats language={language} today={buziosIsoDate()} load={getProviderStats} run={run} busy={busy} />
               <Text style={styles.sectionTitle}>{words.vouchers.checkInTitle}</Text>
               <Text style={styles.helper}>{words.vouchers.checkInHint}</Text>
               <Field label={words.vouchers.checkInCode} value={voucherInput} onChange={setVoucherInput} maxLength={20} />

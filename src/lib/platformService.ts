@@ -298,3 +298,55 @@ export async function setProviderCategoryRate(providerId: string, category: Port
   });
   if (error) throw toReservationError('connectical_admin_set_provider_category_rate', error.message);
 }
+
+// Estadísticas del proveedor por oferta (migración 202611170002). Importes en centavos BRL.
+export type ProviderOfferStats = {
+  offer_id: string;
+  title: string;
+  category: PortalCategory;
+  published: boolean;
+  quotes: number;
+  reservations: number;
+  confirmed: number;
+  cancelled: number;
+  expired: number;
+  units_sold: number;
+  gross_cents: number;
+  service_fee_cents: number;
+  commission_cents: number;
+  net_cents: number;
+  refunded_cents: number;
+  discount_cents: number;
+  checked_in: number;
+  upcoming_7d: number;
+};
+
+export async function getProviderStats(from: string, to: string): Promise<ProviderOfferStats[]> {
+  const rows = await callRpc<ProviderOfferStats[] | null>('connectical_provider_stats', { p_from: from, p_to: to });
+  // bigint llega como texto o número según el driver: se normaliza a número.
+  return (rows ?? []).map(row => ({
+    ...row,
+    gross_cents: Number(row.gross_cents),
+    service_fee_cents: Number(row.service_fee_cents),
+    commission_cents: Number(row.commission_cents),
+    net_cents: Number(row.net_cents),
+    refunded_cents: Number(row.refunded_cents),
+    discount_cents: Number(row.discount_cents),
+  }));
+}
+
+export type ProviderStatsTotals = Omit<ProviderOfferStats, 'offer_id' | 'title' | 'category' | 'published'> & {
+  conversionBps: number;
+};
+
+// Suma por oferta y conversión cotización → confirmada en puntos básicos (0 sin cotizaciones).
+export function totalProviderStats(rows: ProviderOfferStats[]): ProviderStatsTotals {
+  const keys = ['quotes', 'reservations', 'confirmed', 'cancelled', 'expired', 'units_sold', 'gross_cents',
+    'service_fee_cents', 'commission_cents', 'net_cents', 'refunded_cents', 'discount_cents', 'checked_in',
+    'upcoming_7d'] as const;
+  const totals = Object.fromEntries(keys.map(key => [key, rows.reduce((sum, row) => sum + row[key], 0)])) as Record<
+    (typeof keys)[number],
+    number
+  >;
+  return { ...totals, conversionBps: totals.quotes ? Math.floor((totals.confirmed * 10000) / totals.quotes) : 0 };
+}
