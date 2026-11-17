@@ -216,6 +216,25 @@ fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simu
 laboratorio InsForge 2.3.5 con el correo capturado por Mailpit (código erróneo rechazado, contraseña anterior
 inválida, correo desconocido sin envío). Sin probar contra el tenant.
 
+### Migraciones 22 a 25 y 19 (17-11-2026, preparadas, SIN aplicar)
+
+Preparadas en `work/mvp-2026-11-16` y probadas en PostgreSQL 17 local (integración, ensayo de actualización desde
+las etapas 1, 4 y 11, inventario de esquema) y en la CI. **No se aplicó nada en buziosflow.** Para aplicarlas hace
+falta autorización expresa, un respaldo verificado justo antes (`npm run backup:verified`) y aplicarlas **una por
+ejecución, en este orden**, comprobando `npm run check:remote-schema` después de cada una:
+
+| Orden | Migración | Qué cambia | Riesgo y reversión |
+| --- | --- | --- | --- |
+| 1 | `20261116000006_catalog-commerce` | Tabla de categorías (+restaurantes, actividades) y FK en lugar de CHECK; promociones; comisión por categoría; columnas nuevas en cotizaciones; redefine `create_quote` y `provider_upsert_offer` | Rellena `list_subtotal_cents` en cotizaciones existentes (un UPDATE). Revertir exige restaurar las dos funciones de `202611150002`/`202611140007` y los CHECK |
+| 2 | `20261117000001_reservation-vouchers` | Código de comprobante, check-in, intentos; disparador en reservas; redefine `redact_reservation` | Asigna código a las reservas ya confirmadas (un UPDATE). El disparador solo actúa al pasar a `confirmed` |
+| 3 | `20261117000002_provider-stats` | Solo una función de lectura | Ninguno |
+| 4 | `20261117000003_offer-posts` | Tabla de publicaciones, moderación y feed público | Tabla nueva sin datos |
+| 5 | `20261117000004_admin-category-kpis` | Solo una función de lectura | Ninguno |
+
+Las tres de fotos (`…16000003` a `…16000005`) siguen pendientes por separado (ver «Storage»). La app es compatible
+con un tenant sin estas migraciones: promociones, feed e indicadores por categoría devuelven vacío si la función no
+existe; comprobantes, estadísticas y publicaciones solo fallan al usarlos, con el error traducido.
+
 ### Comprobación del tenant, advisor y contrato con la app
 
 Comprobación de solo lectura en cualquier momento: `npm run check:remote-schema` (migraciones aplicadas frente a
