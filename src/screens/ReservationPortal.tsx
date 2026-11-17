@@ -100,6 +100,7 @@ import { colors } from '../theme';
 import { OfferPhotoManager } from '../components/OfferPhotoManager';
 import { PromotionManager } from '../components/PromotionManager';
 import { ProviderStats } from '../components/ProviderStats';
+import { TravelerAgenda } from '../components/TravelerAgenda';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
 import {
   deleteOwnPost,
@@ -782,6 +783,7 @@ export function ReservationPortal({
                   ) : null}
                 </View>
               ) : null}
+              <TravelerAgenda reservations={reservations} offerTitles={offerTitles} today={buziosIsoDate()} language={language} />
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{words.myReservations}</Text>
                 {reservationList('traveler_request')}

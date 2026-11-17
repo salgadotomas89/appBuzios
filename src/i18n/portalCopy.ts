@@ -271,6 +271,14 @@ const es = {
     percent_format: 'Porcentaje inválido. Usa por ejemplo 18 o 18,5.',
     percent_range: 'El porcentaje no puede superar 100.',
   } satisfies Record<InputError['code'], string>,
+  agenda: {
+    title: 'Mi agenda en Búzios',
+    empty: 'No tienes reservas próximas.',
+    today: 'Hoy',
+    tomorrow: 'Mañana',
+    night: 'noche {n} de {total}',
+    awaitingPayment: 'pendiente de pago',
+  },
   profile: {
     title: 'Perfil público',
     hint: 'Lo ven los turistas en tus ofertas. No incluyas teléfonos ni enlaces de pago: las reservas se hacen en Búzios Flow.',
@@ -684,6 +692,14 @@ const pt: PortalCopy = {
     count_range: 'deve estar entre {min} e {max}.',
     percent_format: 'Porcentagem inválida. Use por exemplo 18 ou 18,5.',
     percent_range: 'A porcentagem não pode passar de 100.',
+  },
+  agenda: {
+    title: 'Minha agenda em Búzios',
+    empty: 'Você não tem reservas próximas.',
+    today: 'Hoje',
+    tomorrow: 'Amanhã',
+    night: 'noite {n} de {total}',
+    awaitingPayment: 'pagamento pendente',
   },
   profile: {
     title: 'Perfil público',
@@ -1106,6 +1122,14 @@ const en: PortalCopy = {
     count_range: 'must be between {min} and {max}.',
     percent_format: 'Invalid percentage. Use for example 18 or 18.5.',
     percent_range: 'The percentage cannot exceed 100.',
+  },
+  agenda: {
+    title: 'My Búzios schedule',
+    empty: 'You have no upcoming reservations.',
+    today: 'Today',
+    tomorrow: 'Tomorrow',
+    night: 'night {n} of {total}',
+    awaitingPayment: 'awaiting payment',
   },
   profile: {
     title: 'Public profile',
