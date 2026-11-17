@@ -144,8 +144,11 @@ column connectical_providers.commission_rate_bps integer null=NO
 column connectical_providers.country_code text null=NO
 column connectical_providers.created_at timestamp with time zone null=NO
 column connectical_providers.id uuid null=NO
+column connectical_providers.languages ARRAY null=NO
 column connectical_providers.name text null=NO
+column connectical_providers.neighborhood text null=NO
 column connectical_providers.owner_user_id uuid null=NO
+column connectical_providers.public_description text null=NO
 column connectical_providers.updated_at timestamp with time zone null=NO
 column connectical_quotes.created_at timestamp with time zone null=NO
 column connectical_quotes.discount_cents integer null=NO
@@ -263,6 +266,7 @@ function connectical_is_category(p_category text) definer=true md5=c53ec20c888bd
 function connectical_issue_voucher() definer=true md5=7f1445e47791dbe71512f0ce81d0462e
 function connectical_list_active_promotions() definer=true md5=6642ea79469b7c81d523b5c9b613ee21
 function connectical_list_feed() definer=true md5=6540f08eca1cf759ac8fbb3fb388137b
+function connectical_list_provider_profiles(p_provider_ids uuid[]) definer=true md5=984451711f0da3aaaf1dd83f954e8a91
 function connectical_list_reservations() definer=true md5=0863ee2c32962de8695c7f374cd4ec5c
 function connectical_lock_offer(p_offer_id uuid) definer=false md5=a69a57dfde1a25a403f3739f026c19f6
 function connectical_my_incidents() definer=true md5=5e28095c5066d0fd14bf196e27b1e362
@@ -274,6 +278,7 @@ function connectical_offer_moderation_guard() definer=true md5=fd5f09ed8bbf7a992
 function connectical_owns_offer(p_offer_id uuid) definer=true md5=72f2e5f8bdfd05dc5432098cbd1520af
 function connectical_provider_check_in(p_voucher_code text) definer=true md5=68ab08665b86e4e51cc511550e6686db
 function connectical_provider_delete_post(p_post_id uuid) definer=true md5=2927417b6b7509e957069988ef2b7a80
+function connectical_provider_get_profile() definer=true md5=94f7462693d3e56a4d298e32b41a7065
 function connectical_provider_list_posts() definer=true md5=2dbd1444a1d65ba7edc4c275fcfc4ce9
 function connectical_provider_list_promotions(p_offer_id uuid) definer=true md5=5a3f1946b859728a138198b1cacc0274
 function connectical_provider_publish_inventory(p_offer_id uuid, p_service_date date, p_total_units integer) definer=true md5=d9fdb95dad61964675ff588b9f5f69f0
@@ -282,6 +287,7 @@ function connectical_provider_save_post(p_post_id uuid, p_offer_id uuid, p_kind 
 function connectical_provider_save_promotion(p_promotion_id uuid, p_offer_id uuid, p_percent_off_bps integer, p_starts_on date, p_ends_on date, p_label text, p_active boolean) definer=true md5=a40834269db76873d01f373b7af7e171
 function connectical_provider_set_offer_details(p_offer_id uuid, p_description text, p_location text, p_meeting_point text, p_schedule text, p_min_quantity integer, p_max_quantity integer) definer=true md5=c08a029448466d147ca74d60409f3d97
 function connectical_provider_stats(p_from date, p_to date) definer=true md5=d810ff9d0c7f41851e2c7c689278f591
+function connectical_provider_update_profile(p_description text, p_neighborhood text, p_languages text[]) definer=true md5=6bda870dabed5b0a27fcff0c3280e2f5
 function connectical_provider_upsert_offer(p_offer_id uuid, p_category text, p_title text, p_base_price_cents integer, p_price_mode text, p_published boolean) definer=true md5=bfe5b848fb00b080ae2274e548a6bc65
 function connectical_prune_sweep_runs() definer=true md5=50148376a5eba44e6ac78d7906d35d93
 function connectical_prune_voucher_attempts() definer=true md5=34346a933acf8412a2401b5514fd248a

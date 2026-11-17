@@ -101,7 +101,16 @@ import { OfferPhotoManager } from '../components/OfferPhotoManager';
 import { PromotionManager } from '../components/PromotionManager';
 import { ProviderStats } from '../components/ProviderStats';
 import { OFFER_PHOTOS_ENABLED } from '../config/featureFlags';
-import { deleteOwnPost, getProviderStats, listOwnOfferMedia, listOwnPosts, saveOwnPost } from '../lib/platformService';
+import {
+  deleteOwnPost,
+  getOwnProviderProfile,
+  getProviderStats,
+  listOwnOfferMedia,
+  listOwnPosts,
+  saveOwnPost,
+  updateOwnProviderProfile,
+} from '../lib/platformService';
+import { ProviderProfileForm } from '../components/ProviderProfileForm';
 import { PostManager } from '../components/PostManager';
 import { offerPhotoGateway } from '../media/offerPhotos';
 import { sessionManager } from '../lib/insforge';
@@ -865,6 +874,7 @@ export function ReservationPortal({
               <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
               <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
               <Text style={styles.helper}>{words.providerEarningsHint}</Text>
+              <ProviderProfileForm language={language} load={getOwnProviderProfile} save={updateOwnProviderProfile} run={run} busy={busy} />
               <ProviderStats language={language} today={buziosIsoDate()} load={getProviderStats} run={run} busy={busy} />
               <Text style={styles.sectionTitle}>{words.vouchers.checkInTitle}</Text>
               <Text style={styles.helper}>{words.vouchers.checkInHint}</Text>
