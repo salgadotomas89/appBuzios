@@ -37,3 +37,14 @@ toman aquí: solo se deja la mecánica lista y apagada o sin valores.
   `8ntv6m27` (OfertasApp, sin confirmar si es ensayo), no lo lee la app. Connectical Logística no aparece en ninguna
   configuración. El prefijo `connectical_` de las tablas es un nombre heredado del módulo, no ese proyecto.
 - Ninguna migración nueva se aplica sin autorización explícita, respaldo verificado (`npm run backup:verified`) y ensayo.
+
+## 2026-11-17 · Auditoría de dependencias (`npm audit`)
+
+- **Alto ×3, una sola causa:** `zod` 3.25.76 anidado en `@insforge/shared-schemas` 1.2.1 (dependencia de
+  `@insforge/sdk` 1.5.2, la última publicada). Aviso GHSA-mrhx-c7xc-m3w5: consumo de memoria al validar colecciones
+  enormes con restricciones; afecta a todo zod < 4.6.6. **No se fuerza** un `overrides` a zod 4 porque
+  `shared-schemas` declara `zod ^3` y el cambio de versión mayor puede romper el SDK. Impacto en la app: el SDK valida
+  respuestas de nuestro propio backend; un atacante necesitaría controlar esas respuestas. **Riesgo aceptado** hasta
+  que InsForge publique un SDK con zod ≥ 4.6.6; revisar en cada actualización del SDK.
+- **Moderado ×6:** `minimatch` vía `@typescript-eslint`, solo herramientas de desarrollo; no llega al bundle.
+- El bundle de producción iOS (`react-native bundle --dev false`) se genera sin errores (1,67 MB) con todo lo nuevo.
