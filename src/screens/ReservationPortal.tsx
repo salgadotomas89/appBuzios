@@ -115,7 +115,7 @@ import { ProviderProfileForm } from '../components/ProviderProfileForm';
 import { PostManager } from '../components/PostManager';
 import { offerPhotoGateway } from '../media/offerPhotos';
 import { sessionManager } from '../lib/insforge';
-import { AdminConsole } from './AdminConsole';
+import { AdminConsole, type ConsoleSection } from './AdminConsole';
 import { TravelerServices } from './TravelerServices';
 
 const CATEGORIES: PortalCategory[] = PORTAL_CATEGORIES;
@@ -145,6 +145,17 @@ const loadOfferMedia = (offerId: string) => listOwnOfferMedia(offerId);
 const currentAccessToken = async () => (await sessionManager?.currentAccessToken()) ?? null;
 
 type ProviderTab = 'bookings' | 'offers' | 'business';
+// Administración en seis áreas; cada una muestra sus bloques y solo las secciones de la consola que le tocan.
+type AdminArea = 'providers' | 'catalog' | 'bookings' | 'content' | 'finance' | 'settings';
+const ADMIN_AREAS: AdminArea[] = ['providers', 'catalog', 'bookings', 'content', 'finance', 'settings'];
+const ADMIN_AREA_SECTIONS: Record<AdminArea, ConsoleSection[]> = {
+  providers: ['applications', 'categoryRates'],
+  catalog: ['moderation', 'photos'],
+  bookings: ['incidents'],
+  content: ['posts', 'campaigns'],
+  finance: ['kpis'],
+  settings: ['users', 'audit'],
+};
 const PROVIDER_TABS: ProviderTab[] = ['bookings', 'offers', 'business'];
 
 export function ReservationPortal({
@@ -209,6 +220,7 @@ export function ReservationPortal({
   const [refundReason, setRefundReason] = useState('');
   // Panel del proveedor en tres pestañas: lo diario (reservas y check-in) primero.
   const [providerTab, setProviderTab] = useState<ProviderTab>('bookings');
+  const [adminArea, setAdminArea] = useState<AdminArea>('bookings');
   const [voucherInput, setVoucherInput] = useState('');
   const [checkInResult, setCheckInResult] = useState<CheckInResult | null>(null);
   const [message, setMessage] = useState('');
@@ -935,156 +947,190 @@ export function ReservationPortal({
           ) : null}
           {role === 'admin' ? (
             <>
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>{words.providers} · {providers.length}</Text>
-                {providers.map(provider => (
-                  <View key={provider.id} style={styles.row}>
-                    <View style={styles.flex}>
-                      <Text style={styles.offerName}>{provider.name}</Text>
-                      <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => toggleProvider(provider)}
-                      disabled={busy}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${provider.active ? words.pauseProvider : words.resumeProvider} ${provider.name}`}
-                    >
-                      <Text style={styles.link}>{provider.active ? words.pauseProvider : words.resumeProvider}</Text>
-                    </Pressable>
-                  </View>
+              <View style={styles.chips}>
+                {ADMIN_AREAS.map(area => (
+                  <Chip key={area} label={words.adminAreas[area]} selected={adminArea === area} onPress={() => setAdminArea(area)} />
                 ))}
-                {providers.length ? <Text style={styles.helper}>{words.pauseHint}</Text> : null}
               </View>
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>
-                <Text style={styles.helper}>
-                  {words.statusCounts
-                    .replace('{held}', String(totals.heldCount))
-                    .replace('{confirmed}', String(totals.confirmedCount))
-                    .replace('{cancelled}', String(totals.cancelledCount))
-                    .replace('{refunded}', String(totals.refundedCount))}
-                </Text>
-                <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
-                <Text style={styles.helper}>{words.confirmedGross}: {brlFromCents(totals.confirmedGrossCents)}</Text>
-                <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
-                <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
-                <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(totals.connecticalFeeCents)}</Text>
-                <Text style={styles.helper}>{words.collectedTotal}: {brlFromCents(totals.collectedCents)} · {words.refundedTotal}: {brlFromCents(totals.refundedCents)}</Text>
-                <Text style={styles.helper}>{words.netCollected}: {brlFromCents(totals.netCollectedCents)}</Text>
-                {inconsistencies.length ? (
-                  <View style={styles.warning}>
-                    <Text style={styles.offerName}>{words.inconsistencyTitle.replace('{count}', String(inconsistencies.length))}</Text>
-                    {inconsistencies.map(item => (
-                      <Text key={`${item.id}:${item.code}`} selectable style={styles.helper}>{words.inconsistencies[item.code]} · {item.id}</Text>
-                    ))}
-                  </View>
-                ) : null}
-                {totals.pendingRefundReviewCount ? (
-                  <Text style={styles.warning}>{words.pendingRefundReview.replace('{count}', String(totals.pendingRefundReviewCount))}</Text>
-                ) : null}
-                <View style={styles.chips}>
-                  <Chip label={words.allStatuses} selected={statusFilter === null} onPress={() => setStatusFilter(null)} />
-                  {STATUSES.map(status => (
-                    <Chip key={status} label={words.status[status]} selected={statusFilter === status} onPress={() => setStatusFilter(status)} />
-                  ))}
-                </View>
-                {refundTarget ? (
-                  <View style={styles.quote}>
-                    <Text style={styles.sectionTitle}>{words.refundTitle}</Text>
-                    <Text style={styles.helper}>{brlFromCents(refundTarget.amount_cents)} · {refundTarget.id}</Text>
-                    <Text style={styles.helper}>{words.refundMax}: {brlFromCents(refundAllowance(refundTarget).maxCents)}</Text>
-                    {refundAllowance(refundTarget).fullRequiresCancellation ? (
-                      <Text style={styles.helper}>{words.refundFullNeedsCancel}</Text>
-                    ) : null}
-                    <Field label={words.refundAmount} value={refundAmount} onChange={setRefundAmount} decimal />
-                    <Field label={words.refundReason} value={refundReason} onChange={setRefundReason} maxLength={MAX_REFUND_REASON_LENGTH} />
-                    <Text style={styles.helper}>{words.refundReasonVisible}</Text>
-                    <ActionButton title={words.refundSubmit} onPress={submitRefund} disabled={busy} />
-                    <ActionButton title={words.refundDiscard} onPress={() => setRefundTarget(null)} disabled={busy} secondary />
-                  </View>
-                ) : null}
-                {reservationList('admin_review', visibleReservations)}
-              </View>
-              {paymentReviews.length ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>{words.paymentReviews} · {paymentReviews.length}</Text>
-                  <Text style={styles.warning}>{words.paymentReviewHint}</Text>
-                  {paymentReviews.map(review => (
-                    <View key={review.id} style={styles.eventRow}>
-                      <Text style={styles.offerName}>{words.paymentReviewOutcomes[review.outcome] ?? review.outcome} · {brlFromCents(review.amount_cents)} {review.currency}</Text>
-                      <Text selectable style={styles.helper}>{review.gateway} · {review.event_id} · {review.reservation_id ?? '—'} · {review.received_at}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-              {commissionTerms.length ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>{words.commissionTerms}</Text>
-                  <Text style={styles.helper}>{words.commissionTermsHint}</Text>
-                  {commissionTerms.map(term => (
-                    <View key={term.offer_id} style={styles.row}>
-                      <View style={styles.flex}>
-                        <Text style={styles.offerName}>{term.offer_title} · {term.provider_name}</Text>
-                        <Text style={styles.helper}>
-                          {words.categories[term.category]} · {words.commissionEffective.replace('{rate}', formatBps(term.effective_rate_bps))}
-                          {term.offer_rate_bps !== null ? ` · ${words.commissionOverride}` : ''}
-                        </Text>
-                        <Text style={term.outside_reference ? styles.warning : styles.helper}>
-                          {term.reference_min_bps === null
-                            ? words.commissionNoReference
-                            : words.commissionReference
-                                .replace('{range}', term.reference_max_bps !== null && term.reference_max_bps !== term.reference_min_bps
-                                  ? `${formatBps(term.reference_min_bps)}–${formatBps(term.reference_max_bps)}`
-                                  : formatBps(term.reference_min_bps))
-                                .replace('{status}', words.commissionStatus[term.reference_status])}
-                          {term.outside_reference ? ` · ${words.commissionOutside}` : ''}
-                        </Text>
+              {adminArea === 'providers' ? (
+                <>
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>{words.providers} · {providers.length}</Text>
+                    {providers.map(provider => (
+                      <View key={provider.id} style={styles.row}>
+                        <View style={styles.flex}>
+                          <Text style={styles.offerName}>{provider.name}</Text>
+                          <Text style={styles.helper}>{provider.commission_rate_bps / 100}% · {provider.active ? words.active : words.paused}</Text>
+                        </View>
+                        <Pressable
+                          onPress={() => toggleProvider(provider)}
+                          disabled={busy}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${provider.active ? words.pauseProvider : words.resumeProvider} ${provider.name}`}
+                        >
+                          <Text style={styles.link}>{provider.active ? words.pauseProvider : words.resumeProvider}</Text>
+                        </Pressable>
                       </View>
-                      <Pressable
-                        onPress={() => setCommissionEdit({ offerId: term.offer_id, value: term.offer_rate_bps === null ? '' : formatBps(term.offer_rate_bps).replace(' %', '') })}
-                        disabled={busy}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${words.commissionEdit} ${term.offer_title}`}
-                      >
-                        <Text style={styles.link}>{words.commissionEdit}</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                  {commissionEdit ? (
-                    <View style={styles.quote}>
-                      <Field label={words.commissionRateLabel} value={commissionEdit.value} onChange={value => setCommissionEdit({ ...commissionEdit, value })} decimal />
-                      <ActionButton title={words.commissionSave} onPress={saveOfferCommission} disabled={busy} />
-                      <ActionButton title={words.refundDiscard} onPress={() => setCommissionEdit(null)} disabled={busy} secondary />
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
-              {sweepHealth ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>{words.sweepTitle}</Text>
-                  <Text style={sweepHealth.last_success_at ? styles.helper : styles.warning}>
-                    {sweepHealth.last_success_at
-                      ? words.sweepLast.replace('{time}', formatTime(sweepHealth.last_success_at))
-                      : words.sweepNever}
-                  </Text>
-                  {sweepHealth.stale && sweepHealth.last_success_at ? <Text style={styles.warning}>{words.sweepStale}</Text> : null}
-                  {sweepHealth.partial_runs_last_hour ? (
-                    <Text style={styles.warning}>{words.sweepPartial.replace('{count}', String(sweepHealth.partial_runs_last_hour))}</Text>
-                  ) : null}
-                  <Text style={styles.helper}>{words.sweepOverdue.replace('{count}', String(sweepHealth.overdue_holds))}</Text>
-                </View>
-              ) : null}
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>{words.history} · {events.length}</Text>
-                {events.map(event => (
-                  <View key={event.id} style={styles.eventRow}>
-                    <Text style={styles.offerName}>{words.eventTypes[event.event_type] ?? event.event_type}</Text>
-                    <Text style={styles.helper}>{event.created_at} · {event.reservation_id}</Text>
+                    ))}
+                    {providers.length ? <Text style={styles.helper}>{words.pauseHint}</Text> : null}
                   </View>
-                ))}
-                {!events.length ? <Text style={styles.helper}>{words.noEvents}</Text> : null}
-              </View>
-              <AdminConsole language={language} busy={busy} run={run} providers={providers} />
+                  <AdminConsole key="providers" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.providers} />
+                </>
+              ) : null}
+              {adminArea === 'catalog' ? (
+                <>
+                  <AdminConsole key="catalog" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.catalog} />
+                </>
+              ) : null}
+              {adminArea === 'bookings' ? (
+                <>
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>{words.reservations} · {visibleReservations.length}</Text>
+                    <Text style={styles.helper}>
+                      {words.statusCounts
+                        .replace('{held}', String(totals.heldCount))
+                        .replace('{confirmed}', String(totals.confirmedCount))
+                        .replace('{cancelled}', String(totals.cancelledCount))
+                        .replace('{refunded}', String(totals.refundedCount))}
+                    </Text>
+                    <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
+                    <Text style={styles.helper}>{words.confirmedGross}: {brlFromCents(totals.confirmedGrossCents)}</Text>
+                    <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
+                    <Text style={styles.helper}>{words.commissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
+                    <Text style={styles.helper}>{words.feeTotal}: {brlFromCents(totals.connecticalFeeCents)}</Text>
+                    <Text style={styles.helper}>{words.collectedTotal}: {brlFromCents(totals.collectedCents)} · {words.refundedTotal}: {brlFromCents(totals.refundedCents)}</Text>
+                    <Text style={styles.helper}>{words.netCollected}: {brlFromCents(totals.netCollectedCents)}</Text>
+                    {inconsistencies.length ? (
+                      <View style={styles.warning}>
+                        <Text style={styles.offerName}>{words.inconsistencyTitle.replace('{count}', String(inconsistencies.length))}</Text>
+                        {inconsistencies.map(item => (
+                          <Text key={`${item.id}:${item.code}`} selectable style={styles.helper}>{words.inconsistencies[item.code]} · {item.id}</Text>
+                        ))}
+                      </View>
+                    ) : null}
+                    {totals.pendingRefundReviewCount ? (
+                      <Text style={styles.warning}>{words.pendingRefundReview.replace('{count}', String(totals.pendingRefundReviewCount))}</Text>
+                    ) : null}
+                    <View style={styles.chips}>
+                      <Chip label={words.allStatuses} selected={statusFilter === null} onPress={() => setStatusFilter(null)} />
+                      {STATUSES.map(status => (
+                        <Chip key={status} label={words.status[status]} selected={statusFilter === status} onPress={() => setStatusFilter(status)} />
+                      ))}
+                    </View>
+                    {refundTarget ? (
+                      <View style={styles.quote}>
+                        <Text style={styles.sectionTitle}>{words.refundTitle}</Text>
+                        <Text style={styles.helper}>{brlFromCents(refundTarget.amount_cents)} · {refundTarget.id}</Text>
+                        <Text style={styles.helper}>{words.refundMax}: {brlFromCents(refundAllowance(refundTarget).maxCents)}</Text>
+                        {refundAllowance(refundTarget).fullRequiresCancellation ? (
+                          <Text style={styles.helper}>{words.refundFullNeedsCancel}</Text>
+                        ) : null}
+                        <Field label={words.refundAmount} value={refundAmount} onChange={setRefundAmount} decimal />
+                        <Field label={words.refundReason} value={refundReason} onChange={setRefundReason} maxLength={MAX_REFUND_REASON_LENGTH} />
+                        <Text style={styles.helper}>{words.refundReasonVisible}</Text>
+                        <ActionButton title={words.refundSubmit} onPress={submitRefund} disabled={busy} />
+                        <ActionButton title={words.refundDiscard} onPress={() => setRefundTarget(null)} disabled={busy} secondary />
+                      </View>
+                    ) : null}
+                    {reservationList('admin_review', visibleReservations)}
+                  </View>
+                  {paymentReviews.length ? (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>{words.paymentReviews} · {paymentReviews.length}</Text>
+                      <Text style={styles.warning}>{words.paymentReviewHint}</Text>
+                      {paymentReviews.map(review => (
+                        <View key={review.id} style={styles.eventRow}>
+                          <Text style={styles.offerName}>{words.paymentReviewOutcomes[review.outcome] ?? review.outcome} · {brlFromCents(review.amount_cents)} {review.currency}</Text>
+                          <Text selectable style={styles.helper}>{review.gateway} · {review.event_id} · {review.reservation_id ?? '—'} · {review.received_at}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>{words.history} · {events.length}</Text>
+                    {events.map(event => (
+                      <View key={event.id} style={styles.eventRow}>
+                        <Text style={styles.offerName}>{words.eventTypes[event.event_type] ?? event.event_type}</Text>
+                        <Text style={styles.helper}>{event.created_at} · {event.reservation_id}</Text>
+                      </View>
+                    ))}
+                    {!events.length ? <Text style={styles.helper}>{words.noEvents}</Text> : null}
+                  </View>
+                  <AdminConsole key="bookings" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.bookings} />
+                </>
+              ) : null}
+              {adminArea === 'content' ? (
+                <>
+                  <AdminConsole key="content" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.content} />
+                </>
+              ) : null}
+              {adminArea === 'finance' ? (
+                <>
+                  {commissionTerms.length ? (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>{words.commissionTerms}</Text>
+                      <Text style={styles.helper}>{words.commissionTermsHint}</Text>
+                      {commissionTerms.map(term => (
+                        <View key={term.offer_id} style={styles.row}>
+                          <View style={styles.flex}>
+                            <Text style={styles.offerName}>{term.offer_title} · {term.provider_name}</Text>
+                            <Text style={styles.helper}>
+                              {words.categories[term.category]} · {words.commissionEffective.replace('{rate}', formatBps(term.effective_rate_bps))}
+                              {term.offer_rate_bps !== null ? ` · ${words.commissionOverride}` : ''}
+                            </Text>
+                            <Text style={term.outside_reference ? styles.warning : styles.helper}>
+                              {term.reference_min_bps === null
+                                ? words.commissionNoReference
+                                : words.commissionReference
+                                    .replace('{range}', term.reference_max_bps !== null && term.reference_max_bps !== term.reference_min_bps
+                                      ? `${formatBps(term.reference_min_bps)}–${formatBps(term.reference_max_bps)}`
+                                      : formatBps(term.reference_min_bps))
+                                    .replace('{status}', words.commissionStatus[term.reference_status])}
+                              {term.outside_reference ? ` · ${words.commissionOutside}` : ''}
+                            </Text>
+                          </View>
+                          <Pressable
+                            onPress={() => setCommissionEdit({ offerId: term.offer_id, value: term.offer_rate_bps === null ? '' : formatBps(term.offer_rate_bps).replace(' %', '') })}
+                            disabled={busy}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${words.commissionEdit} ${term.offer_title}`}
+                          >
+                            <Text style={styles.link}>{words.commissionEdit}</Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                      {commissionEdit ? (
+                        <View style={styles.quote}>
+                          <Field label={words.commissionRateLabel} value={commissionEdit.value} onChange={value => setCommissionEdit({ ...commissionEdit, value })} decimal />
+                          <ActionButton title={words.commissionSave} onPress={saveOfferCommission} disabled={busy} />
+                          <ActionButton title={words.refundDiscard} onPress={() => setCommissionEdit(null)} disabled={busy} secondary />
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <AdminConsole key="finance" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.finance} />
+                </>
+              ) : null}
+              {adminArea === 'settings' ? (
+                <>
+                  {sweepHealth ? (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>{words.sweepTitle}</Text>
+                      <Text style={sweepHealth.last_success_at ? styles.helper : styles.warning}>
+                        {sweepHealth.last_success_at
+                          ? words.sweepLast.replace('{time}', formatTime(sweepHealth.last_success_at))
+                          : words.sweepNever}
+                      </Text>
+                      {sweepHealth.stale && sweepHealth.last_success_at ? <Text style={styles.warning}>{words.sweepStale}</Text> : null}
+                      {sweepHealth.partial_runs_last_hour ? (
+                        <Text style={styles.warning}>{words.sweepPartial.replace('{count}', String(sweepHealth.partial_runs_last_hour))}</Text>
+                      ) : null}
+                      <Text style={styles.helper}>{words.sweepOverdue.replace('{count}', String(sweepHealth.overdue_holds))}</Text>
+                    </View>
+                  ) : null}
+                  <AdminConsole key="settings" language={language} busy={busy} run={run} providers={providers} sections={ADMIN_AREA_SECTIONS.settings} />
+                </>
+              ) : null}
             </>
           ) : null}
           {role === 'traveler' || role === 'provider' ? (

@@ -272,6 +272,7 @@ const es = {
     percent_range: 'El porcentaje no puede superar 100.',
   } satisfies Record<InputError['code'], string>,
   providerTabs: { bookings: 'Reservas', offers: 'Mis ofertas', business: 'Mi negocio' },
+  adminAreas: { providers: 'Proveedores', catalog: 'Catálogo', bookings: 'Reservas', content: 'Promociones y contenido', finance: 'Finanzas y comisiones', settings: 'Configuración' },
   agenda: {
     title: 'Mi agenda en Búzios',
     empty: 'No tienes reservas próximas.',
@@ -695,6 +696,7 @@ const pt: PortalCopy = {
     percent_range: 'A porcentagem não pode passar de 100.',
   },
   providerTabs: { bookings: 'Reservas', offers: 'Minhas ofertas', business: 'Meu negócio' },
+  adminAreas: { providers: 'Fornecedores', catalog: 'Catálogo', bookings: 'Reservas', content: 'Promoções e conteúdo', finance: 'Finanças e comissões', settings: 'Configurações' },
   agenda: {
     title: 'Minha agenda em Búzios',
     empty: 'Você não tem reservas próximas.',
@@ -1126,6 +1128,7 @@ const en: PortalCopy = {
     percent_range: 'The percentage cannot exceed 100.',
   },
   providerTabs: { bookings: 'Bookings', offers: 'My offers', business: 'My business' },
+  adminAreas: { providers: 'Providers', catalog: 'Catalog', bookings: 'Bookings', content: 'Promotions and content', finance: 'Finance and commissions', settings: 'Settings' },
   agenda: {
     title: 'My Búzios schedule',
     empty: 'You have no upcoming reservations.',

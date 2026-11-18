@@ -495,6 +495,7 @@ it('lets admins pause and resume providers', async () => {
     .mockResolvedValue([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false }]);
   mocked.setSharedProviderActive.mockResolvedValue({ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false });
   const root = await render('pt');
+  await press(root, 'Fornecedores');
 
   expect(hasText(root, 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.')).toBe(true);
   await press(root, 'Pausar');
@@ -528,6 +529,7 @@ it('tells admins when no scheduled sweep has run and when runs were partial', as
     partial_runs_last_hour: 0, overdue_holds: 3, stale: true,
   });
   let root = await render();
+  await press(root, 'Configuración');
   expect(hasText(root, 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona.')).toBe(true);
   expect(hasText(root, 'Retenciones vencidas esperando barrido: 3')).toBe(true);
 
@@ -536,6 +538,7 @@ it('tells admins when no scheduled sweep has run and when runs were partial', as
     runs_last_hour: 4, partial_runs_last_hour: 2, overdue_holds: 0, stale: true,
   });
   root = await render('pt');
+  await press(root, 'Configurações');
   expect(hasText(root, 'Atenção: mais de 15 minutos sem uma execução correta.')).toBe(true);
   expect(hasText(root, 'Execuções parciais na última hora: 2')).toBe(true);
 });
@@ -565,6 +568,7 @@ it('shows effective commissions against unapproved references and sets a product
   ]);
   mocked.setOfferCommission.mockResolvedValue(1850);
   const root = await render();
+  await press(root, 'Finanzas y comisiones');
 
   expect(hasText(root, 'Experiencias privadas y VIP · efectiva 10 %')).toBe(true);
   expect(hasText(root, 'referencia 18 %–20 % (propuesta) · fuera de la referencia')).toBe(true);
@@ -880,4 +884,18 @@ it('ignores a preselected offer that is no longer published', async () => {
     );
   });
   expect(texts(renderer.root)).not.toContain('Crear cotización');
+});
+
+it('groups administration in six areas and opens a single-section area directly', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  const root = await render();
+  for (const area of ['Proveedores', 'Catálogo', 'Reservas', 'Promociones y contenido', 'Finanzas y comisiones', 'Configuración']) {
+    expect(texts(root)).toContain(area);
+  }
+  // Por defecto, Reservas: la lista de reservas está a la vista sin más toques.
+  expect(hasText(root, 'Historial')).toBe(true);
+  await press(root, 'Configuración');
+  expect(texts(root)).toContain('Usuarios');
+  expect(texts(root)).toContain('Actividad');
+  expect(texts(root)).not.toContain('Solicitudes');
 });
