@@ -899,3 +899,15 @@ it('groups administration in six areas and opens a single-section area directly'
   expect(texts(root)).toContain('Actividad');
   expect(texts(root)).not.toContain('Solicitudes');
 });
+
+it('opens a new provider without offers on My offers and an established one on Bookings', async () => {
+  mocked.getSharedRole.mockResolvedValue('provider');
+  mocked.listProviderOffers.mockResolvedValue([]);
+  let root = await render();
+  expect(hasText(root, 'Nombre de la oferta')).toBe(true);
+  expect(hasText(root, 'Check-in con comprobante')).toBe(false);
+
+  mocked.listProviderOffers.mockResolvedValue([pousada]);
+  root = await render();
+  expect(hasText(root, 'Check-in con comprobante')).toBe(true);
+});
