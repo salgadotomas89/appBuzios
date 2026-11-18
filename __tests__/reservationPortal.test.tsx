@@ -209,6 +209,7 @@ it('lets providers publish offers in any category with a BRL price', async () =>
     version: 1, updated_at: '2099-01-01T00:00:00Z',
   });
   const root = await render();
+  await press(root, 'Mis ofertas');
 
   await type(root, 'Nombre de la oferta', '  Fiesta en barco  ');
   await press(root, 'Barcos');
@@ -232,6 +233,7 @@ it('lets providers publish offers in any category with a BRL price', async () =>
 it('rejects a malformed provider price without calling the backend', async () => {
   mocked.getSharedRole.mockResolvedValue('provider');
   const root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Precio BRL (ej. 320,00)', '12,345');
   await press(root, 'Publicar oferta y cupo');
   expect(hasText(root, 'Precio BRL inválido. Usa el formato 1.234,56.')).toBe(true);
@@ -465,6 +467,7 @@ it('publishes a range of nights in one call and keeps single dates on the single
   mocked.publishProviderInventory.mockResolvedValue({} as never);
   mocked.publishProviderInventoryRange.mockResolvedValue(7);
   const root = await render();
+  await press(root, 'Mis ofertas');
 
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await type(root, 'Cupo disponible para esa fecha', '3');
@@ -598,6 +601,7 @@ it('saves offer details with the offer and enforces per-booking limits for trave
   mocked.publishProviderInventory.mockResolvedValue({} as never);
   mocked.setProviderOfferDetails.mockResolvedValue('offer-boat');
   let root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await type(root, 'Descripción para el turista', ' Escuna de 4 horas ');
   await type(root, 'Ubicación', 'Praia dos Ossos');
@@ -635,6 +639,7 @@ it('shows providers their net income and the platform commission, without counti
     reservation({ id: 'r-cancel', status: 'cancelled', payment_status: 'rejected' }),
   ]);
   const root = await render();
+  await press(root, 'Mi negocio');
   expect(hasText(root, 'Tus ingresos')).toBe(true);
   expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 576,00')).toBe(true);
   expect(hasText(root, 'Comisión de la plataforma en reservas confirmadas: R$ 64,00')).toBe(true);
@@ -660,6 +665,7 @@ it('publishes a new offer only after its details and inventory are saved, and re
     .mockRejectedValueOnce(new Error('network down'))
     .mockResolvedValue({} as never);
   const root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await press(root, 'Publicar oferta y cupo');
   expect(hasText(root, 'network down')).toBe(true);

@@ -144,6 +144,9 @@ class InputValidationError extends Error {}
 const loadOfferMedia = (offerId: string) => listOwnOfferMedia(offerId);
 const currentAccessToken = async () => (await sessionManager?.currentAccessToken()) ?? null;
 
+type ProviderTab = 'bookings' | 'offers' | 'business';
+const PROVIDER_TABS: ProviderTab[] = ['bookings', 'offers', 'business'];
+
 export function ReservationPortal({
   onClose,
   language = 'es',
@@ -204,6 +207,8 @@ export function ReservationPortal({
   const [refundTarget, setRefundTarget] = useState<SharedReservation | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  // Panel del proveedor en tres pestañas: lo diario (reservas y check-in) primero.
+  const [providerTab, setProviderTab] = useState<ProviderTab>('bookings');
   const [voucherInput, setVoucherInput] = useState('');
   const [checkInResult, setCheckInResult] = useState<CheckInResult | null>(null);
   const [message, setMessage] = useState('');
@@ -812,103 +817,120 @@ export function ReservationPortal({
           ) : null}
           {role === 'provider' ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{words.myOffers}</Text>
-              {providerOffers.map(offer => (
-                <Pressable
-                  key={offer.id}
-                  onPress={() => editProviderOffer(offer)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selectedProviderOfferId === offer.id }}
-                  style={[styles.offer, selectedProviderOfferId === offer.id && styles.selected]}
-                >
-                  <View style={styles.flex}>
-                    <Text style={styles.offerName}>{offer.title}</Text>
-                    <Text style={styles.helper}>{words.categories[offer.category]} · {words.priceUnit[offer.price_mode]}</Text>
-                  </View>
-                  <Text style={styles.amount}>{brlFromCents(offer.base_price_cents)}</Text>
-                </Pressable>
-              ))}
-              <ActionButton title={words.newOffer} secondary onPress={startNewOffer} disabled={busy} />
-              <Text style={styles.sectionTitle}>{selectedProviderOfferId ? words.editOffer : words.createOfferTitle}</Text>
-              <Field label={words.offerName} value={offerTitle} onChange={setOfferTitle} maxLength={MAX_TITLE_LENGTH} />
-              <Text style={styles.fieldLabel}>{words.category}</Text>
               <View style={styles.chips}>
-                {CATEGORIES.map(category => (
-                  <Chip key={category} label={words.categories[category]} selected={offerCategory === category} onPress={() => setOfferCategory(category)} />
+                {PROVIDER_TABS.map(tab => (
+                  <Chip key={tab} label={words.providerTabs[tab]} selected={providerTab === tab} onPress={() => setProviderTab(tab)} />
                 ))}
               </View>
-              <Text style={styles.fieldLabel}>{words.priceMode}</Text>
-              <View style={styles.chips}>
-                {PRICE_MODES.map(mode => (
-                  <Chip key={mode} label={words.priceUnit[mode]} selected={offerPriceMode === mode} onPress={() => setOfferPriceMode(mode)} />
-                ))}
-              </View>
-              <Field label={words.priceBrl} value={offerPrice} onChange={setOfferPrice} decimal />
-              <Field label={words.offerDescription} value={offerDetails.description} onChange={description => setOfferDetails({ ...offerDetails, description })} maxLength={MAX_DESCRIPTION_LENGTH} multiline />
-              <Field label={words.offerLocation} value={offerDetails.location} onChange={location => setOfferDetails({ ...offerDetails, location })} maxLength={MAX_DETAIL_LENGTH} />
-              <Field label={words.offerMeetingPoint} value={offerDetails.meetingPoint} onChange={meetingPoint => setOfferDetails({ ...offerDetails, meetingPoint })} maxLength={MAX_DETAIL_LENGTH} />
-              <Field label={words.offerSchedule} value={offerDetails.schedule} onChange={schedule => setOfferDetails({ ...offerDetails, schedule })} maxLength={MAX_DETAIL_LENGTH} />
-              <Field label={words.minQuantity} value={offerDetails.minQuantity} onChange={minQuantity => setOfferDetails({ ...offerDetails, minQuantity })} numeric />
-              <Field label={words.maxQuantity} value={offerDetails.maxQuantity} onChange={maxQuantity => setOfferDetails({ ...offerDetails, maxQuantity })} numeric />
-              <Text style={styles.helper}>{words.offerDetailsHint}</Text>
-              <Field label={words.date} value={date} onChange={setDate} />
-              <Field label={words.units} value={stock} onChange={setStock} numeric />
-              <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
-              <Text style={styles.helper}>{words.publishNightsHint}</Text>
-              <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
-              <PostManager
-                offerId={selectedProviderOfferId}
-                language={language}
-                load={listOwnPosts}
-                save={saveOwnPost}
-                remove={deleteOwnPost}
-                describeError={describeError}
-              />
-              <PromotionManager
-                offerId={selectedProviderOfferId}
-                language={language}
-                today={buziosIsoDate()}
-                load={listProviderPromotions}
-                save={saveProviderPromotion}
-                describeError={describeError}
-              />
-              {photosEnabled && offerPhotoGateway ? (
-                <OfferPhotoManager
-                  offerId={selectedProviderOfferId}
-                  language={language}
-                  gateway={offerPhotoGateway}
-                  loadMedia={loadOfferMedia}
-                  getAccessToken={currentAccessToken}
-                />
+              {providerTab === 'bookings' ? (
+                <>
+                  <Text style={styles.sectionTitle}>{words.vouchers.checkInTitle}</Text>
+                  <Text style={styles.helper}>{words.vouchers.checkInHint}</Text>
+                  <Field label={words.vouchers.checkInCode} value={voucherInput} onChange={setVoucherInput} maxLength={20} />
+                  <ActionButton title={words.vouchers.checkInButton} onPress={checkIn} disabled={busy || !voucherInput.trim()} />
+                  {checkInResult?.reservation ? (
+                    <Text style={styles.helper}>
+                      {offerTitles.get(checkInResult.reservation.offer_id) ?? checkInResult.reservation.offer_id} · {checkInResult.reservation.service_date} · ×{checkInResult.reservation.quantity}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.sectionTitle}>{words.receivedReservations}</Text>
+                  {reservationList('provider_cancelled')}
+                </>
               ) : null}
-              <Text style={styles.sectionTitle}>{words.myInventory}</Text>
-              {providerInventory.length ? providerInventory.map(item => (
-                <View key={`${item.offer_id}:${item.service_date}`} style={styles.row}>
-                  <View style={styles.flex}>
-                    <Text style={styles.offerName}>{offerTitles.get(item.offer_id) ?? item.offer_id}</Text>
-                    <Text style={styles.helper}>{item.service_date} · {item.held_units} {words.held} · {item.sold_units} {words.sold}</Text>
+              {providerTab === 'offers' ? (
+                <>
+                  <Text style={styles.sectionTitle}>{words.myOffers}</Text>
+                  {providerOffers.map(offer => (
+                    <Pressable
+                      key={offer.id}
+                      onPress={() => editProviderOffer(offer)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: selectedProviderOfferId === offer.id }}
+                      style={[styles.offer, selectedProviderOfferId === offer.id && styles.selected]}
+                    >
+                      <View style={styles.flex}>
+                        <Text style={styles.offerName}>{offer.title}</Text>
+                        <Text style={styles.helper}>{words.categories[offer.category]} · {words.priceUnit[offer.price_mode]}</Text>
+                      </View>
+                      <Text style={styles.amount}>{brlFromCents(offer.base_price_cents)}</Text>
+                    </Pressable>
+                  ))}
+                  <ActionButton title={words.newOffer} secondary onPress={startNewOffer} disabled={busy} />
+                  <Text style={styles.sectionTitle}>{selectedProviderOfferId ? words.editOffer : words.createOfferTitle}</Text>
+                  <Field label={words.offerName} value={offerTitle} onChange={setOfferTitle} maxLength={MAX_TITLE_LENGTH} />
+                  <Text style={styles.fieldLabel}>{words.category}</Text>
+                  <View style={styles.chips}>
+                    {CATEGORIES.map(category => (
+                      <Chip key={category} label={words.categories[category]} selected={offerCategory === category} onPress={() => setOfferCategory(category)} />
+                    ))}
                   </View>
-                  <Text style={styles.amount}>{item.total_units - item.held_units - item.sold_units} {words.free}</Text>
-                </View>
-              )) : <Text style={styles.helper}>{words.noInventory}</Text>}
-              <Text style={styles.sectionTitle}>{words.providerEarnings}</Text>
-              <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
-              <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
-              <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
-              <Text style={styles.helper}>{words.providerEarningsHint}</Text>
-              <ProviderProfileForm language={language} load={getOwnProviderProfile} save={updateOwnProviderProfile} run={run} busy={busy} />
-              <ProviderStats language={language} today={buziosIsoDate()} load={getProviderStats} run={run} busy={busy} />
-              <Text style={styles.sectionTitle}>{words.vouchers.checkInTitle}</Text>
-              <Text style={styles.helper}>{words.vouchers.checkInHint}</Text>
-              <Field label={words.vouchers.checkInCode} value={voucherInput} onChange={setVoucherInput} maxLength={20} />
-              <ActionButton title={words.vouchers.checkInButton} onPress={checkIn} disabled={busy || !voucherInput.trim()} />
-              {checkInResult?.reservation ? (
-                <Text style={styles.helper}>
-                  {offerTitles.get(checkInResult.reservation.offer_id) ?? checkInResult.reservation.offer_id} · {checkInResult.reservation.service_date} · ×{checkInResult.reservation.quantity}
-                </Text>
+                  <Text style={styles.fieldLabel}>{words.priceMode}</Text>
+                  <View style={styles.chips}>
+                    {PRICE_MODES.map(mode => (
+                      <Chip key={mode} label={words.priceUnit[mode]} selected={offerPriceMode === mode} onPress={() => setOfferPriceMode(mode)} />
+                    ))}
+                  </View>
+                  <Field label={words.priceBrl} value={offerPrice} onChange={setOfferPrice} decimal />
+                  <Field label={words.offerDescription} value={offerDetails.description} onChange={description => setOfferDetails({ ...offerDetails, description })} maxLength={MAX_DESCRIPTION_LENGTH} multiline />
+                  <Field label={words.offerLocation} value={offerDetails.location} onChange={location => setOfferDetails({ ...offerDetails, location })} maxLength={MAX_DETAIL_LENGTH} />
+                  <Field label={words.offerMeetingPoint} value={offerDetails.meetingPoint} onChange={meetingPoint => setOfferDetails({ ...offerDetails, meetingPoint })} maxLength={MAX_DETAIL_LENGTH} />
+                  <Field label={words.offerSchedule} value={offerDetails.schedule} onChange={schedule => setOfferDetails({ ...offerDetails, schedule })} maxLength={MAX_DETAIL_LENGTH} />
+                  <Field label={words.minQuantity} value={offerDetails.minQuantity} onChange={minQuantity => setOfferDetails({ ...offerDetails, minQuantity })} numeric />
+                  <Field label={words.maxQuantity} value={offerDetails.maxQuantity} onChange={maxQuantity => setOfferDetails({ ...offerDetails, maxQuantity })} numeric />
+                  <Text style={styles.helper}>{words.offerDetailsHint}</Text>
+                  <Field label={words.date} value={date} onChange={setDate} />
+                  <Field label={words.units} value={stock} onChange={setStock} numeric />
+                  <Field label={words.publishNights} value={publishNights} onChange={setPublishNights} numeric />
+                  <Text style={styles.helper}>{words.publishNightsHint}</Text>
+                  <ActionButton title={selectedProviderOfferId ? words.saveOffer : words.publishOffer} onPress={saveOffer} disabled={busy} />
+                  <PostManager
+                    offerId={selectedProviderOfferId}
+                    language={language}
+                    load={listOwnPosts}
+                    save={saveOwnPost}
+                    remove={deleteOwnPost}
+                    describeError={describeError}
+                  />
+                  <PromotionManager
+                    offerId={selectedProviderOfferId}
+                    language={language}
+                    today={buziosIsoDate()}
+                    load={listProviderPromotions}
+                    save={saveProviderPromotion}
+                    describeError={describeError}
+                  />
+                  {photosEnabled && offerPhotoGateway ? (
+                    <OfferPhotoManager
+                      offerId={selectedProviderOfferId}
+                      language={language}
+                      gateway={offerPhotoGateway}
+                      loadMedia={loadOfferMedia}
+                      getAccessToken={currentAccessToken}
+                    />
+                  ) : null}
+                  <Text style={styles.sectionTitle}>{words.myInventory}</Text>
+                  {providerInventory.length ? providerInventory.map(item => (
+                    <View key={`${item.offer_id}:${item.service_date}`} style={styles.row}>
+                      <View style={styles.flex}>
+                        <Text style={styles.offerName}>{offerTitles.get(item.offer_id) ?? item.offer_id}</Text>
+                        <Text style={styles.helper}>{item.service_date} · {item.held_units} {words.held} · {item.sold_units} {words.sold}</Text>
+                      </View>
+                      <Text style={styles.amount}>{item.total_units - item.held_units - item.sold_units} {words.free}</Text>
+                    </View>
+                  )) : <Text style={styles.helper}>{words.noInventory}</Text>}
+                </>
               ) : null}
-              <Text style={styles.sectionTitle}>{words.receivedReservations}</Text>
-              {reservationList('provider_cancelled')}
+              {providerTab === 'business' ? (
+                <>
+                  <Text style={styles.sectionTitle}>{words.providerEarnings}</Text>
+                  <Text style={styles.helper}>{words.providerNetTotal}: {brlFromCents(totals.providerNetCents)}</Text>
+                  <Text style={styles.helper}>{words.providerCommissionTotal}: {brlFromCents(totals.commissionCents)}</Text>
+                  <Text style={styles.helper}>{words.heldTotal}: {brlFromCents(totals.heldAmountCents)}</Text>
+                  <Text style={styles.helper}>{words.providerEarningsHint}</Text>
+                  <ProviderProfileForm language={language} load={getOwnProviderProfile} save={updateOwnProviderProfile} run={run} busy={busy} />
+                  <ProviderStats language={language} today={buziosIsoDate()} load={getProviderStats} run={run} busy={busy} />
+                </>
+              ) : null}
             </View>
           ) : null}
           {role === 'admin' ? (
