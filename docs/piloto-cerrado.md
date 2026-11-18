@@ -1,21 +1,21 @@
 # Primer piloto cerrado — preparación y criterios
 
-Para el equipo que ejecute el piloto. **El piloto no está listo**: las migraciones ya están aplicadas y verificadas
-en buziosflow, pero falta comprobar que llegan los códigos de verificación por correo y hacer al menos un recorrido
+Para el equipo que ejecute el piloto. **El piloto no está listo**: las 26 migraciones y el despliegue de fotos están aplicados y verificados
+en buziosflow (17-11-2026), pero falta crear las cuentas del equipo, comprobar que llegan los códigos de verificación por correo y hacer al menos un recorrido
 real en un iPhone o Android. Reservas comerciales y pagos reales siguen apagados; todo cobro es simulado.
 
-## Estado del tenant buziosflow (15-11-2026)
+## Estado del tenant buziosflow (17-11-2026)
 
 | Comprobación | Resultado |
 | --- | --- |
 | Proyecto | buziosflow, `ykfv5j3m.us-east.insforge.app`, vinculado con el CLI; la app apunta a él |
-| Respaldo | plataforma: `post-migraciones-15` (`e134bb27-…`, sustituye a `pre-reservas`); local: volcado completo tras aplicar retención e índices, restaurado y comparado sin diferencias (`npm run backup:verified`) |
-| Migraciones | 17 de 20 aplicadas (retención del registro del barrido e índices el 15-11 por la tarde); verificación y conciliación correctas. Las tres de fotos (`20261116000003`, `…0004` y la moderación `…0005`) están probadas localmente (las dos primeras también en el laboratorio InsForge 2.3.5) y esperan autorización (ver docs/despliegue-fotos.md) (ver runbook, «Storage: corrección») |
+| Respaldo | plataforma: `post-migraciones-15` (`e134bb27-…`, cupo 1/1, no renovada); local: volcados verificados antes de las migraciones y antes de las fotos (`npm run backup:verified`, PASS) |
+| Migraciones | **26 de 26** aplicadas (17-11-2026); verificación, conciliación e inventario idénticos ([runbook-insforge-ensayo.md](runbook-insforge-ensayo.md)) |
 | App con clave anónima | catálogo, inventario y fotos legibles; RPC privadas rechazadas |
 | Barrido de retenciones | schedule `connectical-hold-sweep` cada 2 minutos, primera ejecución 200 y `succeeded` |
 | Datos | ninguno: 0 usuarios, 0 ofertas |
 | Correo | SMTP propio desactivado: envía el proveedor gestionado de InsForge con su plantilla en inglés. Entrega **sin comprobar**; plantillas en portugués preparadas para cuando haya SMTP |
-| Fotos | **sin bucket**: las reglas que lo protegen no están aplicadas |
+| Fotos | bucket privado `offer-media`, función, URL y limpieza horaria desplegados (17-11-2026, [operacion-2026-11-17.md](operacion-2026-11-17.md)); falta la verificación con cuentas del equipo |
 
 El detalle y los comandos están en [runbook-insforge-ensayo.md](runbook-insforge-ensayo.md).
 
