@@ -9,9 +9,11 @@
 export const SHARED_CATALOG_ENABLED: boolean = __DEV__;
 
 // OFFER_PHOTOS_ENABLED muestra a los proveedores el gestor de fotos (src/components/OfferPhotoManager.tsx), que sube
-// por la función offer-media. Queda apagado hasta desplegar en buziosflow las migraciones 202611160003/0004, el bucket
-// privado, la función y su URL (docs/despliegue-fotos.md); sin eso la función no existe y cada subida fallaría.
-export const OFFER_PHOTOS_ENABLED = false;
+// por la función offer-media. Desde el 17-11-2026 buziosflow tiene migraciones, bucket privado, función, URL y limpieza
+// (docs/despliegue-fotos.md, pasos 1-7). Encendido solo en builds de desarrollo, que son la «build de prueba con la
+// bandera encendida» del paso 11; en release sigue apagado hasta completar la verificación con cuentas del equipo y
+// las pruebas en un iPhone y un Android reales.
+export const OFFER_PHOTOS_ENABLED: boolean = __DEV__;
 
 // CANCELLATION_POLICY_ENABLED permitiría mostrar la propuesta de src/utils/cancellationPolicy.ts.
 // No existe una política comercial aprobada, así que no hay ninguna política cargada y ningún flujo
