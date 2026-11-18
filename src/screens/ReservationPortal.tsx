@@ -149,9 +149,13 @@ export function ReservationPortal({
   language = 'es',
   photosEnabled = OFFER_PHOTOS_ENABLED,
   shareText = Share.share,
+  initialBooking,
 }: {
   onClose: () => void;
   language?: Language;
+  // Oferta, fecha y cantidades elegidas en el detalle del catálogo: el portal abre con la oferta seleccionada y
+  // el turista solo confirma la cotización (se aplica una vez, tras iniciar sesión).
+  initialBooking?: { offerId: string; date: string; quantity: number; nights: number } | null;
   // Hoja de compartir del sistema; inyectable en pruebas.
   shareText?: (content: { message: string }) => Promise<unknown>;
   // Solo para pruebas: el gestor de fotos depende del despliegue de offer-media (OFFER_PHOTOS_ENABLED).
@@ -205,6 +209,7 @@ export function ReservationPortal({
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  const bookingApplied = useRef(false);
   // Se incrementa al cambiar los datos de la cotización; una respuesta tardía con otro valor se descarta.
   const quoteRequest = useRef(0);
   // Una clave por reserva e importe: reintentar, descartar o reabrir el formulario reutiliza la misma,
@@ -246,6 +251,21 @@ export function ReservationPortal({
     if (!mounted.current) return;
     setOffers(visibleOffers);
     setReservations(visibleReservations);
+    const pending = nextRole === 'traveler' && !bookingApplied.current ? initialBooking : null;
+    const preselected = pending ? visibleOffers.find(offer => offer.id === pending.offerId) : undefined;
+    if (pending && preselected) {
+      bookingApplied.current = true;
+      setSelectedOffer(preselected);
+      setDate(pending.date);
+      setQuantity(String(pending.quantity));
+      setNights(preselected.price_mode === 'night' ? String(pending.nights) : '1');
+      setQuote(null);
+      listOfferAvailability(preselected.id, buziosIsoDate())
+        .then(dates => {
+          if (mounted.current) setAvailability(dates);
+        })
+        .catch(() => undefined);
+    }
     setProviders(visibleProviders);
     setEvents(visibleEvents);
     setProviderOffers(ownedOffers);

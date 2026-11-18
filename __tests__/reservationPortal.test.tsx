@@ -846,3 +846,32 @@ it('shows the traveler a day-by-day agenda with today, tomorrow and each night o
   expect(hasText(root, 'Pousada Porto · ×1 · noche 2 de 2')).toBe(true);
   expect(hasText(root, 'Barco Azul · ×2 · pendiente de pago')).toBe(true);
 });
+
+it('opens with the offer, date and quantities chosen in the catalog so the traveler only confirms the quote', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockRejectedValue(new service.ReservationError('x', 'inventory_unavailable'));
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ReservationPortal onClose={jest.fn()} language="es" initialBooking={{ offerId: pousada.id, date: '2099-01-10', quantity: 2, nights: 3 }} />,
+    );
+  });
+  const root = renderer.root;
+  const field = (label: string) => root.findAll(node => node.type === TextInput && node.props.accessibilityLabel === label)[0]?.props.value;
+  expect(field('Entrada (AAAA-MM-DD)')).toBe('2099-01-10');
+  expect(field('Noches')).toBe('3');
+  expect(mocked.listOfferAvailability).toHaveBeenCalledWith(pousada.id, expect.any(String));
+  await press(root, 'Crear cotización');
+  expect(mocked.createSharedQuote).toHaveBeenCalledWith({ offerId: pousada.id, serviceDate: '2099-01-10', quantity: 2, nights: 3, serviceFeeRateBps: 600 });
+});
+
+it('ignores a preselected offer that is no longer published', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ReservationPortal onClose={jest.fn()} language="es" initialBooking={{ offerId: 'gone', date: '2099-01-10', quantity: 1, nights: 1 }} />,
+    );
+  });
+  expect(texts(renderer.root)).not.toContain('Crear cotización');
+});

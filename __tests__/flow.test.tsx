@@ -132,12 +132,14 @@ test('switches language and keeps unavailable listings out of the trip', async (
   expect(hasText(root, 'Adicionar à Minha viagem')).toBe(false);
 });
 
-test('localizes the operations entry and stepper labels in Portuguese', async () => {
+test('localizes the account tab and stepper labels in Portuguese', async () => {
   const renderer = await renderApp();
   const root = renderer.root;
 
   pressText(root, 'PT');
-  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(true);
+  // La cuenta, las reservas reales y los paneles están en la pestaña «Minha conta» de la barra inferior.
+  expect(hasText(root, 'Minha conta')).toBe(true);
+  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(false);
   pressText(root, 'Pousadas');
   pressText(root, 'Pousada Maravista');
   const labels = root
