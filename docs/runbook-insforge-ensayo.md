@@ -216,7 +216,20 @@ fija la contraseña nueva; no inicia sesión. Probado con el SDK real y red simu
 laboratorio InsForge 2.3.5 con el correo capturado por Mailpit (código erróneo rechazado, contraseña anterior
 inválida, correo desconocido sin envío). Sin probar contra el tenant.
 
-### Migraciones 21 a 26 (17-11-2026, preparadas, SIN aplicar)
+### Migraciones 18 a 26 aplicadas en buziosflow (17-11-2026, 22:22–22:23 -03, con autorización expresa)
+
+| Paso | Evidencia |
+| --- | --- |
+| Destino, dos medios | CLI `current`: buziosflow `bfab79dc-…`, `ykfv5j3m`, igual que `.insforge/project.json` y `.env`. En la propia plataforma: el schedule único `f195463f-…` (`connectical-hold-sweep`), el respaldo `e134bb27-…` y el historial de 17 migraciones aplicadas el 15-11 |
+| Estado previo | 17 de 26; pendientes exactamente las 9 previstas; verificación y conciliación `PASS`; deriva solo en las 4 funciones que redefinen las pendientes. **0 usuarios, proveedores, ofertas, reservas, fotos y buckets** |
+| Respaldo | `npm run backup:verified` → `PASS` (1530 líneas de huella, 69 tablas), en `~/RespaldosBuziosFlow/20261118_011553_snapshot`. La copia de plataforma no se pudo renovar: cupo manual 1/1 y borrar `post-migraciones-15` no estaba permitido en esta sesión; sigue disponible |
+| Ensayo | Restauración de ese volcado sin red, migraciones como `project_admin` en orden: 8 de 9 aplican, verificación toda `true`, conciliación vacía, inventario idéntico salvo las 4 políticas de `…0004`, que falla solo por la ausencia conocida de `insforge_pg_utils` en `postgres` plano. Para `…0004`: archivo sin cambios desde su ensayo en el laboratorio oficial (15-11) y condición comprobada en vivo (`insforge.policy_grant_tables` incluye `storage.objects` para `project_admin`) |
+| Aplicación | `db migrations up <archivo>`, una por ejecución, en orden: `…16000003`, `…16000004` (4 políticas RESTRICTIVE; las 4 `storage_objects_owner_*` de InsForge intactas), `…16000005` (2 disparadores), `…16000006`, `…17000001` a `…17000005` |
+| Verificación | `npm run check:remote-schema`: **26 de 26**, verificación `PASS`, conciliación sin deriva, inventario idéntico (408 líneas). Permisos: anónimo solo en `list_active_promotions`, `list_feed`, `list_provider_profiles`, `is_category`, `social_platform` y lectura de categorías; las tablas nuevas sin lectura directa. SDK real con la clave anónima: catálogo público responde (7 categorías) y estadísticas, check-in, indicadores y publicaciones directas responden `permission denied` |
+
+Sin aplicar todavía de las fotos: bucket `offer-media`, función, `media_public_base_url` y limpieza ([despliegue-fotos.md](despliegue-fotos.md) pasos 4 a 7). Hasta entonces **no se pueden registrar fotos** (`…0003` exige que las escriba la función), lo que es coherente con `OFFER_PHOTOS_ENABLED = false`.
+
+### Migraciones 21 a 26 (17-11-2026, preparadas; aplicadas más tarde ese día, ver arriba)
 
 Preparadas en `work/mvp-2026-11-16` y probadas en PostgreSQL 17 local (integración, ensayo de actualización desde
 las etapas 1, 4 y 11, inventario de esquema) y en la CI. **No se aplicó nada en buziosflow.** Para aplicarlas hace
