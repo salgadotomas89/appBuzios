@@ -63,7 +63,12 @@ const client = createClient({ baseUrl: env.INSFORGE_URL, anonKey: env.INSFORGE_A
 const before = otpState();
 console.log(`Codes on record for ${email} before sign-up: ${before.codes}`);
 
-const password = await ask('Password for the new account (min 6, not shown): ', { hidden: true });
+// La app exige 8 caracteres (ReservationPortal) aunque el servidor acepte 6: se aplica la regla de la app.
+const password = await ask('Password for the new account (min 8, not shown): ', { hidden: true });
+if (password.length < 8) {
+  console.log('RESULT nothing sent: the password needs at least 8 characters, as in the app');
+  process.exit(2);
+}
 const name = (await ask('Display name: ')) || 'Equipo Búzios Flow';
 const signUp = await client.auth.signUp({ email, password, name });
 if (signUp.error) {
