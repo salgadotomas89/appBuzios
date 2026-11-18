@@ -358,9 +358,10 @@ on conflict (key) do update set value = excluded.value, updated_at = now();
 
 ## 6. Activar el catálogo compartido en un build de ensayo
 
-Solo después de los pasos 1–4: cambiar `SHARED_CATALOG_ENABLED` a `true` en `src/config/featureFlags.ts` en una
-rama de ensayo y probar con dos dispositivos el recorrido del documento de revisión humana. Los pagos siguen
-simulados; `CANCELLATION_POLICY_ENABLED` sigue en `false`.
+Desde el 17-11-2026 `SHARED_CATALOG_ENABLED = __DEV__`: cualquier build de desarrollo (`npm start` y
+`npm run ios -- --simulator "iPhone 17"`) es la versión de ensayo y lee el catálogo de buziosflow; los builds de
+release siguen con el catálogo de ejemplo. Probar con dos dispositivos el recorrido del documento de revisión humana.
+Los pagos siguen simulados; `CANCELLATION_POLICY_ENABLED` sigue en `false`.
 
 ## 6b. Antes de conectar cualquier pasarela real
 

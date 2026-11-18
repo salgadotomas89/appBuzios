@@ -28,6 +28,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
+// Catálogo de ejemplo (flag apagado, como en release); sharedCatalogFlow.test.tsx cubre el catálogo compartido.
+jest.mock('../src/config/featureFlags', () => ({ ...jest.requireActual('../src/config/featureFlags'), SHARED_CATALOG_ENABLED: false }));
 jest.mock('../src/lib/insforge', () => ({
   insforge: {},
   checkInsforgeConnection: jest.fn(() => Promise.resolve(true)),
