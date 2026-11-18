@@ -55,9 +55,34 @@ El script se niega (`email_not_verified`, `anonymous_user`, `profile_missing`, `
 algo no cuadra; no forzarlo. Con `--apply` el trigger registra `role_changed` en la auditoría con actor nulo
 (cambio hecho fuera de la app).
 
-Comprobar después, con esa cuenta en la app: aparece la consola de administración (Solicitudes, Publicaciones,
-Incidencias, Usuarios, Indicadores, Actividad, Campañas) y en «Actividad» figura el cambio de rol con actor de
-sistema.
+Comprobar después, con esa cuenta en la app (pestaña «Mi cuenta»): aparece la administración en seis áreas
+(Proveedores, Catálogo, Reservas, Promociones y contenido, Finanzas y comisiones, Configuración) y en
+Configuración → «Actividad» figura el cambio de rol con actor de sistema.
+
+## 3b. Cuentas de proveedor y turista del equipo y verificación de fotos
+
+Dos personas o buzones más del equipo, cada uno con el paso 2 hecho (`RESULT sign-in works; profile role=traveler`).
+Todo se hace desde la app, como lo hará un proveedor real; no hace falta SQL.
+
+1. **Proveedor.** Con su cuenta, «Mi cuenta» → «¿Tienes un negocio turístico en Búzios?» → enviar la solicitud con
+   datos reales del negocio de prueba del equipo.
+2. **Administrador.** Proveedores → «Solicitudes» → aprobar con la comisión acordada por escrito (es obligatoria).
+3. **Proveedor.** Cerrar y abrir sesión: aparecen las pestañas Reservas, Mis ofertas y Mi negocio. En «Mis ofertas»,
+   crear **una** oferta de prueba claramente marcada en el título («PRUEBA EQUIPO — no reservar») con cupo para una
+   fecha.
+4. **Fotos (paso 8 de [despliegue-fotos.md](despliegue-fotos.md)):**
+
+   ```sh
+   npm run verify:offer-media -- --traveler turista@equipo.com --provider pousada@equipo.com \
+     --offer <uuid de esa oferta> --admin correo-admin@equipo.com
+   ```
+
+   Pide las contraseñas sin mostrarlas y debe terminar en `Offer photos verified`. Al final borra su foto de prueba.
+5. **Al terminar:** en «Mis ofertas», despublicar la oferta de prueba (o el administrador la suspende en Catálogo →
+   «Publicaciones»). No borrar cuentas: se quedan como cuentas reales del equipo.
+
+Antes de invitar a proveedores de verdad, decidir si cada oferta nueva debe esperar aprobación
+(`offer_moderation_required`, hoy `false`; la consulta preparada está en [piloto-cerrado.md](piloto-cerrado.md)).
 
 ## 4. Registro en la bitácora (sin datos sensibles)
 

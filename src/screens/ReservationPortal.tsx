@@ -220,6 +220,7 @@ export function ReservationPortal({
   const [refundReason, setRefundReason] = useState('');
   // Panel del proveedor en tres pestañas: lo diario (reservas y check-in) primero.
   const [providerTab, setProviderTab] = useState<ProviderTab>('bookings');
+  const providerTabChosen = useRef(false);
   const [adminArea, setAdminArea] = useState<AdminArea>('bookings');
   const [voucherInput, setVoucherInput] = useState('');
   const [checkInResult, setCheckInResult] = useState<CheckInResult | null>(null);
@@ -286,6 +287,8 @@ export function ReservationPortal({
     setProviders(visibleProviders);
     setEvents(visibleEvents);
     setProviderOffers(ownedOffers);
+    // Un proveedor recién aprobado no tiene reservas que atender: empieza creando su primera oferta.
+    if (nextRole === 'provider' && !ownedOffers.length && !providerTabChosen.current) setProviderTab('offers');
     setProviderInventory(ownedInventory);
     if (nextRole === 'admin') {
       // La salud del barrido es informativa: si la migración 202611140006 falta, no bloquea el panel.
@@ -831,7 +834,7 @@ export function ReservationPortal({
             <View style={styles.section}>
               <View style={styles.chips}>
                 {PROVIDER_TABS.map(tab => (
-                  <Chip key={tab} label={words.providerTabs[tab]} selected={providerTab === tab} onPress={() => setProviderTab(tab)} />
+                  <Chip key={tab} label={words.providerTabs[tab]} selected={providerTab === tab} onPress={() => { providerTabChosen.current = true; setProviderTab(tab); }} />
                 ))}
               </View>
               {providerTab === 'bookings' ? (
