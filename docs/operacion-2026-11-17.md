@@ -21,7 +21,7 @@ Commit de `main`: `586d669` (CI verde, incluido «Función offer-media en Deno»
 | 4. Bucket | `offer-media` creado **privado** (`public = false`) |
 | 5. Función | `offer-media` desplegada y activa (`deno check` de InsForge aceptado). Sin sesión: `OPTIONS` 204; limpieza 401; subir 401; borrar 401; foto desconocida 404 |
 | 6. URL | `media_public_base_url` = `https://ykfv5j3m.function2.insforge.app/offer-media`, igual a la que construye la app (`offerMediaFunctionUrl`) |
-| 7. Limpieza | Schedule `offer-media-cleanup` (`64f6762b-…`, `17 * * * *`, POST con `${{secrets.API_KEY}}`); `connectical-hold-sweep` sigue activo |
+| 7. Limpieza | Schedule `offer-media-cleanup` (`64f6762b-…`, `17 * * * *`, POST con `${{secrets.API_KEY}}`); `connectical-hold-sweep` sigue activo. **Primera ejecución: 18-11-2026 00:17 -03, `200`, 1092 ms** |
 | Acceso anónimo (SDK con la clave de la app) | listar el bucket: rechazado; subir: rechazado; 0 fotos visibles; 0 objetos en el bucket |
 | 8–9. Cuentas del equipo | **Pendiente**: buziosflow no tiene usuarios. Se hará con `npm run verify:offer-media` cuando existan el turista, el proveedor con oferta y el administrador del equipo |
 | 10. Recuperación | Sin incidencias; procedimiento disponible |
