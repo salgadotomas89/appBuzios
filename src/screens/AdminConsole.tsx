@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ActionButton, Chip, Field, formatBps, portalStyles as styles } from '../components/PortalControls';
 import type { Language } from '../data/homeMock';
@@ -41,6 +41,7 @@ import { brlFromCents } from '../utils/format';
 import { addDays, buziosIsoDate, parseIsoDate, parsePercentToBps } from '../utils/portalInput';
 
 type Section = keyof (typeof platformCopy)['es']['sections'];
+export type ConsoleSection = Section;
 const SECTIONS: Section[] = ['applications', 'moderation', 'photos', 'incidents', 'users', 'kpis', 'audit', 'campaigns', 'categoryRates', 'posts'];
 
 export type ConsoleProvider = { id: string; name: string; commission_rate_bps: number };
@@ -53,12 +54,15 @@ export function AdminConsole({
   busy,
   run,
   providers = [],
+  sections = SECTIONS,
 }: {
   language: Language;
   busy: boolean;
   run: (action: () => Promise<string | void>) => void;
   // Proveedores que el portal ya cargó para la administración; los usa la comisión por categoría.
   providers?: ConsoleProvider[];
+  // Secciones visibles (el portal agrupa la administración por áreas). Con una sola, se abre directamente.
+  sections?: Section[];
 }) {
   const words = platformCopy[language];
   const portalWords = portalCopy[language];
@@ -82,6 +86,13 @@ export function AdminConsole({
   const [categoryRates, setCategoryRates] = useState<ProviderCategoryRate[]>([]);
   const [posts, setPosts] = useState<PostReview[]>([]);
   const [campaignDraft, setCampaignDraft] = useState({ title: '', body: '', starts: buziosIsoDate(), ends: addDays(buziosIsoDate(), 7) });
+
+  // Un área con una sola sección (p. ej. «Finanzas»: indicadores) la abre sin pedir otro toque.
+  useEffect(() => {
+    if (sections.length === 1) open(sections[0]);
+    // Solo al montar: el portal remonta la consola al cambiar de área.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function open(next: Section) {
     setSection(next);
@@ -220,13 +231,19 @@ export function AdminConsole({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{words.consoleTitle}</Text>
-      <Text style={styles.helper}>{words.consoleHint}</Text>
-      <View style={styles.chips}>
-        {SECTIONS.map(item => (
-          <Chip key={item} label={words.sections[item]} selected={section === item} onPress={() => open(item)} />
-        ))}
-      </View>
+      {sections === SECTIONS ? (
+        <>
+          <Text style={styles.sectionTitle}>{words.consoleTitle}</Text>
+          <Text style={styles.helper}>{words.consoleHint}</Text>
+        </>
+      ) : null}
+      {sections.length > 1 ? (
+        <View style={styles.chips}>
+          {sections.map(item => (
+            <Chip key={item} label={words.sections[item]} selected={section === item} onPress={() => open(item)} />
+          ))}
+        </View>
+      ) : null}
 
       {section === 'applications' ? (
         applications.length ? applications.map(application => (

@@ -209,6 +209,7 @@ it('lets providers publish offers in any category with a BRL price', async () =>
     version: 1, updated_at: '2099-01-01T00:00:00Z',
   });
   const root = await render();
+  await press(root, 'Mis ofertas');
 
   await type(root, 'Nombre de la oferta', '  Fiesta en barco  ');
   await press(root, 'Barcos');
@@ -232,6 +233,7 @@ it('lets providers publish offers in any category with a BRL price', async () =>
 it('rejects a malformed provider price without calling the backend', async () => {
   mocked.getSharedRole.mockResolvedValue('provider');
   const root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Precio BRL (ej. 320,00)', '12,345');
   await press(root, 'Publicar oferta y cupo');
   expect(hasText(root, 'Precio BRL inválido. Usa el formato 1.234,56.')).toBe(true);
@@ -465,6 +467,7 @@ it('publishes a range of nights in one call and keeps single dates on the single
   mocked.publishProviderInventory.mockResolvedValue({} as never);
   mocked.publishProviderInventoryRange.mockResolvedValue(7);
   const root = await render();
+  await press(root, 'Mis ofertas');
 
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await type(root, 'Cupo disponible para esa fecha', '3');
@@ -492,6 +495,7 @@ it('lets admins pause and resume providers', async () => {
     .mockResolvedValue([{ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false }]);
   mocked.setSharedProviderActive.mockResolvedValue({ id: 'p1', name: 'Pousada Sol', country_code: 'BR', commission_rate_bps: 1000, active: false });
   const root = await render('pt');
+  await press(root, 'Fornecedores');
 
   expect(hasText(root, 'Pausar impede novas cotações e publicações. As reservas existentes não mudam.')).toBe(true);
   await press(root, 'Pausar');
@@ -525,6 +529,7 @@ it('tells admins when no scheduled sweep has run and when runs were partial', as
     partial_runs_last_hour: 0, overdue_holds: 3, stale: true,
   });
   let root = await render();
+  await press(root, 'Configuración');
   expect(hasText(root, 'Sin ejecuciones correctas registradas: el scheduler no está instalado o no funciona.')).toBe(true);
   expect(hasText(root, 'Retenciones vencidas esperando barrido: 3')).toBe(true);
 
@@ -533,6 +538,7 @@ it('tells admins when no scheduled sweep has run and when runs were partial', as
     runs_last_hour: 4, partial_runs_last_hour: 2, overdue_holds: 0, stale: true,
   });
   root = await render('pt');
+  await press(root, 'Configurações');
   expect(hasText(root, 'Atenção: mais de 15 minutos sem uma execução correta.')).toBe(true);
   expect(hasText(root, 'Execuções parciais na última hora: 2')).toBe(true);
 });
@@ -562,6 +568,7 @@ it('shows effective commissions against unapproved references and sets a product
   ]);
   mocked.setOfferCommission.mockResolvedValue(1850);
   const root = await render();
+  await press(root, 'Finanzas y comisiones');
 
   expect(hasText(root, 'Experiencias privadas y VIP · efectiva 10 %')).toBe(true);
   expect(hasText(root, 'referencia 18 %–20 % (propuesta) · fuera de la referencia')).toBe(true);
@@ -598,6 +605,7 @@ it('saves offer details with the offer and enforces per-booking limits for trave
   mocked.publishProviderInventory.mockResolvedValue({} as never);
   mocked.setProviderOfferDetails.mockResolvedValue('offer-boat');
   let root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await type(root, 'Descripción para el turista', ' Escuna de 4 horas ');
   await type(root, 'Ubicación', 'Praia dos Ossos');
@@ -635,6 +643,7 @@ it('shows providers their net income and the platform commission, without counti
     reservation({ id: 'r-cancel', status: 'cancelled', payment_status: 'rejected' }),
   ]);
   const root = await render();
+  await press(root, 'Mi negocio');
   expect(hasText(root, 'Tus ingresos')).toBe(true);
   expect(hasText(root, 'Neto proveedor de reservas confirmadas, antes de reembolsos: R$ 576,00')).toBe(true);
   expect(hasText(root, 'Comisión de la plataforma en reservas confirmadas: R$ 64,00')).toBe(true);
@@ -660,6 +669,7 @@ it('publishes a new offer only after its details and inventory are saved, and re
     .mockRejectedValueOnce(new Error('network down'))
     .mockResolvedValue({} as never);
   const root = await render();
+  await press(root, 'Mis ofertas');
   await type(root, 'Fecha (AAAA-MM-DD)', '2099-03-01');
   await press(root, 'Publicar oferta y cupo');
   expect(hasText(root, 'network down')).toBe(true);
@@ -845,4 +855,47 @@ it('shows the traveler a day-by-day agenda with today, tomorrow and each night o
   expect(hasText(root, 'Pousada Porto · ×1 · noche 1 de 2 · BZ-ABCD-EFGH')).toBe(true);
   expect(hasText(root, 'Pousada Porto · ×1 · noche 2 de 2')).toBe(true);
   expect(hasText(root, 'Barco Azul · ×2 · pendiente de pago')).toBe(true);
+});
+
+it('opens with the offer, date and quantities chosen in the catalog so the traveler only confirms the quote', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  mocked.createSharedQuote.mockRejectedValue(new service.ReservationError('x', 'inventory_unavailable'));
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ReservationPortal onClose={jest.fn()} language="es" initialBooking={{ offerId: pousada.id, date: '2099-01-10', quantity: 2, nights: 3 }} />,
+    );
+  });
+  const root = renderer.root;
+  const field = (label: string) => root.findAll(node => node.type === TextInput && node.props.accessibilityLabel === label)[0]?.props.value;
+  expect(field('Entrada (AAAA-MM-DD)')).toBe('2099-01-10');
+  expect(field('Noches')).toBe('3');
+  expect(mocked.listOfferAvailability).toHaveBeenCalledWith(pousada.id, expect.any(String));
+  await press(root, 'Crear cotización');
+  expect(mocked.createSharedQuote).toHaveBeenCalledWith({ offerId: pousada.id, serviceDate: '2099-01-10', quantity: 2, nights: 3, serviceFeeRateBps: 600 });
+});
+
+it('ignores a preselected offer that is no longer published', async () => {
+  mocked.getSharedRole.mockResolvedValue('traveler');
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ReservationPortal onClose={jest.fn()} language="es" initialBooking={{ offerId: 'gone', date: '2099-01-10', quantity: 1, nights: 1 }} />,
+    );
+  });
+  expect(texts(renderer.root)).not.toContain('Crear cotización');
+});
+
+it('groups administration in six areas and opens a single-section area directly', async () => {
+  mocked.getSharedRole.mockResolvedValue('admin');
+  const root = await render();
+  for (const area of ['Proveedores', 'Catálogo', 'Reservas', 'Promociones y contenido', 'Finanzas y comisiones', 'Configuración']) {
+    expect(texts(root)).toContain(area);
+  }
+  // Por defecto, Reservas: la lista de reservas está a la vista sin más toques.
+  expect(hasText(root, 'Historial')).toBe(true);
+  await press(root, 'Configuración');
+  expect(texts(root)).toContain('Usuarios');
+  expect(texts(root)).toContain('Actividad');
+  expect(texts(root)).not.toContain('Solicitudes');
 });

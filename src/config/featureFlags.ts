@@ -1,11 +1,12 @@
 // Interruptores de funcionalidades que dependen del backend compartido.
 //
 // SHARED_CATALOG_ENABLED suma al catálogo de la demo las ofertas publicadas en InsForge
-// (tablas connectical_*). Queda apagado hasta aplicar las migraciones en un tenant de ensayo
-// confirmado; mientras tanto la app muestra solo el catálogo de ejemplo de homeMock.
+// (tablas connectical_*). Desde el 17-11-2026 buziosflow tiene las 26 migraciones aplicadas: se enciende en los
+// builds de desarrollo (__DEV__: `npm run ios` en el simulador), que son la versión de ensayo, y sigue apagado en
+// release hasta decidir el lanzamiento. Los pagos son simulados en ambos casos.
 // Es una constante y no una variable de .env porque react-native-dotenv está configurado con
 // allowUndefined: false y una variable nueva rompería cualquier .env local existente.
-export const SHARED_CATALOG_ENABLED = false;
+export const SHARED_CATALOG_ENABLED: boolean = __DEV__;
 
 // OFFER_PHOTOS_ENABLED muestra a los proveedores el gestor de fotos (src/components/OfferPhotoManager.tsx), que sube
 // por la función offer-media. Queda apagado hasta desplegar en buziosflow las migraciones 202611160003/0004, el bucket

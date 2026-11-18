@@ -11,7 +11,7 @@
 // 5. Reservas: cotización, retención, vencimiento, pago simulado, cancelación, reembolso e incidencia.
 // No imprime contraseñas, códigos ni tokens.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
@@ -145,9 +145,9 @@ function png(width, height) {
 async function main() {
   const health = await (await fetch(`${env.LAB_URL}/api/health`)).json();
   check(`lab runs InsForge ${health.version}`, health.version === '2.3.5', JSON.stringify(health));
-  if (sql("select count(*) from pg_policies where schemaname = 'storage' and policyname like 'connectical_offer_media_%'") !== '0') {
-    throw new Error('202611160004 is already applied: recreate the lab with scripts/lab/insforge-lab.sh up');
-  }
+  // Como en buziosflow desde el 17-11-2026: todas las migraciones aplicadas en orden, incluida 202611160004.
+  check('the four restrictive offer-media policies are applied (202611160004, as on the tenant)',
+    sql("select count(*) from pg_policies where schemaname = 'storage' and policyname like 'connectical_offer_media_%' and permissive = 'RESTRICTIVE'") === '4');
 
   console.log('\n# 1. Alta, verificación y recuperación de contraseña');
   await authFlow();
@@ -201,12 +201,11 @@ async function main() {
   const html = new Blob(['<html><script>alert(1)</script></html>'], { type: 'image/png' });
   const directKey = `offers/${offer}/${randomUUID()}.png`;
   const direct = await provider.storage.from('offer-media').upload(directKey, html);
-  console.log(`INFO  before 202611160004, InsForge ${direct.error ? 'refuses' : 'accepts'} a provider's direct upload to offer-media (default owner policies)`);
+  check('the owner cannot upload straight to offer-media (202611160004)', Boolean(direct.error), 'direct upload accepted');
   const byRpc = await provider.db.rpc('connectical_add_offer_media', { p_offer_id: offer, p_storage_key: directKey, p_content_type: 'image/png', p_byte_size: 38, p_width: 1200, p_height: 900, p_alt_text: 'Falsa' });
   check('a file uploaded straight to the bucket cannot be registered by RPC (202611160003)', errorCode(byRpc.error) === 'invalid_media', byRpc.error?.message ?? 'registered');
   const travelerDirect = await traveler.storage.from('offer-media').upload(`notas/${randomUUID()}.txt`, new Blob(['x'], { type: 'text/plain' }));
-  const providerList = await provider.storage.from('offer-media').list({ limit: 100, offset: 0 });
-  check('a user only lists their own objects in the private bucket', !(providerList.data?.objects ?? []).some(o => o.key.startsWith('notas/')), providerList.error?.message);
+  check('a traveler cannot upload to offer-media (202611160004)', Boolean(travelerDirect.error), 'direct upload accepted');
   const anonDownload = await fetch(`${env.LAB_URL}/api/storage/buckets/offer-media/objects/${directKey}`);
   check('anonymous download from the private bucket is refused', anonDownload.status === 401 || anonDownload.status === 404, String(anonDownload.status));
 
@@ -253,27 +252,9 @@ async function main() {
   const cleanup = await call('POST', 'maintenance/cleanup', env.LAB_API_KEY);
   const cleanupBody = await cleanup.json();
   const leftovers = sql("select string_agg(key, ',' order by key) from storage.objects where bucket = 'offer-media'");
-  check('cleanup removes the direct uploads and keeps the registered photo', cleanup.status === 200 && leftovers === uploadedBody.key, `${JSON.stringify(cleanupBody)} left=${leftovers}`);
-  console.log(`INFO  traveler direct upload before 202611160004: ${travelerDirect.error ? 'refused' : 'accepted (then cleaned up)'}`);
+  check('cleanup keeps exactly the registered photo', cleanup.status === 200 && leftovers === uploadedBody.key, `${JSON.stringify(cleanupBody)} left=${leftovers}`);
 
-  console.log('\n# 4b. Aplicar 202611160004 con el CLI como project_admin (método oficial) y repetir');
-  const cliMigrations = join(lab, 'cli', 'migrations');
-  const storageMigration = '20261116000004_offer-media-storage.sql';
-  copyFileSync(join(repo, 'migrations', storageMigration), join(cliMigrations, storageMigration));
-  let applied = '';
-  try {
-    applied = execFileSync('npx', ['-y', '@insforge/cli', 'db', 'migrations', 'up', '--all'], { cwd: join(lab, 'cli'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (error) {
-    applied = String(error.stderr ?? error.message);
-  } finally {
-    if (existsSync(join(cliMigrations, storageMigration))) rmSync(join(cliMigrations, storageMigration));
-  }
-  check('the CLI applies the storage policies as project_admin (insforge_pg_utils)', /Applied 1 migration/.test(applied), applied.trim().split('\n').pop());
-  check('the four restrictive policies exist', sql("select count(*) from pg_policies where schemaname = 'storage' and policyname like 'connectical_offer_media_%' and permissive = 'RESTRICTIVE'") === '4');
-  const after = await provider.storage.from('offer-media').upload(`offers/${offer}/${randomUUID()}.png`, new Blob([photo], { type: 'image/png' }));
-  check('after 202611160004 the owner cannot upload straight to offer-media', Boolean(after.error), 'direct upload accepted');
-  const afterTraveler = await traveler.storage.from('offer-media').upload(`notas/${randomUUID()}.txt`, new Blob(['x'], { type: 'text/plain' }));
-  check('after 202611160004 a traveler cannot upload to offer-media', Boolean(afterTraveler.error), 'direct upload accepted');
+  console.log('\n# 4b. Otros buckets y borrado por la función');
   const other = await traveler.storage.from('lab-otro').upload(`${traveler.id}/nota.txt`, new Blob(['x'], { type: 'text/plain' }));
   check('other buckets keep InsForge rules (own uploads allowed)', !other.error, other.error?.message);
   const second = await call('POST', `offers/${offer}`, provider.token, photo, { 'X-Alt-Text': 'Piscina' });
@@ -316,6 +297,79 @@ async function main() {
   check('admin operations are refused to travelers', Boolean(users.error)); errorCode(users.error);
   const kpis = await admin.db.rpc('connectical_admin_kpis', { p_from: sql('select current_date - 1'), p_to: sql('select current_date + 1') });
   check('the admin reads the KPIs', !kpis.error, kpis.error?.message);
+
+  console.log('\n# 5b. Recorrido MVP: perfil, actividad, promoción, comisión por categoría, comprobante, estadísticas y publicaciones');
+  const profile = await provider.db.rpc('connectical_provider_update_profile', { p_description: 'Passeios guiados e pousada em Geribá', p_neighborhood: 'Geribá', p_languages: ['pt', 'es'] });
+  check('the provider saves a public profile', !profile.error, profile.error?.message);
+  const today = sql('select public.connectical_today()');
+  const tourRow = await provider.db.rpc('connectical_provider_upsert_offer', { p_offer_id: null, p_category: 'actividades', p_title: 'Trilha ao nascer do sol', p_base_price_cents: 10000, p_price_mode: 'person', p_published: true });
+  const tour = tourRow.data?.id;
+  check('the provider publishes an activity (new category)', Boolean(tour), tourRow.error?.message);
+  await admin.db.rpc('connectical_admin_set_offer_moderation', { p_offer_id: tour, p_status: 'approved', p_note: '' });
+  const tourStock = await provider.db.rpc('connectical_provider_publish_inventory', { p_offer_id: tour, p_service_date: today, p_total_units: 4 });
+  check('the provider publishes 4 places for today', !tourStock.error, tourStock.error?.message);
+  const publicProfile = await anonClient().database.rpc('connectical_list_provider_profiles', { p_provider_ids: [tourRow.data?.provider_id] });
+  check('visitors read the provider profile without commission or owner', (publicProfile.data ?? []).length === 1 && !('commission_rate_bps' in (publicProfile.data?.[0] ?? {})), publicProfile.error?.message);
+  const promo = await provider.db.rpc('connectical_provider_save_promotion', { p_promotion_id: null, p_offer_id: tour, p_percent_off_bps: 2000, p_starts_on: today, p_ends_on: today, p_label: 'Lançamento', p_active: true });
+  check('the provider creates a 20% promotion for today', Boolean(promo.data?.id), promo.error?.message);
+  const overlap = await provider.db.rpc('connectical_provider_save_promotion', { p_promotion_id: null, p_offer_id: tour, p_percent_off_bps: 1000, p_starts_on: today, p_ends_on: today, p_label: 'Dupla', p_active: true });
+  check('an overlapping promotion is refused', Boolean(overlap.error)); errorCode(overlap.error);
+  const travelerPromo = await traveler.db.rpc('connectical_provider_save_promotion', { p_promotion_id: null, p_offer_id: tour, p_percent_off_bps: 9000, p_starts_on: today, p_ends_on: today, p_label: 'x', p_active: true });
+  check('a traveler cannot create promotions', Boolean(travelerPromo.error)); errorCode(travelerPromo.error);
+  const visiblePromo = await anonClient().database.rpc('connectical_list_active_promotions', {});
+  check('visitors see the active promotion', (visiblePromo.data ?? []).some(row => row.offer_id === tour && row.percent_off_bps === 2000), visiblePromo.error?.message);
+  const providerRate = await provider.db.rpc('connectical_admin_set_provider_category_rate', { p_provider_id: tourRow.data?.provider_id, p_category: 'actividades', p_rate_bps: 0 });
+  check('a provider cannot set its own category commission', Boolean(providerRate.error)); errorCode(providerRate.error);
+  const rate = await admin.db.rpc('connectical_admin_set_provider_category_rate', { p_provider_id: tourRow.data?.provider_id, p_category: 'actividades', p_rate_bps: 1500 });
+  check('the admin sets a 15% commission for this provider in activities', !rate.error, rate.error?.message);
+
+  const tourist = await account('visitante');
+  const tourQuote = await tourist.db.rpc('connectical_create_quote', { p_offer_id: tour, p_service_date: today, p_quantity: 2, p_nights: 1, p_service_fee_rate_bps: 600 });
+  const q = tourQuote.data ?? {};
+  check('the quote applies the promotion: list 200,00, discount 40,00, subtotal 160,00, total 169,60',
+    q.list_subtotal_cents === 20000 && q.discount_cents === 4000 && q.subtotal_cents === 16000 && q.traveler_total_cents === 16960, tourQuote.error?.message ?? JSON.stringify(q));
+  check('the traveler does not receive the commission nor its source', q.provider_commission_cents == null && q.provider_commission_source == null);
+  const storedQuote = sql(`select provider_commission_rate_bps || '|' || provider_commission_cents || '|' || provider_commission_source from public.connectical_quotes where id = '${q.id}'`);
+  check('the stored quote uses the category rate on the discounted subtotal (1500 bps → 24,00)', storedQuote === '1500|2400|provider_category', storedQuote);
+  const key = randomUUID();
+  const holdA = await tourist.db.rpc('connectical_create_reservation_hold', { p_quote_id: q.id, p_idempotency_key: key });
+  const holdB = await tourist.db.rpc('connectical_create_reservation_hold', { p_quote_id: q.id, p_idempotency_key: key });
+  check('a repeated booking request returns the same reservation (no duplicate)', Boolean(holdA.data?.id) && holdA.data?.id === holdB.data?.id, holdA.error?.message ?? holdB.error?.message);
+  check('one reservation exists for that quote', sql(`select count(*) from public.connectical_reservations where quote_id = '${q.id}'`) === '1');
+  const paid = await tourist.db.rpc('connectical_simulate_payment', { p_reservation_id: holdA.data?.id, p_outcome: 'approved', p_method: 'pix', p_reference: `LAB-MVP-${run}` });
+  check('the simulated payment confirms the booking (no real payment)', paid.data?.status === 'confirmed', paid.error?.message);
+  const touristList = await tourist.db.rpc('connectical_list_reservations', {});
+  const voucher = (touristList.data ?? []).find(r => r.id === holdA.data?.id)?.voucher_code;
+  check('the traveler gets a voucher code BZ-XXXX-XXXX', /^BZ-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/.test(voucher ?? ''), String(voucher));
+  const providerReservations = await provider.db.rpc('connectical_list_reservations', {});
+  check('the provider does not see the voucher code', (providerReservations.data ?? []).find(r => r.id === holdA.data?.id)?.voucher_code == null);
+  const otherList = await traveler.db.rpc('connectical_list_reservations', {});
+  check('another traveler cannot see this reservation', !(otherList.data ?? []).some(r => r.id === holdA.data?.id), otherList.error?.message);
+  const notProvider = await tourist.db.rpc('connectical_provider_check_in', { p_voucher_code: voucher });
+  check('a traveler cannot check in', Boolean(notProvider.error)); errorCode(notProvider.error);
+  const checkIn = await provider.db.rpc('connectical_provider_check_in', { p_voucher_code: (voucher ?? '').toLowerCase().replace(/-/g, '') });
+  check('the provider checks the traveler in with the typed code', checkIn.data?.status === 'checked_in', checkIn.error?.message ?? JSON.stringify(checkIn.data));
+  const again = await provider.db.rpc('connectical_provider_check_in', { p_voucher_code: voucher });
+  check('the voucher cannot be used twice', again.data?.status === 'already_checked_in', JSON.stringify(again.data));
+  const stats = await provider.db.rpc('connectical_provider_stats', { p_from: today, p_to: today });
+  const tourStats = (stats.data ?? []).find(row => row.offer_id === tour) ?? {};
+  check('provider statistics show the confirmed booking, net and check-in',
+    tourStats.confirmed === 1 && Number(tourStats.gross_cents) === 16960 && Number(tourStats.net_cents) === 16960 - 960 - 2400 && Number(tourStats.discount_cents) === 4000 && tourStats.checked_in === 1,
+    stats.error?.message ?? JSON.stringify(tourStats));
+  const catKpis = await admin.db.rpc('connectical_admin_category_kpis', { p_from: today, p_to: today });
+  const activities = (catKpis.data ?? []).find(row => row.category === 'actividades') ?? {};
+  check('admin category KPIs trace the provider+category commission', activities.confirmed === 1 && activities.source_provider_category === 1 && Number(activities.commission_cents) === 2400, catKpis.error?.message ?? JSON.stringify(activities));
+
+  const badPost = await provider.db.rpc('connectical_provider_save_post', { p_post_id: null, p_offer_id: tour, p_kind: 'post', p_body: 'Link estranho', p_link_url: 'https://evil.example/instagram.com/p/AbCdEf123/' });
+  check('a post with an unsupported link is refused', Boolean(badPost.error)); errorCode(badPost.error);
+  const post = await provider.db.rpc('connectical_provider_save_post', { p_post_id: null, p_offer_id: tour, p_kind: 'story', p_body: 'Vagas hoje ao nascer do sol', p_link_url: 'https://www.instagram.com/reel/AbCdEf123/' });
+  check('the provider posts a story with an Instagram permalink', Boolean(post.data?.id), post.error?.message);
+  const feedBefore = await anonClient().database.rpc('connectical_list_feed', {});
+  check('the story is not public before review', !(feedBefore.data ?? []).some(row => row.id === post.data?.id), feedBefore.error?.message);
+  const approvePost = await admin.db.rpc('connectical_admin_moderate_post', { p_post_id: post.data?.id, p_status: 'approved', p_note: '' });
+  check('the admin approves the story', approvePost.data === 'approved', approvePost.error?.message);
+  const feedAfter = await anonClient().database.rpc('connectical_list_feed', {});
+  check('visitors see the approved story in the feed', (feedAfter.data ?? []).some(row => row.id === post.data?.id && row.link_platform === 'instagram'), feedAfter.error?.message);
 
   console.log('\n# 6. Traducciones de los errores vistos en el laboratorio');
   const missing = [...seenErrors].filter(code => ['es', 'pt', 'en'].some(language => !(code in portalCopy[language].errors)));

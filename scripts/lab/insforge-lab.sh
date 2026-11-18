@@ -8,7 +8,8 @@
 # arranque y quedan en ~/LaboratorioBuziosFlow/lab.env (permisos 600), fuera del repositorio. El correo sale por
 # SMTP hacia Mailpit, que lo guarda sin enviarlo a nadie. Las migraciones se aplican con el CLI de InsForge desde
 # ~/LaboratorioBuziosFlow/cli (enlazado al laboratorio, no a buziosflow), igual que en el tenant: como
-# project_admin. La 202611160004 (políticas de storage) no se puede aplicar así: queda sin aplicar, como allí.
+# project_admin, todas en orden como en buziosflow desde el 17-11-2026 (202611160004 crea sus políticas de storage gracias a
+# insforge_pg_utils).
 set -eu
 
 INSFORGE_VERSION=v2.3.5
@@ -98,6 +99,5 @@ admin_put config '{"requireEmailVerification":true,"verifyEmailMethod":"code","r
 cd "$lab/cli"
 npx -y @insforge/cli link --api-base-url "$LAB_URL" --api-key "$LAB_API_KEY" >/dev/null
 rm -rf migrations && mkdir migrations && cp "$repo"/migrations/*.sql migrations/
-rm migrations/*_offer-media-storage.sql # necesita ser dueño de storage.objects: no se aplica, como en buziosflow
 npx -y @insforge/cli db migrations up --all
 echo "Lab ready. Variables in $lab/lab.env; mail at $LAB_MAILPIT"

@@ -19,9 +19,10 @@ import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
 import { portalCopy } from '../i18n/portalCopy';
+import { deviceLanguage, loadLanguage, saveLanguage } from '../lib/languagePreference';
 import { mapsUrl } from '../utils/maps';
 import { recommendOffers } from '../utils/recommendations';
-import { CATEGORY_ICONS, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
+import { CATEGORY_ICONS, sharedOfferId, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
 import { loadFavorites, saveFavorites, toggleFavorite } from '../lib/favoritesStorage';
 import { useCatalog, type CatalogSource } from '../data/useCatalog';
 import { OfferFeed } from '../components/OfferFeed';
@@ -100,7 +101,6 @@ const copy = {
     choosePeople: 'Personas',
     filterHint: 'La fecha filtra solo ofertas con cupo publicado; los ejemplos no tienen calendario.',
     pastDate: 'Esta fecha ya pasó en Búzios. Elige otra para confirmar.',
-    operations: 'Reservas compartidas · acceso de operaciones',
     previousDay: 'Día anterior',
     nextDay: 'Día siguiente',
     decreaseQuantity: 'Disminuir cantidad',
@@ -145,6 +145,7 @@ const copy = {
     backHome: 'Seguir explorando',
     home: 'Inicio',
     tripTab: 'Mi viaje',
+    accountTab: 'Mi cuenta',
     unitPeople: 'personas',
     unitTickets: 'entradas',
     unitGroups: 'grupos',
@@ -210,7 +211,6 @@ const copy = {
     choosePeople: 'Pessoas',
     filterHint: 'A data filtra só ofertas com vagas publicadas; os exemplos não têm calendário.',
     pastDate: 'Esta data já passou em Búzios. Escolha outra para confirmar.',
-    operations: 'Reservas compartilhadas · acesso de operações',
     previousDay: 'Dia anterior',
     nextDay: 'Próximo dia',
     decreaseQuantity: 'Diminuir quantidade',
@@ -255,6 +255,7 @@ const copy = {
     backHome: 'Continuar explorando',
     home: 'Início',
     tripTab: 'Minha viagem',
+    accountTab: 'Minha conta',
     unitPeople: 'pessoas',
     unitTickets: 'ingressos',
     unitGroups: 'grupos',
@@ -320,7 +321,6 @@ const copy = {
     choosePeople: 'People',
     filterHint: 'The date filter only applies to offers with published availability; samples have no calendar.',
     pastDate: 'This date has already passed in Búzios. Choose another one to confirm.',
-    operations: 'Shared reservations · operations access',
     previousDay: 'Previous day',
     nextDay: 'Next day',
     decreaseQuantity: 'Decrease quantity',
@@ -365,6 +365,7 @@ const copy = {
     backHome: 'Keep exploring',
     home: 'Home',
     tripTab: 'My trip',
+    accountTab: 'My account',
     unitPeople: 'people',
     unitTickets: 'tickets',
     unitGroups: 'groups',
@@ -445,13 +446,19 @@ function availabilityLabel(offer: Offer, language: Language) {
 
 export function FlowScreen() {
   const insets = useSafeAreaInsets();
-  const [language, setLanguage] = useState<Language>('es');
+  const [language, setLanguageState] = useState<Language>(deviceLanguage);
+  // Elegir idioma lo recuerda en el teléfono; al abrir se usa lo guardado o el idioma del dispositivo.
+  function setLanguage(next: Language) {
+    setLanguageState(next);
+    saveLanguage(next).catch(() => undefined);
+  }
   const [screen, setScreen] = useState<Screen>('home');
   const [selectedCategory, setSelectedCategory] = useState<OfferCategory | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [filterDate, setFilterDate] = useState<string | null>(null);
+  const [portalBooking, setPortalBooking] = useState<{ offerId: string; date: string; quantity: number; nights: number } | null>(null);
   const [filterPeople, setFilterPeople] = useState<number | null>(null);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tripItems, setTripItems] = useState<TripItem[]>([]);
@@ -505,6 +512,16 @@ export function FlowScreen() {
   }, [bookings, serviceFeeRate, storageReady, tripItems]);
   useEffect(() => {
     let active = true;
+    loadLanguage().then(stored => {
+      if (active && stored) setLanguageState(stored);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     loadFavorites().then(ids => {
       if (active) setFavorites(ids);
     });
@@ -543,16 +560,20 @@ export function FlowScreen() {
 
   function openOffer(offer: Offer) {
     setSelectedOfferId(offer.id);
-    setDraftDate(today);
-    setDraftQuantity(1);
+    // Lo que el turista ya filtró en el explorador no se le vuelve a pedir.
+    setDraftDate(filterDate && filterDate >= today ? filterDate : today);
+    setDraftQuantity(filterPeople && (offer.priceMode === 'person' || offer.priceMode === 'ticket') ? Math.min(filterPeople, 8) : 1);
     setDraftNights(1);
     setScreen('detail');
   }
 
   function addToTrip(offer: Offer) {
     if (offer.availability === 'unavailable' || offer.availability === 'incomplete') return;
-    if (offer.source === 'shared') {
-      // El viaje demo no consume cupo; una oferta real se cotiza y retiene en el portal.
+    const realOfferId = sharedOfferId(offer);
+    if (realOfferId) {
+      // El viaje demo no consume cupo; una oferta real se cotiza y retiene en el portal, que abre con esta
+      // oferta, fecha y cantidades ya elegidas.
+      setPortalBooking({ offerId: realOfferId, date: draftDate, quantity: draftQuantity, nights: draftNights });
       setScreen('operations');
       return;
     }
@@ -634,6 +655,8 @@ export function FlowScreen() {
   function changeScreen(next: Screen) {
     setScreen(next);
     if (next === 'explore') setSelectedCategory(null);
+    // Desde la pestaña, el portal abre sin oferta preseleccionada.
+    if (next === 'operations') setPortalBooking(null);
   }
 
   return (
@@ -656,12 +679,18 @@ export function FlowScreen() {
             onCategory={category => openExplore(category)}
             onExplore={() => openExplore()}
             onOffer={openOffer}
-            onOperations={() => setScreen('operations')}
             catalog={catalog}
           />
         ) : null}
         {screen === 'operations' ? (
-          <ReservationPortal onClose={() => setScreen('home')} language={language} />
+          <ReservationPortal
+            onClose={() => {
+              setPortalBooking(null);
+              setScreen('home');
+            }}
+            language={language}
+            initialBooking={portalBooking}
+          />
         ) : null}
         {screen === 'explore' ? (
           <ExploreView
@@ -811,7 +840,6 @@ function HomeView({
   onCategory,
   onExplore,
   onOffer,
-  onOperations,
   catalog,
 }: {
   language: Language;
@@ -820,7 +848,6 @@ function HomeView({
   onCategory: (category: OfferCategory) => void;
   onExplore: () => void;
   onOffer: (offer: Offer) => void;
-  onOperations: () => void;
   catalog: Catalog & { source: CatalogSource; feed?: FeedPost[] };
 }) {
   return (
@@ -868,7 +895,6 @@ function HomeView({
         ))}
       </View>
       <PrimaryButton title={words.explore} onPress={onExplore} />
-      <PrimaryButton title={words.operations as string} onPress={onOperations} />
     </>
   );
 }
@@ -1127,9 +1153,7 @@ function DetailView({
           {offer.missingFields[language].map(value => <Bullet key={value} text={value} />)}
         </View>
       ) : null}
-      {canBook && offer.source === 'shared' ? (
-        <PrimaryButton title={addLabel} onPress={onAdd} />
-      ) : canBook ? (
+      {canBook ? (
         <View style={styles.bookingControls}>
           <Text style={styles.controlLabel}>{offer.priceMode === 'night' ? words.stayDate : words.date}</Text>
           <DateStepper value={date} min={today} language={language} onChange={onDate} />
@@ -1614,10 +1638,13 @@ function BottomNav({
   tripCount: number;
   onScreen: (screen: Screen) => void;
 }) {
-  const tabs: { id: Screen; label: string; icon: 'bed' | 'search' | 'boat' }[] = [
+  // Cuarta pestaña: reservas reales, cuenta y paneles de proveedor o administración (según el rol), sin buscar
+  // un botón al pie de la portada.
+  const tabs: { id: Screen; label: string; icon: 'bed' | 'search' | 'boat' | 'user' }[] = [
     { id: 'home', label: words.home as string, icon: 'bed' },
     { id: 'explore', label: words.explore as string, icon: 'search' },
     { id: 'trip', label: words.tripTab as string, icon: 'boat' },
+    { id: 'operations', label: words.accountTab as string, icon: 'user' },
   ];
   return (
     <View style={styles.bottomNav}>

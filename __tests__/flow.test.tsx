@@ -28,6 +28,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
+// Catálogo de ejemplo (flag apagado, como en release); sharedCatalogFlow.test.tsx cubre el catálogo compartido.
+jest.mock('../src/config/featureFlags', () => ({ ...jest.requireActual('../src/config/featureFlags'), SHARED_CATALOG_ENABLED: false }));
 jest.mock('../src/lib/insforge', () => ({
   insforge: {},
   checkInsforgeConnection: jest.fn(() => Promise.resolve(true)),
@@ -132,12 +134,14 @@ test('switches language and keeps unavailable listings out of the trip', async (
   expect(hasText(root, 'Adicionar à Minha viagem')).toBe(false);
 });
 
-test('localizes the operations entry and stepper labels in Portuguese', async () => {
+test('localizes the account tab and stepper labels in Portuguese', async () => {
   const renderer = await renderApp();
   const root = renderer.root;
 
   pressText(root, 'PT');
-  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(true);
+  // La cuenta, las reservas reales y los paneles están en la pestaña «Minha conta» de la barra inferior.
+  expect(hasText(root, 'Minha conta')).toBe(true);
+  expect(hasText(root, 'Reservas compartilhadas · acesso de operações')).toBe(false);
   pressText(root, 'Pousadas');
   pressText(root, 'Pousada Maravista');
   const labels = root
@@ -325,4 +329,15 @@ test('opens directions in the maps app and suggests other bookable offers from t
   pressAccessible(root, 'Ruta en buggy por Búzios');
   expect(hasText(root, 'Ruta en buggy por Búzios')).toBe(true);
   openURL.mockRestore();
+});
+
+test('remembers the chosen language after reopening the app', async () => {
+  const first = await renderApp();
+  pressText(first.root, 'PT');
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+  first.unmount();
+  const second = await renderApp(false);
+  expect(hasText(second.root, 'Minha conta')).toBe(true);
 });

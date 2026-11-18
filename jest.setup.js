@@ -21,3 +21,10 @@ jest.mock('react-native-image-picker', () => ({
   launchCamera: jest.fn(async () => ({ didCancel: true })),
   launchImageLibrary: jest.fn(async () => ({ didCancel: true })),
 }));
+
+// Las pruebas de pantallas están escritas en español: el idioma del dispositivo se fija en Jest. La lógica real de
+// detección se prueba en __tests__/languagePreference.test.ts con jest.requireActual.
+jest.mock('./src/lib/languagePreference', () => {
+  const actual = jest.requireActual('./src/lib/languagePreference');
+  return { ...actual, deviceLanguage: () => 'es' };
+});
