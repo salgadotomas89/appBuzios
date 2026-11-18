@@ -328,3 +328,14 @@ test('opens directions in the maps app and suggests other bookable offers from t
   expect(hasText(root, 'Ruta en buggy por Búzios')).toBe(true);
   openURL.mockRestore();
 });
+
+test('remembers the chosen language after reopening the app', async () => {
+  const first = await renderApp();
+  pressText(first.root, 'PT');
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+  first.unmount();
+  const second = await renderApp(false);
+  expect(hasText(second.root, 'Minha conta')).toBe(true);
+});

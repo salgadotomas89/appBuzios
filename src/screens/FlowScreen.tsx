@@ -19,6 +19,7 @@ import { loadDemoState, saveDemoState } from '../lib/demoStorage';
 import { ReservationPortal } from './ReservationPortal';
 import { SHARED_CATALOG_ENABLED } from '../config/featureFlags';
 import { portalCopy } from '../i18n/portalCopy';
+import { deviceLanguage, loadLanguage, saveLanguage } from '../lib/languagePreference';
 import { mapsUrl } from '../utils/maps';
 import { recommendOffers } from '../utils/recommendations';
 import { CATEGORY_ICONS, sharedOfferId, filterOffers, matchesSearch, withPromotionOn, type Catalog } from '../data/catalog';
@@ -445,7 +446,12 @@ function availabilityLabel(offer: Offer, language: Language) {
 
 export function FlowScreen() {
   const insets = useSafeAreaInsets();
-  const [language, setLanguage] = useState<Language>('es');
+  const [language, setLanguageState] = useState<Language>(deviceLanguage);
+  // Elegir idioma lo recuerda en el teléfono; al abrir se usa lo guardado o el idioma del dispositivo.
+  function setLanguage(next: Language) {
+    setLanguageState(next);
+    saveLanguage(next).catch(() => undefined);
+  }
   const [screen, setScreen] = useState<Screen>('home');
   const [selectedCategory, setSelectedCategory] = useState<OfferCategory | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
@@ -504,6 +510,16 @@ export function FlowScreen() {
       serviceFeeRate,
     }).catch(error => console.warn('No se pudo guardar el viaje demo', error));
   }, [bookings, serviceFeeRate, storageReady, tripItems]);
+  useEffect(() => {
+    let active = true;
+    loadLanguage().then(stored => {
+      if (active && stored) setLanguageState(stored);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     let active = true;
     loadFavorites().then(ids => {
